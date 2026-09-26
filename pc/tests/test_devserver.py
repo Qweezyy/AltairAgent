@@ -1,4 +1,4 @@
-"""Наблюдатель за dev-серверами: менеджер процессов и детектор ошибок."""
+"""Dev-server watcher: the process manager and the error detector."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 from core.devserver.detect import looks_ready, scan_output
 from core.devserver.manager import DevServerError, DevServerManager
 
-# ------------------------------------------------------------------ детектор
+# ------------------------------------------------------------------ detector
 
 
 def test_scan_detects_python_traceback():
@@ -41,33 +41,37 @@ def test_looks_ready():
     assert not looks_ready(["still bundling..."])
 
 
-# ------------------------------------------------------------------ менеджер
+# ------------------------------------------------------------------ manager
 
 
 def _echo_command(text: str) -> str:
-    """Короткая команда, печатающая строку и завершающаяся."""
+    """A short command that prints a line and exits."""
     return f"echo {text}"
 
 
 def _sleep_server() -> str:
-    """Долгоживущая команда, имитирующая dev-сервер (нативная для оболочки)."""
+    """A long-running command posing as a dev server (native to the shell)."""
     if sys.platform == "win32":
         return "Write-Host SERVERREADY; Start-Sleep -Seconds 30"
     return "echo SERVERREADY; sleep 30"
+
+
+def _wait_until(condition, timeout: float = 30.0) -> None:
+    """Polls until `condition()` holds. The generous deadline only matters on a slow CI runner
+    (a cold PowerShell start there can take many seconds); green runs return at once."""
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(0.1)
 
 
 def test_start_read_stop(tmp_path):
     mgr = DevServerManager()
     server = mgr.start("srv", _sleep_server(), tmp_path)
     try:
-        # Ждём стартовую строку.
-        for _ in range(40):
-            if server.line_count() > 0:
-                break
-            time.sleep(0.1)
+        _wait_until(lambda: server.line_count() > 0)
         new = server.read_new()
         assert any("SERVERREADY" in line for line in new)
-        # Повторное чтение без новых логов пусто.
+        # A second read with no new output is empty.
         assert server.read_new() == []
         assert server.is_running()
     finally:
@@ -95,13 +99,10 @@ def test_exited_process_status(tmp_path):
     mgr = DevServerManager()
     server = mgr.start("quick", _echo_command("привет"), tmp_path)
     try:
-        for _ in range(40):
-            if not server.is_running():
-                break
-            time.sleep(0.1)
+        _wait_until(lambda: not server.is_running())
         assert not server.is_running()
         assert server.exit_code() is not None
-        # Имя освобождается: можно запустить снова.
+        # The name is freed: the server can be started again.
         again = mgr.start("quick", _sleep_server(), tmp_path)
         assert again.is_running()
     finally:
