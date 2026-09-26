@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- День: фон окна до Compose = светлая «бумага», тёмные иконки статус-бара.
+         Системные бары прозрачные — под ними виден фон приложения (не серая полоска).
+         Ночной вариант — в values-night/themes.xml. Финальный контраст иконок под
+         выбранную в приложении тему выставляется из кода (MainActivity). -->
+    <style name="Theme.LocalAIAgent" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Брендовый splash Altair: тёмный космос + золотая звезда (иконки статус-бара светлые). -->
+        <item name="android:windowBackground">@drawable/splash_window</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

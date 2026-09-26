@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Русская локаль. База (английская) — в values/strings.xml. -->
+<resources>
+    <!-- Общие действия -->
+    <string name="action_save">Сохранить</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_back">Назад</string>
+    <string name="action_delete">Удалить</string>
+    <string name="action_add">Добавить</string>
+    <string name="action_refresh">Обновить</string>
+
+    <!-- Разделы (боковое меню) -->
+    <string name="nav_library">Библиотека</string>
+    <string name="nav_board">Доска чата</string>
+    <string name="nav_secrets">Хранилище секретов</string>
+    <string name="nav_plugins">Плагины</string>
+    <string name="nav_recent">Недавнее</string>
+    <string name="nav_new_chat">Новый чат</string>
+    <string name="nav_search">Поиск</string>
+
+    <!-- Настройки -->
+    <string name="settings_title">Настройки</string>
+    <string name="settings_appearance">Внешний вид</string>
+    <string name="settings_appearance_sub">Тема · %1$s</string>
+    <string name="settings_models">Модели</string>
+    <string name="settings_bridge">Мост к ПК</string>
+    <string name="settings_account">Аккаунт</string>
+
+    <!-- Внешний вид / тема -->
+    <string name="theme_group">Тема</string>
+    <string name="theme_accent">Акцент</string>
+    <string name="theme_system">Система</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Тёмная</string>
+    <string name="theme_black">Чёрная</string>
+
+    <!-- Плагины (MCP) и навыки -->
+    <string name="plugins_title">Плагины</string>
+    <string name="plugins_mcp_hint">MCP-серверы — внешние наборы инструментов. Телефон подключается к ним напрямую по сети.</string>
+    <string name="plugins_no_servers">Серверов пока нет. Добавьте (+) или синхронизируйте с ПК.</string>
+    <string name="plugins_add_server">Добавить сервер</string>
+    <string name="plugins_skills_header">Навыки (%1$d)</string>
+    <string name="plugins_no_skills">Навыков пока нет.</string>
+    <string name="plugins_no_skills_pc">Навыков пока нет. Синхронизируйте с ПК.</string>
+    <string name="plugins_sync_pc">Синхронизировать с ПК</string>
+    <string name="mcp_from_pc">с ПК</string>
+    <string name="mcp_new_server">Новый MCP-сервер</string>
+    <string name="mcp_field_name">Имя</string>
+    <string name="mcp_field_url">URL (https://…)</string>
+    <string name="mcp_field_token">Токен (Bearer, необязательно)</string>
+    <string name="mcp_test_connection">Проверить связь</string>
+
+    <!-- Язык -->
+    <string name="lang_group">Язык</string>
+    <string name="lang_system">Система</string>
+    <string name="lang_en">English</string>
+    <string name="lang_ru">Русский</string>
+
+    <!-- Иконка приложения -->
+    <string name="icon_group">Иконка приложения</string>
+    <string name="icon_change_hint">Иконка на рабочем столе сменится, когда свернёте приложение.</string>
+    <string name="icon_deep">Глубокий</string>
+    <string name="icon_blue">Синий</string>
+    <string name="icon_aurora">Аврора</string>
+    <string name="icon_violet">Фиолет</string>
+    <string name="icon_ember">Огонь</string>
+    <string name="icon_minimal">Минимал</string>
+    <string name="icon_milky">Млечный</string>
+    <string name="icon_rose">Роза</string>
+
+    <!-- Приветствие -->
+    <string name="welcome_title">Чем помочь?</string>
+    <string name="welcome_subtitle_bridge">Спросите что угодно — поиск в интернете, точные вычисления, чтение ссылок, картинки и делегирование ПК.</string>
+    <string name="welcome_subtitle">Спросите что угодно — поиск в интернете, точные вычисления, чтение ссылок, картинки и генерация.</string>
+
+    <!-- Мост к ПК -->
+    <string name="bridge_intro">Свяжи телефон с ПК-агентом, чтобы делегировать задачи разработки.</string>
+    <string name="bridge_quick">Быстро</string>
+    <string name="bridge_quick_hint">На ПК откройте «Связать телефон» — появится QR и ссылка. Отсканируйте QR любой камерой (Altair откроется и настроится сам) или вставьте ссылку сюда.</string>
+    <string name="bridge_link_label">Ссылка связывания (altair://pair…)</string>
+    <string name="bridge_from_clipboard">Из буфера</string>
+    <string name="bridge_connect">Подключить</string>
+    <string name="bridge_or_manual">…или вручную</string>
+    <string name="bridge_pc_address">Адрес ПК (напр. 100.102.19.29:8000)</string>
+    <string name="bridge_token">Токен моста (пусто — не менять)</string>
+    <string name="bridge_workspace">Папка/проект на ПК</string>
+    <string name="bridge_test">Проверить связь</string>
+    <string name="bridge_not_set">не настроен</string>
+
+    <!-- Аккаунт -->
+    <string name="account_title">Аккаунт</string>
+    <string name="account_name_label">Как к вам обращаться</string>
+    <string name="account_name_hint">Имя видно только в приложении и передаётся ИИ на этом телефоне</string>
+    <string name="account_no_name">имя не задано</string>
+
+    <!-- Общее -->
+    <string name="action_close">Закрыть</string>
+
+    <!-- Действия над сообщением / римейк -->
+    <string name="remix_table">Таблица</string>
+    <string name="remix_diagram">Схема</string>
+    <string name="remix_list">Список</string>
+    <string name="remix_simpler">Попроще</string>
+    <string name="remix_code">Код</string>
+    <string name="act_copy">Копировать</string>
+    <string name="act_speak">Озвучить</string>
+    <string name="act_select_text">Выделить текст…</string>
+    <string name="act_edit">Изменить (ответ переделается)</string>
+    <string name="act_regenerate">Перегенерировать</string>
+    <string name="act_continue_new">Продолжить в новом чате</string>
+    <string name="act_revert_here">Вернуться сюда (стереть далее)</string>
+    <string name="edit_title">Изменить сообщение</string>
+    <string name="edit_redo">Переделать ответ</string>
+
+    <!-- Действия над выделенным текстом -->
+    <string name="sel_hint">Выдели фрагмент и выбери действие</string>
+    <string name="sel_simpler">Проще</string>
+    <string name="sel_more">Подробнее</string>
+    <string name="sel_translate">Перевести</string>
+    <string name="sel_check">Проверить</string>
+    <string name="sel_reply">Ответить</string>
+    <string name="sel_to_board">→ На доску</string>
+    <string name="sel_to_chat_mem">→ Память чата</string>
+    <string name="sel_to_global_mem">→ Общая память</string>
+
+    <!-- Доска чата -->
+    <string name="board_title">Доска чата</string>
+    <string name="board_hint">Собирай сюда важные фрагменты: выдели текст → «На доску».</string>
+    <string name="board_empty">Пусто</string>
+    <string name="board_clear">Очистить</string>
+    <string name="board_copy_all">Скопировать всё</string>
+
+    <!-- Диалог вопроса -->
+    <string name="ask_title">Вопрос от ассистента</string>
+    <string name="ask_done">Готово</string>
+    <string name="ask_custom">Свой вариант</string>
+    <string name="ask_custom_hint">Свой ответ…</string>
+    <string name="ask_recommended">рекомендую</string>
+    <string name="ask_above">выше</string>
+    <string name="ask_below">ниже</string>
+
+    <!-- Библиотека -->
+    <string name="lib_title">Библиотека</string>
+    <string name="lib_empty">Пусто. Отправленные фото, видео, аудио и файлы появятся здесь.</string>
+    <string name="lib_cant_show">Не удалось показать файл текстом.</string>
+    <string name="lib_loading">Загрузка…</string>
+
+    <!-- Запрос файла -->
+    <string name="req_file_needed">Ассистенту нужен файл</string>
+    <string name="req_types">Типы: %1$s\n</string>
+    <string name="req_multi">Можно несколько файлов\n</string>
+    <string name="req_single">Один файл\n</string>
+    <string name="req_limit">Лимит: %1$d МБ</string>
+    <string name="req_required">\nОбязательно</string>
+    <string name="req_skip">Пропустить</string>
+    <string name="req_pick_file">Выбрать файл</string>
+
+    <!-- Запрос секрета / хранилище -->
+    <string name="sec_needed">Ассистенту нужен секрет</string>
+    <string name="sec_name">Имя секрета</string>
+    <string name="sec_value_hidden">Значение (скрыто)</string>
+    <string name="sec_access">Доступ для ИИ:</string>
+    <string name="sec_always">Всегда</string>
+    <string name="sec_on_permission">С разрешения</string>
+    <string name="sec_state_always">всегда</string>
+    <string name="sec_state_ask">с разрешения</string>
+    <string name="sec_switch_ask">→ спрашивать</string>
+    <string name="sec_switch_always">→ всегда</string>
+    <string name="secrets_title">Хранилище секретов</string>
+    <string name="secrets_empty">Секретов пока нет. ИИ может попросить ввести секрет, или добавьте сами (+).</string>
+    <string name="sec_new">Новый секрет</string>
+    <string name="sec_value">Значение</string>
+    <string name="sec_purpose">Назначение (необязательно)</string>
+
+    <!-- Запрос запоминания -->
+    <string name="mem_this_chat">в память этого чата</string>
+    <string name="mem_global">в общую память</string>
+    <string name="mem_remember_q">Запомнить это?</string>
+    <string name="mem_save_scope">Сохранить %1$s?</string>
+    <string name="mem_remember">Запомнить</string>
+    <string name="mem_no">Не надо</string>
+
+    <!-- Подтверждения -->
+    <string name="approve_title">Разрешить действие?</string>
+    <string name="approve_body">Ассистент хочет выполнить «%1$s».</string>
+    <string name="approve_once">Один раз</string>
+    <string name="approve_reject">Отклонить</string>
+    <string name="secreq_title">Разрешить доступ к секрету?</string>
+    <string name="secreq_body">Ассистент хочет использовать секрет «%1$s».</string>
+    <string name="allow">Разрешить</string>
+    <string name="deny">Запретить</string>
+
+    <!-- Поверхность чата -->
+    <string name="chat_search_here">Поиск по этому чату…</string>
+    <string name="nothing_found">Ничего не найдено</string>
+    <string name="menu">Меню</string>
+    <string name="search_in_chat">Поиск в чате</string>
+    <string name="chat_menu">Меню чата</string>
+    <string name="chat_summary">Краткая сводка чата</string>
+    <string name="chat_summary_sub">Решения, факты, открытые вопросы — одним ответом</string>
+    <string name="files_media">Файлы и медиа</string>
+    <string name="files_media_empty">Пока пусто. Отправленные фото, видео и файлы появятся здесь.</string>
+    <string name="chat_memory">Память этого чата</string>
+    <string name="chat_memory_hint">Можно править и удалять — очисти поле, чтобы стереть.</string>
+    <string name="chat_memory_ph">Заметки/факты этого чата…</string>
+    <string name="search_all_chats">Поиск по чатам</string>
+    <string name="search_word_ph">Слово или фраза…</string>
+    <string name="file_generic">файл</string>
+    <string name="tool_label">Инструмент</string>
+    <string name="remix_shorter">Короче</string>
+    <string name="remix_longer">Длиннее</string>
+    <string name="remix_formal">Формальнее</string>
+    <string name="version_prev">Предыдущая версия</string>
+    <string name="version_next">Следующая версия</string>
+    <string name="pc_label">ПК</string>
+    <string name="pc_busy">ПК занят</string>
+    <string name="pc_offline">ПК оффлайн</string>
+
+    <!-- Композер / вложения -->
+    <string name="attach_enable_hint">Включи типы вложений в «Настройки → Модели».</string>
+    <string name="attach_camera">Камера</string>
+    <string name="attach_photo">Фото</string>
+    <string name="attach_draw">Рисунок</string>
+    <string name="attach_video">Видео</string>
+    <string name="attach_audio">Аудио</string>
+    <string name="attach_files">Файлы</string>
+    <string name="attachment">Вложение</string>
+    <string name="remove">Убрать</string>
+    <string name="steer_hint">Подкручу ответ на лету</string>
+    <string name="attach">Прикрепить</string>
+    <string name="ask_placeholder">Спросить…</string>
+    <string name="steer_action">Подкрутить на лету</string>
+    <string name="stop">Остановить</string>
+    <string name="send">Отправить</string>
+
+    <!-- Настройки: реакции/тактильность -->
+    <string name="reactions_title">Реакции ИИ на мои сообщения</string>
+    <string name="reactions_sub">ИИ иногда ставит лёгкую эмодзи-реакцию — просто для живости</string>
+    <string name="haptics_title">Тактильный отклик</string>
+    <string name="haptics_sub">Лёгкая вибрация на события: думаю / нужен ты / готово</string>
+
+    <!-- Настройки: модели -->
+    <string name="caps_text_only">только текст</string>
+    <string name="add_model">Добавить модель</string>
+    <string name="model_title">Название</string>
+    <string name="model_id">ID модели (напр. 0x-alpha)</string>
+    <string name="api_key">API-ключ</string>
+    <string name="model_accepts">Что принимает на ввод:</string>
+    <string name="save_model">Сохранить модель</string>
+
+    <string name="copy_code">Копировать код</string>
+    <string name="pair_ok">Мост настроен по ссылке</string>
+    <string name="pair_fail">Ссылка связывания не распознана</string>
+    <string name="notif_answer_ready">Ответ готов</string>
+    <string name="notif_reminder">Напоминание</string>
+    <string name="notif_agent_running">Агент работает…</string>
+
+    <!-- Статусы VM -->
+    <string name="status_thinking">Думаю…</string>
+    <string name="status_processing">Обрабатываю: %1$s</string>
+    <string name="status_checking">Проверяю…</string>
+    <string name="status_no_key">⚠️ Не задан API-ключ. Открой настройки и введи ключ модели.</string>
+    <string name="error_prefix">Ошибка: %1$s</string>
+    <string name="status_reconnecting">Переподключение %1$d/%2$d…</string>
+    <string name="status_tool">Инструмент: %1$s</string>
+    <string name="bridge_need_address">Укажи адрес ПК</string>
+    <string name="bridge_ok">✓ Связь с ПК есть</string>
+    <string name="mcp_need_url">Укажи URL сервера</string>
+    <string name="sync_pc">Синхронизация с ПК…</string>
+    <string name="bridge_not_configured">Мост к ПК не настроен</string>
+    <string name="sync_result">С ПК: серверов %1$d, навыков %2$d</string>
+    <string name="sync_no_pc">Нет связи с ПК (проверь мост)</string>
+    <string name="mem_shared_header"># Общая память</string>
+    <string name="mem_chat_header"># Память чата</string>
+    <string name="file_needed_short">Нужен файл</string>
+    <string name="board_export_header"># Доска чата</string>
+
+    <!-- Каналы уведомлений -->
+    <string name="channel_run_name">Работа агента</string>
+    <string name="channel_run_desc">Показывает, что агент выполняет задачу</string>
+    <string name="channel_done_desc">Уведомляет, когда агент закончил, а вы вне приложения</string>
+    <string name="channel_remind_name">Напоминания</string>
+    <string name="channel_remind_desc">Таймеры, события и условные уведомления агента</string>
+
+    <string name="pair_confirm_title">Связать с этим ПК?</string>
+    <string name="pair_confirm_body">Подключить мост к %1$s? Подтверждайте, только если открыли эту ссылку сами со своего ПК — иначе ваши файлы и чаты могут уйти на чужой сервер.</string>
+    <string name="pair_confirm_ok">Связать</string>
+    <string name="net_insecure">Не отправляю ключ по незашифрованному HTTP на публичный адрес (%1$s). Используйте https:// или локальный / Tailscale-адрес.</string>
+    <string name="approve_uses_secrets">Будут использованы ваши секреты: %1$s. Разрешайте, только если доверяете, куда команда их отправит.</string>
+    <string name="mcp_status_ok">✓ инструментов: %1$d</string>
+    <string name="mcp_status_failed">✗ %1$s</string>
+    <string name="mcp_bad_url">URL должен начинаться с https:// (или http:// для локального адреса)</string>
+    <string name="mcp_bad_name">Имя: латиница, цифры, точка, _ и -, до 48 символов</string>
+    <string name="mcp_name_taken">Сервер с именем %1$s уже есть</string>
+    <string name="mcp_saved">Сохранено: %1$s</string>
+    <string name="mcp_edit_server">Изменить MCP-сервер</string>
+    <string name="mcp_field_token_keep">Новый токен (пусто — оставить текущий)</string>
+    <string name="mcp_headers">Заголовки: %1$s</string>
+    <string name="mcp_paste_json">Вставить JSON</string>
+    <string name="mcp_manual">Вручную</string>
+    <string name="mcp_paste_hint">Вставь конфиг из Claude Desktop, Cursor или VS Code как есть ({\"mcpServers\": …}). Удалённые серверы (url) добавятся; локальные (command) работают только на ПК.</string>
+    <string name="mcp_json_field">JSON-конфиг</string>
+    <string name="mcp_json_invalid">Это не похоже на конфиг: %1$s</string>
+    <string name="mcp_import_added">Добавлено: %1$s</string>
+    <string name="mcp_import_none">Нет серверов, к которым телефон может подключиться</string>
+    <string name="mcp_skip_local">%1$s: локальный сервер (command) — работает только на ПК</string>
+    <string name="mcp_skip_other">%1$s: пропущен (%2$s)</string>
+    <string name="mcp_delete_title">Удалить сервер %1$s?</string>
+    <string name="mcp_delete_pc_note">Он пришёл с ПК. Синхронизация его не вернёт.</string>
+    <string name="mcp_delete_body">Его инструменты станут недоступны агенту.</string>
+    <string name="action_edit">Изменить</string>
+    <string name="skill_import">Импорт навыка</string>
+    <string name="skills_hint">Навыки — проверенные рецепты, которые агент сам находит, когда задача подходит. Импортируй SKILL.md или .zip, синхронизируй с ПК или попроси агента создать навык.</string>
+    <string name="skill_imported">Установлено: %1$s</string>
+    <string name="skill_import_failed">Не удалось импортировать: %1$s</string>
+    <string name="skill_replace_title">Заменить навыки?</string>
+    <string name="skill_replace_body">Уже установлены: %1$s. Заменить новой версией?</string>
+    <string name="skill_replace_ok">Заменить</string>
+    <string name="skill_delete_title">Удалить навык %1$s?</string>
+    <string name="skill_delete_pc_note">Он пришёл с ПК. Синхронизация его не вернёт.</string>
+    <string name="skill_deleted">Удалено: %1$s</string>
+    <string name="skill_files">Файлы: %1$s</string>
+    <string name="sync_removed">" · удалено: %1$d"</string>
+</resources>

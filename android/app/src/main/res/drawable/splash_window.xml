@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Брендовый splash Altair: почти-чёрный фон + золотая звезда по центру (до старта Compose). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_bg" />
+    <item
+        android:width="200dp"
+        android:height="200dp"
+        android:gravity="center">
+        <bitmap
+            android:src="@drawable/ic_launcher_foreground"
+            android:gravity="center" />
+    </item>
+</layer-list>

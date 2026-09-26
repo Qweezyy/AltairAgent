@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Групповой чат агентов</title>
+    <link rel="stylesheet" href="/static/fonts.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/swarm.css">
+    <script>
+        (function () {
+            var forced = new URLSearchParams(location.search).get("theme");
+            var saved = localStorage.getItem("local_ai_theme");
+            var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+            document.documentElement.dataset.theme = forced || saved || (dark ? "dark" : "light");
+        })();
+    </script>
+</head>
+<body>
+<div class="swarm-app">
+    <header class="swarm-top">
+        <h1>Групповой чат агентов</h1>
+        <span class="sub">эксперимент: равноправные агенты общаются только через чат</span>
+        <span class="spacer"></span>
+        <a class="home-link" href="/">← к обычному чату</a>
+    </header>
+
+    <!-- ЛЕВО: конфигурация -->
+    <aside class="swarm-config">
+        <div class="field">
+            <label for="task">Общая задача команды</label>
+            <textarea id="task" rows="3" placeholder="Например: написать модуль is_palindrome(text) и покрыть его тестами"></textarea>
+        </div>
+
+        <div class="row">
+            <div class="field">
+                <label for="rounds">Ходов/участник</label>
+                <input type="number" id="rounds" min="1" max="20" value="6">
+            </div>
+            <div class="field">
+                <label for="model">Модель</label>
+                <input type="text" id="model" placeholder="по умолчанию">
+            </div>
+        </div>
+
+        <div class="field">
+            <label for="workspace">Рабочая папка</label>
+            <div class="ws-row">
+                <input type="text" id="workspace" placeholder="папка проекта">
+                <button class="ghost btn-sm" id="browse-ws" title="Выбрать папку">Обзор</button>
+            </div>
+            <div class="hint">Агенты работают одновременно и правят файлы здесь. Действуют автономно в пределах этой папки.</div>
+        </div>
+
+        <div class="section-head">
+            <h2>Команда</h2>
+            <span class="spacer"></span>
+            <button class="ghost btn-sm" id="import-team" title="Загрузить команду из JSON">Импорт</button>
+            <button class="ghost btn-sm" id="export-team" title="Сохранить команду в JSON">Экспорт</button>
+            <button class="ghost btn-sm" id="reset-team">Сбросить</button>
+        </div>
+        <div id="members"></div>
+        <button class="ghost" id="add-member" style="width:100%">+ Добавить участника</button>
+
+        <div class="warn-box" id="team-warn"></div>
+
+        <div style="display:flex; gap:12px; margin-top:20px;">
+            <button class="primary" id="run" style="flex:2">▶ Запустить</button>
+            <button class="danger" id="stop" style="flex:1" disabled>■ Стоп</button>
+        </div>
+
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+    </aside>
+
+    <!-- ПРАВО: живой эксперимент -->
+    <section class="swarm-live">
+        <div class="live-head">
+            <span class="status-pill" id="status">не запущено</span>
+            <span class="round-badge" id="round"></span>
+            <span class="spacer" style="flex:1"></span>
+            <span class="round-badge" id="conn">подключение…</span>
+        </div>
+        <div class="members-strip" id="strip"></div>
+        <div class="chat-feed" id="feed">
+            <div class="empty-hint">
+                Настройте команду слева и нажмите «Запустить».<br>
+                Все участники работают <b>одновременно</b>, каждый в своей зоне, и НЕ видят
+                действий коллег — они координируются только через этот общий чат.
+            </div>
+        </div>
+        <div class="activity-log" id="activity" hidden></div>
+    </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/static/swarm.js"></script>
+</body>
+</html>

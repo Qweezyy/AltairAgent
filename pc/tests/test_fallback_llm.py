@@ -1,0 +1,79 @@
+"""Запасные модели в маршрутизации: FallbackLLM и tier_candidates."""
+
+from __future__ import annotations
+
+import pytest
+
+from core.agent.router import tier_candidates
+from core.llm.base import AssistantTurn, LLMClient
+from core.llm.fallback import FallbackLLM
+
+
+class _Stub(LLMClient):
+    def __init__(self, model: str, *, boom: bool = False) -> None:
+        self.model = model
+        self._boom = boom
+        self.calls = 0
+        self.closed = False
+
+    async def complete(self, messages, **kwargs):  # type: ignore[override]
+        self.calls += 1
+        if self._boom:
+            raise RuntimeError(f"{self.model} не отвечает")
+        return AssistantTurn(content=f"ok:{self.model}")
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_tier_candidates_primary_then_fallbacks():
+    tier = {
+        "model": "big", "base_url": "u", "api_key": "k",
+        "fallbacks": [{"model": "big2", "base_url": "u2"}, {"bad": 1}, {"model": "big3"}],
+    }
+    cands = tier_candidates(tier)
+    assert [c["model"] for c in cands] == ["big", "big2", "big3"]
+    assert cands[0]["api_key"] == "k"
+
+
+def test_tier_candidates_empty_without_model():
+    assert tier_candidates({}) == []
+    assert tier_candidates({"fallbacks": [{"model": "x"}]}) == [{"model": "x", "base_url": "", "api_key": ""}]
+
+
+async def test_fallback_uses_first_working():
+    built = []
+
+    def build(**kw):
+        c = _Stub(kw["model"], boom=(kw["model"] == "primary"))
+        built.append(c)
+        return c
+
+    llm = FallbackLLM([{"model": "primary"}, {"model": "backup"}], build)
+    turn = await llm.complete([{"role": "user", "content": "hi"}])
+    assert turn.content == "ok:backup"
+    assert llm.model == "backup"
+    await llm.aclose()
+    assert all(c.closed for c in built)
+
+
+async def test_fallback_all_fail_raises_last():
+    def build(**kw):
+        return _Stub(kw["model"], boom=True)
+
+    llm = FallbackLLM([{"model": "a"}, {"model": "b"}], build)
+    with pytest.raises(RuntimeError):
+        await llm.complete([{"role": "user", "content": "hi"}])
+
+
+async def test_fallback_primary_ok_skips_backup():
+    built = {}
+
+    def build(**kw):
+        built[kw["model"]] = _Stub(kw["model"])
+        return built[kw["model"]]
+
+    llm = FallbackLLM([{"model": "primary"}, {"model": "backup"}], build)
+    turn = await llm.complete([{"role": "user", "content": "hi"}])
+    assert turn.content == "ok:primary"
+    assert "backup" not in built  # запасную даже не создаём, если основная ответила

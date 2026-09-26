@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Фон окна до старта Compose (splash) — бренд Altair, почти-чёрный космос. -->
+    <color name="splash_bg">#08080C</color>
+</resources>

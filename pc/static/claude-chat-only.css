@@ -1,0 +1,452 @@
+/* ============================================================================
+   Скин чата в стиле Claude — НА ТОКЕНАХ ТЕМЫ (следует за светлой/тёмной).
+   Центрированная колонка, «пузырь» пользователя, ответ модели простым текстом,
+   круглая коралловая кнопка отправки. Цвета только из переменных — без хардкода.
+   Загружается ПОСЛЕ style.css и response-ui-fix.css, поэтому имеет приоритет.
+   ========================================================================== */
+
+:root {
+  --chat-col: 720px;
+}
+
+/* ------------------------------------------------------------------ лента */
+
+#feed-container {
+  background: var(--surface-0);
+}
+
+#feed-items {
+  padding: 24px 0 8px;
+}
+
+/* Убираем «рельс» старого дизайна: вертикальную линию и точки-засечки у каждого
+   сообщения — в Claude лента чистая, без таймлайна. */
+#feed-items::before { display: none !important; }
+#feed-items > *::before { display: none !important; }
+#feed-items > * { margin-bottom: 0; }
+
+/* Ответ модели — простой текст во всю колонку, без рамок и фона (как в Claude) */
+.agent-response-block {
+  max-width: var(--chat-col);
+  margin: 0 auto;
+  padding: 10px 0 18px;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.agent-response-block::before { display: none; }
+
+/* Реплика пользователя — мягкий «пузырь» с приподнятым фоном, по центру колонки */
+.user-message {
+  display: block;
+  max-width: var(--chat-col);
+  margin: 18px auto 6px;
+  padding: 12px 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--text-1);
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.user-message::before { display: none; }
+
+.user-message .btn-retry {
+  display: inline-flex;
+  margin-top: 10px;
+  white-space: nowrap;
+}
+
+/* Шаги/размышления/группы тоже выравниваем по колонке чата */
+.step-group,
+.thinking,
+.system-message,
+.question-block,
+.approval-block,
+.chat-image-block {
+  max-width: var(--chat-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Инлайн-картинка внутри текста ответа (маркер ![подпись](<img:запрос>)) */
+.answer-inline-image {
+  margin: 14px 0;
+}
+.answer-inline-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 460px;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.answer-inline-image figcaption {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* Картинка, которую агент показал прямо в ответе */
+.chat-image {
+  margin: 8px auto 16px;
+}
+.chat-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: zoom-in;
+}
+.chat-image figcaption {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Инлайн-виджет (SVG-графика / интерактив) в песочнице */
+.chat-widget-block,
+.chat-attachment-block {
+  max-width: var(--chat-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+.chat-widget {
+  margin: 8px auto 16px;
+}
+.chat-widget .widget-frame {
+  display: block;
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.chat-widget.chat-graphic .widget-frame {
+  min-height: 200px;
+}
+.chat-widget figcaption,
+.chat-attachment figcaption {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Инлайн-вложение (чип со скачиванием) */
+.chat-attachment {
+  margin: 8px auto 16px;
+}
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--surface-2, transparent);
+  transition: border-color 0.15s ease;
+}
+.attach-chip:hover {
+  border-color: var(--accent, #c96442);
+}
+.attach-icon {
+  font-size: 18px;
+}
+.attach-name {
+  font-weight: 600;
+}
+.attach-meta {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* Доступность: уважаем системную настройку «уменьшить движение». */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Сработавшее напоминание в ленте */
+.reminder-fired-block {
+  max-width: var(--chat-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+.reminder-fired {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px auto;
+  padding: 10px 14px;
+  border: 1px solid var(--accent, #c96442);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent, #c96442) 8%, transparent);
+}
+.reminder-bell {
+  font-size: 18px;
+}
+.reminder-text {
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- композер */
+
+#task-form.composer {
+  background: var(--surface-0);
+  border-top: 1px solid transparent;
+  padding-bottom: 14px;
+}
+
+.composer-header,
+.composer-footer,
+#attach-list {
+  max-width: var(--chat-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Поле ввода — крупная скруглённая «капсула» с мягкой тенью, как у Claude */
+.composer-input-row {
+  max-width: var(--chat-col);
+  margin: 0 auto;
+  padding: 10px 10px 10px 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--timing) var(--ease), box-shadow var(--timing) var(--ease);
+}
+
+.composer-input-row:focus-within {
+  border-color: color-mix(in srgb, var(--ochre) 55%, var(--line));
+  box-shadow: var(--shadow-md);
+}
+
+#task-input {
+  color: var(--text-1);
+  background: transparent;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+#task-input::placeholder { color: var(--text-3); }
+
+/* Круглая коралловая кнопка отправки / стоп */
+#submit-btn,
+#stop-btn {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  color: #fff;
+  background: var(--ochre);
+  transition: background var(--timing) var(--ease), opacity var(--timing) var(--ease);
+}
+
+#submit-btn:hover { background: var(--amber); }
+#submit-btn.is-stop { background: var(--clay); }
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.composer-hint { margin-left: auto; }
+
+/* Кольцо заполнения контекстного окна модели */
+.context-ring {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: transform var(--timing) var(--ease);
+}
+.context-ring:hover { transform: scale(1.08); }
+.context-ring svg {
+  width: 30px;
+  height: 30px;
+  transform: rotate(-90deg);
+}
+.context-ring circle {
+  fill: none;
+  stroke-width: 3;
+}
+.ring-track { stroke: var(--surface-3); }
+.ring-fill {
+  stroke: var(--sage);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s var(--ease), stroke 0.3s var(--ease);
+}
+.context-ring[data-level="warn"] .ring-fill { stroke: var(--amber); }
+.context-ring[data-level="full"] .ring-fill { stroke: var(--clay); }
+.ring-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-3);
+}
+
+/* Чипы над полем ввода — мягкие «таблетки» */
+.composer-chip {
+  gap: 6px;
+  padding: 6px 12px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 13px;
+  transition: all var(--timing) var(--ease);
+}
+
+.composer-chip:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--ochre) 45%, var(--line));
+}
+
+/* ---------------------------------------------------------- приветствие */
+
+.welcome h2 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ----------------------------------------------- анимации и реактивность */
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Появление сообщений/шагов ленты (элементы создаются один раз — без мигания) */
+.user-message,
+.agent-response-block,
+.step-group,
+.system-message,
+.question-block,
+.approval-block,
+.chat-image-block {
+  animation: msg-in 0.34s var(--ease);
+}
+
+/* Всплывающие меню — мягкое появление */
+#plus-menu,
+.export-menu,
+#cmd-popup {
+  animation: menu-in 0.16s var(--ease);
+}
+
+/* Модальные окна */
+.modal { animation: modal-in 0.2s var(--ease); }
+.modal-backdrop { animation: fade-in 0.2s var(--ease); }
+
+/* Отклик на нажатия — «живые» кнопки */
+.icon-btn,
+.composer-chip,
+.work-toggle-btn,
+.btn,
+.tab-btn {
+  transition: color var(--timing) var(--ease), background var(--timing) var(--ease),
+    border-color var(--timing) var(--ease), transform 0.1s var(--ease), box-shadow var(--timing) var(--ease);
+}
+.icon-btn:active,
+.composer-chip:active,
+.work-toggle-btn:active,
+.btn:active { transform: scale(0.94); }
+#submit-btn:active,
+#stop-btn:active { transform: scale(0.9); }
+#submit-btn {
+  transition: background var(--timing) var(--ease), transform 0.1s var(--ease);
+}
+
+/* Плавная смена темы */
+body,
+#sidebar,
+#chat-section,
+.chat-header,
+#work-drawer,
+.modal,
+.composer-input-row {
+  transition: background-color 0.25s var(--ease), border-color 0.25s var(--ease);
+}
+
+/* Уважаем настройку «меньше движения» */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ------------------------------------------------- типографика подписей
+   В Claude нет капс-надписей вразрядку: приводим служебные заголовки к
+   обычному регистру и UI-шрифту (без «Unbounded»). */
+.sidebar-title,
+.work-drawer-title,
+.menu-title,
+.plan-title,
+.thinking-label,
+.tab-btn {
+  font-family: var(--font-ui) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 600 !important;
+}
+
+.sidebar-title {
+  font-size: 15px !important;
+}
+
+.menu-title,
+.plan-title {
+  font-size: 12px !important;
+  color: var(--text-3) !important;
+}
+
+.work-drawer-title {
+  font-size: 13px !important;
+  color: var(--text-2) !important;
+}

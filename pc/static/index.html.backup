@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Локальный ИИ-агент</title>
+    <link rel="stylesheet" href="/static/vendor/highlight.min.css">
+    <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+    <link rel="stylesheet" href="/static/fonts.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Тема применяется до первой отрисовки, иначе на старте мигает светлым.
+        (function () {
+            var forced = new URLSearchParams(location.search).get("theme");
+            var saved = localStorage.getItem("local_ai_theme");
+            var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+            document.documentElement.dataset.theme = forced || saved || (dark ? "dark" : "light");
+        })();
+    </script>
+</head>
+<body>
+    <div id="app-layout">
+
+        <!-- Боковая панель: список чатов -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <h2 class="sidebar-title">Диалоги</h2>
+                <div class="sidebar-actions">
+                    <button class="icon-btn" id="btn-new-chat" title="Новый чат" aria-label="Новый чат">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="btn-sidebar-toggle" title="Скрыть панель" aria-label="Скрыть панель">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="sidebar-sessions-list"></div>
+            <div class="sidebar-footer">
+                <button type="button" class="icon-btn" id="btn-memory" title="Что агент запомнил">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                </button>
+                <button type="button" class="icon-btn" id="btn-commands" title="Быстрые команды (/имя)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"></path>
+                    </svg>
+                </button>
+                <button type="button" class="icon-btn" id="btn-secrets" title="Ключи и пароли">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M12 1v6m0 6v6m-5.66-15a10 10 0 1 0 11.32 0M6.34 19a10 10 0 0 0 11.32 0"></path>
+                    </svg>
+                </button>
+                <button type="button" class="icon-btn" id="btn-update" title="Проверить обновления">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                </button>
+                <div id="version-label"></div>
+                <div class="update-note" id="update-note" hidden></div>
+            </div>
+        </aside>
+
+        <!-- Центральная секция: диалог -->
+        <section id="chat-section">
+            <div class="chat-header">
+                <div>
+                    <h1 id="chat-header-title">Новый диалог</h1>
+                    <div class="header-meta">
+                        <span id="workspace-label">Папка не выбрана</span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <span id="usage-meter" hidden></span>
+                    <div class="status-indicator">
+                        <span class="status-dot" id="status-dot"></span>
+                        <span id="status-text">Отключен</span>
+                    </div>
+                    <button class="icon-btn" id="btn-export" title="Экспорт диалога" aria-label="Экспорт диалога">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+                        </svg>
+                    </button>
+                    <div class="export-menu" id="export-menu" hidden>
+                        <button type="button" data-format="md">Markdown (.md)</button>
+                        <button type="button" data-format="html">HTML (.html)</button>
+                        <button type="button" data-format="pdf">PDF (.pdf)</button>
+                    </div>
+                    <button class="icon-btn" id="btn-clear-chat" title="Очистить диалог" aria-label="Очистить диалог">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"></path>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="btn-settings" title="Настройки" aria-label="Настройки">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10.6 3.09V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 16.11 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09A1.65 1.65 0 0 0 21.91 11H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="btn-theme" title="Сменить тему" aria-label="Сменить тему">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div id="setup-banner" hidden>
+                <p>Чтобы агент заработал, укажите ключ API.</p>
+                <button type="button" class="btn btn-primary" id="btn-setup-open">Открыть настройки</button>
+            </div>
+
+            <div id="drop-overlay" class="drop-overlay" hidden>
+                <p>Отпустите, чтобы приложить файлы</p>
+            </div>
+
+            <div id="feed-container">
+                <div id="plan-widget" style="display: none;">
+                    <div class="plan-header">
+                        <div class="plan-meta">
+                            <span class="plan-title">План</span>
+                            <span id="plan-counter">0/0</span>
+                        </div>
+                        <button type="button" id="btn-plan-toggle">Скрыть</button>
+                    </div>
+                    <div class="plan-progress">
+                        <div id="plan-progress-bar" style="width: 0%;"></div>
+                    </div>
+                    <div id="plan-steps-list" hidden></div>
+                </div>
+
+                <div id="feed-items">
+                    <div class="welcome">
+                        <h2>Что сделать в этой папке?</h2>
+                        <p>Агент читает и правит файлы, запускает тесты и ищет в интернете — строго внутри выбранной рабочей папки.</p>
+                    </div>
+                </div>
+            </div>
+
+            <button type="button" id="btn-new-messages" hidden>↓ Новые сообщения</button>
+
+            <div id="task-form">
+                <div class="composer-wrapper">
+                    <div id="workspace-error" hidden></div>
+                    <div id="cmd-popup" hidden></div>
+                    
+                    <div class="composer-header">
+                        <div class="plus-wrap">
+                            <button type="button" class="composer-chip" id="btn-plus" title="Добавить к запросу">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 5v14M5 12h14"></path>
+                                </svg>
+                            </button>
+                            <div id="plus-menu" hidden>
+                                <div class="menu-group">
+                                    <p class="menu-title">Приложить</p>
+                                    <button type="button" data-action="attach-media">
+                                        <span>Фото и видео</span>
+                                        <span class="menu-hint">Отправятся модели, которая их понимает</span>
+                                    </button>
+                                    <button type="button" data-action="attach-files">
+                                        <span>Файлы и архивы</span>
+                                        <span class="menu-hint">PDF, Excel, Word, код, zip</span>
+                                    </button>
+                                    <button type="button" data-action="attach-folder">
+                                        <span>Папку</span>
+                                        <span class="menu-hint">Агент увидит её состав</span>
+                                    </button>
+                                </div>
+                                <div class="menu-group">
+                                    <p class="menu-title">Поиск в интернете</p>
+                                    <div id="web-mode-segments">
+                                        <button type="button" data-web="auto">Авто</button>
+                                        <button type="button" data-web="force">Всегда</button>
+                                        <button type="button" data-web="off">Выкл</button>
+                                    </div>
+                                    <button type="button" data-action="deep-research">
+                                        <span>Глубокое исследование</span>
+                                        <span class="menu-hint">Много источников, отчёт со ссылками</span>
+                                        <span id="deep-state">выкл</span>
+                                    </button>
+                                </div>
+                                <div class="menu-group">
+                                    <p class="menu-title">Навыки</p>
+                                    <div id="plus-skills">
+                                        <p>Загружаю…</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="button" class="composer-chip" id="btn-open-folder-picker" title="Выбрать рабочую папку">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            <span id="workspace-chip-name">папка</span>
+                        </button>
+
+                        <button type="button" class="composer-chip" id="mode-chip" title="Режим разрешений">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 3l7 4v5c0 4.5-3 8-7 9-4-1-7-4.5-7-9V7z"></path>
+                            </svg>
+                            <span id="mode-name">Ручной</span>
+                        </button>
+                        <div id="mode-menu" hidden></div>
+
+                        <button type="button" class="composer-chip" id="preset-chip" title="Профили настроек">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                                <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                                <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                                <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                            </svg>
+                            <span id="preset-name">Пресет</span>
+                        </button>
+                        <div id="preset-menu" hidden></div>
+
+                        <label class="composer-chip">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="4" y="4" width="16" height="16" rx="3"></rect>
+                                <path d="M9 9h6v6H9z"></path>
+                            </svg>
+                            <input id="model-input" list="model-options" spellcheck="false" placeholder="модель" autocomplete="off">
+                        </label>
+                        <datalist id="model-options">
+                            <option value="openrouter/auto-beta"></option>
+                            <option value="anthropic/claude-sonnet-4.5"></option>
+                            <option value="openai/gpt-5"></option>
+                            <option value="google/gemini-3.7-flash"></option>
+                        </datalist>
+                    </div>
+
+                    <div id="attach-list" hidden></div>
+
+                    <form class="composer-main" novalidate>
+                        <textarea
+                            id="task-input"
+                            rows="1"
+                            placeholder="Опишите задачу…"
+                        ></textarea>
+                        <button type="submit" id="submit-btn" title="Запустить задачу">
+                            <span class="btn-run__label">▶</span>
+                        </button>
+                    </form>
+
+                    <div class="composer-footer">
+                        <span id="composer-flags"></span>
+                        <span>Enter — запустить, Shift+Enter — новая строка</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Рельс панели работы -->
+        <div id="work-rail">
+            <span class="rail-label">Работа</span>
+        </div>
+
+        <!-- Панель работы -->
+        <aside id="work-drawer">
+            <div class="work-tabs">
+                <button class="tab-btn is-active" data-tab="artifacts">
+                    Артефакты <span id="artifact-count">0</span>
+                </button>
+                <button class="tab-btn" data-tab="preview">Превью</button>
+                <button class="tab-btn" data-tab="changes">Изменения</button>
+                <button class="tab-btn" data-tab="terminal">Терминал</button>
+            </div>
+
+            <div class="work-content">
+                <div class="tab-content is-active" id="tab-artifacts">
+                    <div id="artifacts-list">
+                        <div class="empty-state">Файлы, которые создаст или изменит агент, появятся здесь.</div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-preview">
+                    <div id="preview-filename">Файл не выбран</div>
+                    <div id="preview-actions"></div>
+                    <div id="preview-body">
+                        <div class="empty-state">Выберите файл во вкладке «Артефакты».</div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-changes">
+                    <div id="changes-branch">—</div>
+                    <button type="button" id="btn-changes-refresh" title="Обновить">↻ Обновить</button>
+                    <div id="changes-body">
+                        <div class="empty-state">Здесь появятся изменения кода в вашей папке.</div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-terminal">
+                    <div id="terminal-status">Терминал не запущен</div>
+                    <button type="button" id="btn-terminal-restart" title="Перезапустить">↻</button>
+                    <div id="terminal-host"></div>
+                </div>
+            </div>
+
+            <div id="work-resize-handle"></div>
+        </aside>
+    </div>
+
+    <!-- Модальные окна -->
+    <div id="settings-modal" hidden>
+        <div class="modal-backdrop" data-close-settings></div>
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Настройки</h3>
+                <button type="button" class="modal-close" data-close-settings>×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Ключ API</label>
+                    <input type="password" id="set-api-key" class="form-input" spellcheck="false" autocomplete="off" placeholder="Введите API-ключ">
+                    <span class="form-hint" id="api-key-hint">Ключ OpenAI-совместимого провайдера.</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Модель по умолчанию</label>
+                    <input type="text" id="set-model" class="form-input" list="model-options" spellcheck="false">
+                    <span class="form-hint">Модель обязана поддерживать вызов инструментов.</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Модель для фото и видео</label>
+                    <input type="text" id="set-vision-model" class="form-input" spellcheck="false">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Endpoint API</label>
+                    <input type="text" id="set-base-url" class="form-input" spellcheck="false">
+                    <span class="form-hint">Например: https://api.gateyourway.com/v1</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Язык ответов</label>
+                    <input type="text" id="set-language" class="form-input" spellcheck="false">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Лимит шагов</label>
+                    <input type="number" id="set-max-steps" class="form-input" min="1" max="200">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Бюджет токенов на задачу</label>
+                    <input type="number" id="set-max-run-tokens" class="form-input" min="0" step="1000">
+                    <span class="form-hint">0 — без лимита.</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Источник обновлений</label>
+                    <input type="text" id="set-update-url" class="form-input" spellcheck="false">
+                </div>
+                <div id="settings-note" hidden></div>
+                <div id="settings-path" class="form-hint"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close-settings>Отмена</button>
+                <button type="button" class="btn btn-primary" id="btn-save-settings">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="memory-modal" hidden>
+        <div class="modal-backdrop" data-close-memory></div>
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Память агента</h3>
+                <button type="button" class="modal-close" data-close-memory>×</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint">Факты, которые агент запомнил и учитывает в новых чатах.</p>
+                <div id="memory-list"></div>
+            </div>
+            <div class="modal-footer">
+                <span id="memory-count"></span>
+                <button type="button" class="btn btn-secondary" id="btn-memory-clear">Стереть всё</button>
+                <button type="button" class="btn btn-primary" data-close-memory>Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="commands-modal" hidden>
+        <div class="modal-backdrop" data-close-commands></div>
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Быстрые команды</h3>
+                <button type="button" class="modal-close" data-close-commands>×</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint">Наберите «/имя» в строке ввода — команда развернётся в полный запрос.</p>
+                <div id="commands-list"></div>
+                <div class="form-group">
+                    <input type="text" id="cmd-new-name" class="form-input" placeholder="имя (например: тесты)" spellcheck="false">
+                    <input type="text" id="cmd-new-desc" class="form-input" placeholder="краткое описание">
+                    <textarea id="cmd-new-template" class="form-input" rows="3" placeholder="шаблон запроса; {{ввод}} — место для аргумента"></textarea>
+                    <button type="button" class="btn btn-primary" id="btn-cmd-save">Сохранить команду</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span id="commands-count"></span>
+                <button type="button" class="btn btn-primary" data-close-commands>Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="secrets-modal" hidden>
+        <div class="modal-backdrop" data-close-secrets></div>
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Секреты (ключи и пароли)</h3>
+                <button type="button" class="modal-close" data-close-secrets>×</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint">Введите ключ или пароль здесь — он сохранится в файле <code>.env</code> вашей рабочей папки.</p>
+                <div id="secrets-list"></div>
+                <div class="form-group">
+                    <input type="text" id="secret-new-name" class="form-input" placeholder="имя (например: OPENAI_API_KEY)" spellcheck="false">
+                    <input type="password" id="secret-new-value" class="form-input" placeholder="значение" autocomplete="off">
+                    <button type="button" class="btn btn-primary" id="btn-secret-save">Сохранить секрет</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span id="secrets-count"></span>
+                <button type="button" class="btn btn-primary" data-close-secrets>Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="folder-modal" hidden>
+        <div class="modal-backdrop" data-close-folder></div>
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Рабочая папка проекта</h3>
+                <button type="button" class="modal-close" data-close-folder>×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <button type="button" class="btn btn-secondary" id="fm-up">↑ Вверх</button>
+                    <input type="text" id="fm-path" class="form-input" spellcheck="false" placeholder="Введите путь">
+                    <button type="button" class="btn btn-secondary" id="fm-go">Перейти</button>
+                    <button type="button" class="btn btn-secondary" id="fm-native">Проводник</button>
+                </div>
+                <div id="fm-quick"></div>
+                <div id="fm-list"></div>
+                <div id="fm-status" class="form-hint"></div>
+            </div>
+            <div class="modal-footer">
+                <span id="fm-selected"></span>
+                <button type="button" class="btn btn-secondary" data-close-folder>Отмена</button>
+                <button type="button" class="btn btn-primary" id="fm-choose">Выбрать эту папку</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/vendor/marked.min.js"></script>
+    <script src="/static/vendor/highlight.min.js"></script>
+    <script src="/static/vendor/katex/katex.min.js"></script>
+    <script src="/static/vendor/xterm/xterm.js"></script>
+    <script src="/static/vendor/xterm/addon-fit.js"></script>
+    <script src="/static/math.js"></script>
+    <script src="/static/terminal.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>

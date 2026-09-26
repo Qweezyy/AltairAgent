@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Altair</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="alternate icon" href="/static/favicon.ico" />
+  <link rel="stylesheet" href="/static/vendor/highlight.min.css" />
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css" />
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
+  <link rel="stylesheet" href="/static/redesign.css?v=63" />
+  <link rel="stylesheet" href="/static/redesign.layout.css?v=63" />
+  <script>
+    // Пред-покраска темы до первого кадра, чтобы не мигало
+    (function () {
+      try {
+        const t = localStorage.getItem("agent_theme");
+        if (t) document.documentElement.dataset.theme = t;
+        else if (window.matchMedia("(prefers-color-scheme: light)").matches) document.documentElement.dataset.theme = "light";
+      } catch (e) {}
+    })();
+  </script>
+  <script src="/static/i18n.js?v=63"></script>
+</head>
+<body>
+  <!-- Иконки: набор Lucide (MIT), 24×24, штрих 2. Id сохранены. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
+      <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+      <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+      <symbol id="i-cpu" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect width="12" height="12" x="6" y="6" rx="1.5"/></symbol>
+      <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8M16 13H8M16 17H8"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+      <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/><path d="M19 3v4M21 5h-4M5 17v2M6 18H4"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.27 21a2 2 0 0 0 3.46 0"/><path d="M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3M7 10l5 5 5-5M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+      <symbol id="i-git" viewBox="0 0 24 24"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 12h16M4 6h16M4 18h16"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8M16 17H8M10 9H8"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/></symbol>
+      <symbol id="i-brain" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+      <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+      <symbol id="i-slash" viewBox="0 0 24 24"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+      <symbol id="i-flask" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .24.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.75-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.45 15h11.1"/><path d="M8.5 2h7"/></symbol>
+      <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+      <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+      <symbol id="i-minimize2" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+      <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 4.7 6.3 9H3v6h3.3l4.7 4.3z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+      <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 9v6M18 9a9 9 0 0 1-9 9"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="app" id="app" data-rail="expanded">
+    <aside class="rail" id="rail">
+      <div class="rail-head" data-tauri-drag-region>
+        <div class="brand grow" data-tauri-drag-region><span class="brand-mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0.5 C13 8.2 15.8 11 23.5 12 C15.8 13 13 15.8 12 23.5 C11 15.8 8.2 13 0.5 12 C8.2 11 11 8.2 12 0.5 Z"/></svg></span><span>Altair</span></div>
+        <button class="btn-icon small" id="rail-collapse" data-i18n-tip="nav.collapse" data-tip="Collapse"><svg class="icon icon-sm"><use href="#i-panel"/></svg></button>
+      </div>
+      <button class="btn rail-new" id="btn-new"><svg class="icon icon-sm"><use href="#i-plus"/></svg> <span data-i18n="app.newChat">New chat</span></button>
+      <div class="rail-search"><svg class="icon icon-sm"><use href="#i-search"/></svg><input class="field" id="session-search" data-i18n-ph="app.searchChats" placeholder="Search chats" /></div>
+      <div class="rail-sessions" id="sessions"></div>
+      <div class="rail-foot">
+        <button class="btn-icon" id="btn-memory" data-i18n-tip="nav.memory" data-tip="Memory"><svg class="icon icon-sm"><use href="#i-brain"/></svg></button>
+        <button class="btn-icon" id="btn-commands" data-i18n-tip="nav.commands" data-tip="Commands"><svg class="icon icon-sm"><use href="#i-slash"/></svg></button>
+        <button class="btn-icon" id="btn-secrets" data-i18n-tip="nav.secrets" data-tip="Secrets"><svg class="icon icon-sm"><use href="#i-key"/></svg></button>
+        <button class="btn-icon" id="btn-trash" data-i18n-tip="nav.trash" data-tip="Recently deleted"><svg class="icon icon-sm"><use href="#i-undo"/></svg></button>
+        <button class="btn-icon" id="btn-settings" data-i18n-tip="nav.settings" data-tip="Settings"><svg class="icon icon-sm"><use href="#i-settings"/></svg></button>
+        <span class="grow"></span>
+        <button class="btn-icon" id="btn-update" data-i18n-tip="nav.updates" data-tip="Updates"><svg class="icon icon-sm"><use href="#i-download"/></svg></button>
+        <button class="btn-icon" id="btn-theme" data-i18n-tip="nav.theme" data-tip="Theme"><svg class="icon icon-sm"><use href="#i-moon"/></svg></button>
+      </div>
+    </aside>
+
+    <main class="work">
+      <header class="topbar" data-tauri-drag-region>
+        <button class="btn-icon" id="rail-open" hidden><svg class="icon"><use href="#i-menu"/></svg></button>
+        <div class="topbar-title grow" data-tauri-drag-region>
+          <span class="chat-title truncate" id="chat-title" data-i18n="app.newChat">New chat</span>
+          <span class="ws-tag" id="ws-tag" hidden></span>
+        </div>
+        <div class="dock-toggles">
+          <button class="btn-icon dock-tgl" id="tgl-terminal" data-pane="terminal" data-i18n-tip="top.terminal" data-tip="Terminal"><svg class="icon"><use href="#i-terminal"/></svg></button>
+          <button class="btn-icon dock-tgl" id="tgl-diff" data-pane="diff" data-i18n-tip="top.diff" data-tip="Code changes"><svg class="icon"><use href="#i-git"/></svg><span class="tgl-dot" id="diff-dot" hidden></span></button>
+          <button class="btn-icon dock-tgl" id="tgl-browser" data-pane="browser" data-i18n-tip="top.browser" data-tip="Agent browser"><svg class="icon"><use href="#i-globe"/></svg></button>
+          <button class="btn-icon" id="btn-more" data-i18n-tip="top.more" data-tip="More"><svg class="icon"><use href="#i-dots"/></svg></button>
+        </div>
+        <div class="winctl" id="winctl" hidden>
+          <button class="win-btn" id="win-min" data-i18n-tip="win.min" data-tip="Minimize" aria-label="Minimize">
+            <svg viewBox="0 0 10 10" width="10" height="10"><path d="M0 5 h10" stroke="currentColor" stroke-width="1"/></svg>
+          </button>
+          <button class="win-btn" id="win-max" data-i18n-tip="win.max" data-tip="Maximize" aria-label="Maximize">
+            <svg class="win-ico-max" viewBox="0 0 10 10" width="10" height="10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+            <svg class="win-ico-restore" viewBox="0 0 10 10" width="10" height="10" hidden><rect x="0.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/><path d="M2.5 2.5 V0.5 H9.5 V7.5 H7.5" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+          </button>
+          <button class="win-btn win-close" id="win-close" data-i18n-tip="win.close" data-tip="Close" aria-label="Close">
+            <svg viewBox="0 0 10 10" width="10" height="10"><path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor" stroke-width="1"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="work-body" id="work-body">
+        <div class="chat-col" id="chat-col">
+          <div class="feed-wrap">
+            <div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>
+            <button class="jump-btn" id="jump-latest" hidden><svg class="icon icon-sm"><use href="#i-arrow-down"/></svg> <span data-i18n="feed.jumpLatest">Jump to latest</span></button>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="composer-inner">
+              <div class="suggestions" id="suggestions" hidden></div>
+              <div class="composer-context">
+                <button class="ctx-chip" id="sel-workspace" data-i18n-tip="composer.workspace" data-tip="Working folder">
+                  <svg class="icon icon-sm"><use href="#i-folder"/></svg>
+                  <span class="sel-val" id="ws-val">…</span>
+                  <svg class="icon icon-sm chev"><use href="#i-chevron-down"/></svg>
+                </button>
+              </div>
+              <form class="composer" id="composer" novalidate>
+                <div class="attach-preview" id="attach-preview"></div>
+                <textarea id="input" rows="1" data-i18n-ph="composer.placeholder" placeholder="Ask or set a task…"></textarea>
+                <div class="cmd-popup" id="cmd-popup" hidden></div>
+              </form>
+              <div class="composer-bar">
+                <button class="mode-btn" id="sel-mode" data-i18n-tip="composer.mode" data-tip="Permission mode">
+                  <svg class="icon icon-sm"><use href="#i-shield"/></svg>
+                  <span class="sel-val" id="mode-val">…</span>
+                  <svg class="icon icon-sm chev"><use href="#i-chevron-down"/></svg>
+                </button>
+                <button type="button" class="btn-icon small" id="btn-plus" data-i18n-tip="composer.attach" data-tip="Attachments & modes"><svg class="icon icon-sm"><use href="#i-plus"/></svg></button>
+                <input type="file" id="file-input" multiple hidden />
+                <span class="grow"></span>
+                <span class="composer-flags" id="composer-flags"></span>
+                <button type="button" class="mode-btn" id="sel-model" data-i18n-tip="composer.model" data-tip="Model"><span class="sel-val" id="model-val">…</span><svg class="icon icon-sm chev"><use href="#i-chevron-down"/></svg></button>
+                <svg class="ctx-ring" id="ctx-ring" viewBox="0 0 26 26" data-i18n-tip="composer.context" data-tip="Context"><circle class="track" cx="13" cy="13" r="10"/><circle class="fill" cx="13" cy="13" r="10" transform="rotate(-90 13 13)"/><text class="ctx-pct" id="ctx-pct" x="13" y="13.6" text-anchor="middle" dominant-baseline="middle">0</text></svg>
+                <button type="submit" form="composer" class="send-btn" id="send-btn" data-i18n-tip="composer.run" data-tip="Run"><svg class="icon"><use href="#i-send"/></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dock" id="dock" hidden>
+          <div class="dock-resize" id="dock-resize" data-i18n-tip="pane.resize" data-tip="Drag to resize"></div>
+
+          <section class="pane" id="pane-terminal" data-pane="terminal" hidden>
+            <div class="pane-vresize"></div>
+            <header class="pane-head"><span class="pane-title" data-i18n="pane.terminal">Terminal</span><span class="grow"></span><button class="btn-icon small" id="btn-terminal-restart" data-i18n-tip="pane.restart" data-tip="Restart"><svg class="icon icon-sm"><use href="#i-refresh"/></svg></button><button class="pane-act" data-act="max" data-i18n-tip="pane.max" data-tip="Full window"><svg class="icon icon-sm"><use href="#i-maximize"/></svg></button><button class="pane-act" data-act="pop" data-i18n-tip="pane.pop" data-tip="Separate window"><svg class="icon icon-sm"><use href="#i-external"/></svg></button><button class="pane-act" data-act="close" data-i18n-tip="pane.close" data-tip="Close"><svg class="icon icon-sm"><use href="#i-x"/></svg></button></header>
+            <div class="pane-body" id="view-terminal" style="display:flex;flex-direction:column;padding:0">
+              <div id="terminal-host" style="flex:1;min-height:0"></div>
+            </div>
+          </section>
+
+          <section class="pane" id="pane-diff" data-pane="diff" hidden>
+            <div class="pane-vresize"></div>
+            <header class="pane-head"><span class="pane-title" data-i18n="pane.changes">Changes</span><span class="grow"></span><button class="pane-act" data-act="max" data-i18n-tip="pane.max" data-tip="Full window"><svg class="icon icon-sm"><use href="#i-maximize"/></svg></button><button class="pane-act" data-act="pop" data-i18n-tip="pane.pop" data-tip="Separate window"><svg class="icon icon-sm"><use href="#i-external"/></svg></button><button class="pane-act" data-act="close" data-i18n-tip="pane.close" data-tip="Close"><svg class="icon icon-sm"><use href="#i-x"/></svg></button></header>
+            <div class="pane-body" id="view-diff"></div>
+          </section>
+
+          <section class="pane" id="pane-browser" data-pane="browser" hidden>
+            <div class="pane-vresize"></div>
+            <header class="pane-head"><span class="pane-title" data-i18n="pane.browser">Browser</span><span class="grow"></span><button class="pane-act" data-act="max" data-i18n-tip="pane.max" data-tip="Full window"><svg class="icon icon-sm"><use href="#i-maximize"/></svg></button><button class="pane-act" data-act="pop" data-i18n-tip="pane.pop" data-tip="Separate window"><svg class="icon icon-sm"><use href="#i-external"/></svg></button><button class="pane-act" data-act="close" data-i18n-tip="pane.close" data-tip="Close"><svg class="icon icon-sm"><use href="#i-x"/></svg></button></header>
+            <div class="pane-body browser-body" id="view-browser" style="padding:0">
+              <div class="browser-bar">
+                <button class="btn-icon small" id="br-back" data-i18n-tip="browser.back" data-tip="Back"><svg class="icon icon-sm"><use href="#i-chevron-right" style="transform:rotate(180deg);transform-origin:center"/></svg></button>
+                <button class="btn-icon small" id="br-forward" data-i18n-tip="browser.forward" data-tip="Forward"><svg class="icon icon-sm"><use href="#i-chevron-right"/></svg></button>
+                <button class="btn-icon small" id="br-reload" data-i18n-tip="browser.reload" data-tip="Reload"><svg class="icon icon-sm"><use href="#i-refresh"/></svg></button>
+                <input class="browser-url" id="br-url" data-i18n-ph="browser.url" placeholder="Address or query…" spellcheck="false" />
+                <button class="btn-icon small br-dl-btn" id="br-dl" data-i18n-tip="browser.downloads" data-tip="Downloads" hidden><svg class="icon icon-sm"><use href="#i-download"/></svg></button>
+                <button class="btn-icon small" id="br-ext" data-i18n-tip="browser.ext" data-tip="Open in system browser"><svg class="icon icon-sm"><use href="#i-external"/></svg></button>
+              </div>
+              <div class="browser-tabs" id="br-tabs"></div>
+              <div class="br-dl-shelf" id="br-dl-shelf" hidden></div>
+              <div class="browser-view" id="browser-view"><div class="browser-empty dim" data-i18n="browser.empty">Enter an address — the page opens in the agent browser. Session and tabs are kept.</div></div>
+            </div>
+          </section>
+
+          <section class="pane" id="pane-artifacts" data-pane="artifacts" hidden>
+            <div class="pane-vresize"></div>
+            <header class="pane-head"><span class="pane-title" data-i18n="pane.files">Files</span><span class="grow"></span><button class="pane-act" data-act="max" data-i18n-tip="pane.max" data-tip="Full window"><svg class="icon icon-sm"><use href="#i-maximize"/></svg></button><button class="pane-act" data-act="pop" data-i18n-tip="pane.pop" data-tip="Separate window"><svg class="icon icon-sm"><use href="#i-external"/></svg></button><button class="pane-act" data-act="close" data-i18n-tip="pane.close" data-tip="Close"><svg class="icon icon-sm"><use href="#i-x"/></svg></button></header>
+            <div class="pane-body" id="view-artifacts"></div>
+          </section>
+
+          <section class="pane" id="pane-preview" data-pane="preview" hidden>
+            <div class="pane-vresize"></div>
+            <header class="pane-head"><span class="pane-title" data-i18n="pane.preview">Preview</span><span class="grow"></span><button class="pane-act" data-act="max" data-i18n-tip="pane.max" data-tip="Full window"><svg class="icon icon-sm"><use href="#i-maximize"/></svg></button><button class="pane-act" data-act="pop" data-i18n-tip="pane.pop" data-tip="Separate window"><svg class="icon icon-sm"><use href="#i-external"/></svg></button><button class="pane-act" data-act="close" data-i18n-tip="pane.close" data-tip="Close"><svg class="icon icon-sm"><use href="#i-x"/></svg></button></header>
+            <div class="pane-body" id="view-preview"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <div id="overlay-root"></div>
+
+  <script src="/static/vendor/marked.min.js"></script>
+  <script src="/static/vendor/highlight.min.js"></script>
+  <script src="/static/vendor/katex/katex.min.js"></script>
+  <script src="/static/vendor/mermaid/mermaid.min.js" defer></script>
+  <script src="/static/vendor/xterm/xterm.js"></script>
+  <script src="/static/vendor/xterm/addon-fit.js"></script>
+  <script src="/static/math.js?v=63"></script>
+  <script src="/static/terminal.js?v=63"></script>
+  <script src="/static/mascot.js?v=63"></script>
+  <script src="/static/cosmos.js?v=63"></script>
+  <script src="/static/onboarding.js?v=63"></script>
+  <script src="/static/redesign.js?v=63"></script>
+  <script src="/static/browser.js?v=63"></script>
+  <script src="/static/extensions.js?v=63"></script>
+</body>
+</html>

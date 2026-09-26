@@ -1,0 +1,65 @@
+package com.localaiagent.app.data
+
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+
+/**
+ * Профиль модели (Задача 2): своё имя, id модели, endpoint, ключ и НАБОР
+ * поддерживаемых типов ввода (capabilities). Пользователь сам задаёт, что модель
+ * умеет принимать: image / video / audio / file (текст умеют все).
+ */
+data class ModelProfile(
+    val id: String,
+    val title: String,
+    val model: String,
+    val baseUrl: String,
+    val apiKey: String,
+    val caps: Set<String> = emptySet(),
+    /** Размер контекстного окна модели (токенов) — для индикатора и самоконтроля ИИ. */
+    val contextWindow: Int = 128_000,
+) {
+    fun accepts(cap: String) = cap in caps
+}
+
+/** Все известные типы вложений (кроме текста). */
+val ALL_CAPS = listOf("image", "video", "audio", "file")
+
+val CAP_LABEL = mapOf(
+    "image" to com.localaiagent.app.R.string.attach_photo,
+    "video" to com.localaiagent.app.R.string.attach_video,
+    "audio" to com.localaiagent.app.R.string.attach_audio,
+    "file" to com.localaiagent.app.R.string.attach_files,
+)
+
+private val JSON = Json { ignoreUnknownKeys = true }
+
+fun modelsToJson(models: List<ModelProfile>): String = buildJsonArray {
+    for (m in models) addJsonObject {
+        put("id", m.id); put("title", m.title); put("model", m.model)
+        put("baseUrl", m.baseUrl); put("apiKey", m.apiKey)
+        put("contextWindow", m.contextWindow)
+        putJsonArray("caps") { m.caps.forEach { add(it) } }
+    }
+}.toString()
+
+fun modelsFromJson(raw: String?): List<ModelProfile> {
+    if (raw.isNullOrBlank()) return emptyList()
+    val arr = runCatching { JSON.parseToJsonElement(raw) as? JsonArray }.getOrNull() ?: return emptyList()
+    return arr.mapNotNull { el ->
+        val o = runCatching { el.jsonObject }.getOrNull() ?: return@mapNotNull null
+        fun s(k: String) = o[k]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val caps = o["caps"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }?.toSet() ?: emptySet()
+        val id = s("id").ifBlank { return@mapNotNull null }
+        val ctxWin = s("contextWindow").toIntOrNull() ?: 128_000
+        ModelProfile(id, s("title"), s("model"), s("baseUrl"), s("apiKey"), caps, ctxWin)
+    }
+}

@@ -1,0 +1,11 @@
+Altair
+Copyright 2026 Altair contributors
+
+This product includes software developed as part of the Altair project
+(https://github.com/Qweezyy/AltairAgent).
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project bundles and depends on third-party open-source components,
+each under its own license (e.g. FastAPI, Uvicorn, ripgrep, Jetpack Compose,
+Ktor, OkHttp, and others). Their licenses apply to those components.

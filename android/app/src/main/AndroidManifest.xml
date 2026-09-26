@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Агент ходит в интернет к LLM/поиску. Камера — позже, для view_image. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Условные напоминания: сеть/будильники для фоновой проверки условий. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:name=".App"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="${appLabel}"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LocalAIAgent">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="${appLabel}"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.LocalAIAgent">
+            <!-- Быстрое связывание с ПК по ссылке/QR: altair://pair?u=..&t=..&w=.. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="altair" android:host="pair" />
+            </intent-filter>
+        </activity>
+
+        <!-- Выбор иконки в настройках: активна ровно ОДНА точка входа-алиас (по умолчанию IconDeep).
+             MainActivity сама НЕ является лаунчер-компонентом и никогда не отключается — иначе при
+             смене иконки система гасила бы запущенную активити и приложение вылетало. -->
+        <activity-alias android:name=".IconDeep" android:targetActivity=".MainActivity" android:enabled="true" android:exported="true" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".IconBlue" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_launcher_blue" android:roundIcon="@mipmap/ic_launcher_blue_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".IconAurora" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_launcher_aurora" android:roundIcon="@mipmap/ic_launcher_aurora_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".IconViolet" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_launcher_violet" android:roundIcon="@mipmap/ic_launcher_violet_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".IconEmber" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_launcher_ember" android:roundIcon="@mipmap/ic_launcher_ember_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".IconMinimal" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_launcher_minimal" android:roundIcon="@mipmap/ic_launcher_minimal_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".IconMilky" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_launcher_milky" android:roundIcon="@mipmap/ic_launcher_milky_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".IconRose" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_launcher_rose" android:roundIcon="@mipmap/ic_launcher_rose_round" android:label="${appLabel}">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+
+        <service
+            android:name=".AgentService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Проверка напоминаний/условий по будильнику. -->
+        <receiver
+            android:name=".reminders.ReminderReceiver"
+            android:exported="false" />
+        <!-- Перепланировать будильники после перезагрузки. -->
+        <receiver
+            android:name=".reminders.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

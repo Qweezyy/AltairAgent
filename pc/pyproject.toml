@@ -1,0 +1,18 @@
+[project]
+name = "local-ai-agent"
+version = "0.1.0"
+description = "Локальный автономный ИИ-агент с инструментами, навыками и MCP"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["E501", "B008"]

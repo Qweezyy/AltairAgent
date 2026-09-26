@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Мост к ПК (Фаза 4) часто идёт по plain-HTTP: свой сервер в LAN или Tailscale
+  без TLS. Поэтому разрешаем cleartext. LLM/веб-запросы всё равно ходят по https.
+  Контрибьютер при желании может сузить до конкретных доменов (domain-config).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

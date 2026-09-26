@@ -1,0 +1,2323 @@
+/* ============================================================================
+   Altair — визуальная система
+   
+   Направление: инструментальная мастерская. Тёплый графит, моноширинный шрифт
+   для данных, единственный акцент охра. Рельс работ — подпись интерфейса.
+   
+   Правила:
+   - Цвета только через токены — хардкод запрещён
+   - Unbounded только капсом, вразрядку 0.11em, 10–11px
+   - Всё машинное (пути, команды, вывод) — моноширинным
+   - Шаг сетки 4px, токены --s1…--s7
+   - Никаких градиентов
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   CSS-переменные: токены цвета, типографики, ритма
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* Шрифты */
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "Consolas", "Monaco", monospace;
+  --font-caps: "Unbounded", sans-serif;
+  
+  /* Ритм: шаг сетки 4px */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  
+  /* Скругления */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  
+  /* Анимации */
+  --timing: 180ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Тёмная тема (по умолчанию) — палитра Claude: тёплый графит + коралловый акцент.
+   surface-0 фон холста, surface-1 сайдбар/панели, surface-2/3 приподнятые слои. */
+[data-theme="dark"] {
+  --surface-0: #262624;
+  --surface-1: #1f1e1d;
+  --surface-2: #30302e;
+  --surface-3: #3a3a37;
+  --line: #3d3d3a;
+
+  --text-1: #f5f4ef;
+  --text-2: #c2c0b6;
+  --text-3: #8f8d84;
+
+  /* Единственный акцент — коралл Claude (кнопки, ссылки, активные состояния). */
+  --ochre: #d97757;
+  --ochre-dim: #a4553b;
+  --sage: #7fa88b;
+  --clay: #cf6b52;
+  --amber: #e08a68;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Светлая тема — тёплая бумага Claude + коралловый акцент. */
+[data-theme="light"] {
+  --surface-0: #faf9f5;
+  --surface-1: #f0eee6;
+  --surface-2: #ffffff;
+  --surface-3: #ece9df;
+  --line: #e3e0d6;
+
+  --text-1: #2d2d2a;
+  --text-2: #5f5e57;
+  --text-3: #8c8a80;
+
+  --ochre: #c15f3c;
+  --ochre-dim: #a44e30;
+  --sage: #43704f;
+  --clay: #b5432a;
+  --amber: #cc6a44;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* --------------------------------------------------------------------------
+   Сброс и базовая типографика
+   -------------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-1);
+  background: var(--surface-0);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --------------------------------------------------------------------------
+   Композиция: sidebar | main | work-panel
+   -------------------------------------------------------------------------- */
+
+html, body {
+  width: 100%;
+}
+
+#app-layout {
+  position: relative;
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#sidebar {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#chat-section {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+/* Рабочая панель — выезжающий справа оверлей поверх чата, а не постоянный
+   столбец. Открывается кнопками «Артефакты/Превью/Изменения/Терминал» в шапке. */
+#work-drawer {
+  position: absolute;
+  top: var(--work-top, 64px);
+  right: 0;
+  bottom: 0;
+  width: clamp(300px, var(--work-w, 460px), 760px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  z-index: 40;
+  background: var(--surface-1);
+  border-left: 1px solid var(--line);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.30);
+  transform: translateX(102%);
+  transition: transform var(--timing) var(--ease);
+}
+
+#app-layout[data-work="open"] #work-drawer {
+  transform: translateX(0);
+}
+
+#work-backdrop {
+  display: none;
+}
+
+#app-layout:has(#sidebar.collapsed) {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+/* Сайдбар скрыт на узких экранах; панель занимает весь экран */
+@media (max-width: 860px) {
+  #app-layout {
+    grid-template-columns: 0 1fr;
+  }
+  #sidebar {
+    display: none;
+  }
+  #work-drawer {
+    width: 100%;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Сайдбар: список чатов
+   -------------------------------------------------------------------------- */
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-1);
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.sidebar-title {
+  font-family: var(--font-caps);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.sidebar-actions {
+  display: flex;
+  gap: var(--s2);
+}
+
+#sidebar-sessions-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s2);
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s3);
+  margin-bottom: var(--s1);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.session-item:hover {
+  background: var(--surface-3);
+  border-color: var(--line);
+}
+
+.session-item.active {
+  background: var(--surface-3);
+  border-color: var(--ochre);
+}
+
+.session-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.btn-session-delete {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: var(--s1);
+  border-radius: var(--r-sm);
+  transition: all var(--timing) var(--ease);
+}
+
+.session-item:hover .btn-session-delete {
+  display: block;
+}
+
+.btn-session-delete:hover {
+  color: var(--clay);
+  background: var(--surface-1);
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+#version-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  margin-left: auto;
+}
+
+.update-note {
+  width: 100%;
+  padding: var(--s2);
+  background: var(--amber);
+  color: var(--surface-0);
+  font-size: 11px;
+  border-radius: var(--r-sm);
+  margin-top: var(--s2);
+}
+
+/* --------------------------------------------------------------------------
+   Секция чата: шапка + лента + композер
+   -------------------------------------------------------------------------- */
+
+#chat-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  /* Над выезжающей панелью работы, чтобы кнопки-переключатели оставались
+     кликабельными и панель не накрывала заголовок. */
+  position: relative;
+  z-index: 45;
+}
+
+#chat-header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 2px;
+}
+
+.header-meta {
+  display: flex;
+  gap: var(--s3);
+  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  position: relative;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+  color: var(--text-2);
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: all var(--timing) var(--ease);
+}
+
+.status-dot.idle {
+  background: var(--text-3);
+}
+
+.status-dot.working {
+  background: var(--ochre);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-dot.error {
+  background: var(--clay);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* --------------------------------------------------------------------------
+   Системные сообщения ленты: ошибки задачи и статус переподключения
+   -------------------------------------------------------------------------- */
+
+.system-message {
+  max-width: var(--chat-col, 740px);
+  margin: 10px auto;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.error-block {
+  border-color: color-mix(in srgb, var(--clay) 45%, var(--line));
+  background: color-mix(in srgb, var(--clay) 8%, var(--surface-1));
+}
+
+.error-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--clay);
+}
+
+.error-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+
+.error-block .btn-retry {
+  margin-top: 10px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #fff;
+  background: var(--ochre);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.error-block .btn-retry:hover {
+  background: var(--amber);
+}
+
+/* Живой индикатор повторного подключения к модели */
+.reconnect-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-color: color-mix(in srgb, var(--amber) 40%, var(--line));
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface-1));
+  color: var(--text-1);
+}
+
+.reconnect-spinner {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 2px solid color-mix(in srgb, var(--ochre) 35%, transparent);
+  border-top-color: var(--ochre);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.reconnect-text {
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.reconnect-reason {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+#usage-meter {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Баннер настройки (если нет ключа API)
+   -------------------------------------------------------------------------- */
+
+#setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s3) var(--s4);
+  background: var(--amber);
+  color: var(--surface-0);
+  border-bottom: 1px solid var(--line);
+}
+
+#setup-banner p {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Лента диалога: рельс работ с засечками
+   -------------------------------------------------------------------------- */
+
+#feed-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s5) 0;
+  position: relative;
+}
+
+#feed-items {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 var(--s4);
+  position: relative;
+}
+
+/* Рельс: вертикальная линия вдоль ленты */
+#feed-items::before {
+  content: "";
+  position: absolute;
+  left: 28px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+/* Каждый элемент ленты получает засечку на рельсе */
+#feed-items > * {
+  position: relative;
+  margin-bottom: var(--s4);
+}
+
+#feed-items > *::before {
+  content: "";
+  position: absolute;
+  left: -36px;
+  top: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+  border: 1px solid var(--line);
+}
+
+/* Засечки по типу элемента */
+.user-message::before {
+  border-radius: var(--r-sm) !important;
+  background: var(--ochre) !important;
+  border-color: var(--ochre) !important;
+}
+
+.agent-message::before {
+  background: transparent !important;
+  border: 2px solid var(--text-3) !important;
+}
+
+.step::before,
+.step-group::before {
+  background: var(--sage) !important;
+  border-color: var(--sage) !important;
+}
+
+.step.failed::before,
+.step-group.has-failures::before {
+  background: var(--clay) !important;
+  border-color: var(--clay) !important;
+}
+
+.activity::before {
+  background: var(--ochre) !important;
+  border-color: var(--ochre) !important;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.thinking::before {
+  background: var(--text-2) !important;
+  border-color: var(--text-2) !important;
+}
+
+/* --------------------------------------------------------------------------
+   Пустой экран: приветствие
+   -------------------------------------------------------------------------- */
+
+.welcome {
+  text-align: center;
+  max-width: 560px;
+  margin: var(--s7) auto;
+  padding: var(--s5);
+}
+
+.welcome h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: var(--s3);
+}
+
+.welcome p {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.chat-section.is-empty #feed-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-section.is-empty #feed-items::before {
+  display: none;
+}
+
+.chat-section.is-empty .welcome::before {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Сообщения пользователя и агента
+   -------------------------------------------------------------------------- */
+
+.user-message {
+  padding: var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.agent-message {
+  padding: var(--s4);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  line-height: 1.7;
+}
+
+.agent-message h1,
+.agent-message h2,
+.agent-message h3 {
+  margin-top: var(--s4);
+  margin-bottom: var(--s3);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.agent-message h1 { font-size: 20px; }
+.agent-message h2 { font-size: 18px; }
+.agent-message h3 { font-size: 16px; }
+
+.agent-message p {
+  margin-bottom: var(--s3);
+}
+
+.agent-message ul,
+.agent-message ol {
+  margin-left: var(--s5);
+  margin-bottom: var(--s3);
+}
+
+.agent-message li {
+  margin-bottom: var(--s2);
+}
+
+.agent-message code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 2px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.agent-message pre {
+  margin: var(--s3) 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.agent-message pre code {
+  display: block;
+  padding: var(--s4);
+  overflow-x: auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  line-height: 1.5;
+}
+
+.agent-message a {
+  color: var(--ochre);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--timing) var(--ease);
+}
+
+.agent-message a:hover {
+  border-bottom-color: var(--ochre);
+}
+
+/* --------------------------------------------------------------------------
+   Кнопка «Повторить» на сообщении пользователя
+   -------------------------------------------------------------------------- */
+
+.btn-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  padding: var(--s2) var(--s3);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.btn-retry:hover {
+  color: var(--ochre);
+  border-color: var(--ochre);
+  background: var(--surface-2);
+}
+
+/* --------------------------------------------------------------------------
+   Подвал ответа: сводка + кнопка копирования
+   -------------------------------------------------------------------------- */
+
+.answer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}
+
+.run-summary {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+.btn-copy-answer {
+  padding: var(--s2) var(--s3);
+  font-size: 11px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.btn-copy-answer:hover {
+  color: var(--ochre);
+  border-color: var(--ochre);
+}
+
+/* --------------------------------------------------------------------------
+   Блоки кода: шапка с языком и кнопкой копирования
+   -------------------------------------------------------------------------- */
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s2) var(--s3);
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.code-lang {
+  font-family: var(--font-caps);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.btn-copy-code {
+  padding: 4px var(--s2);
+  font-size: 11px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.btn-copy-code:hover {
+  color: var(--ochre);
+  border-color: var(--ochre);
+  background: var(--surface-2);
+}
+
+.btn-copy-code.copied {
+  color: var(--sage);
+  border-color: var(--sage);
+}
+
+/* --------------------------------------------------------------------------
+   Размышления (thinking)
+   -------------------------------------------------------------------------- */
+
+.thinking {
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.thinking-label {
+  font-family: var(--font-caps);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.thinking-caret {
+  color: var(--text-3);
+}
+
+.thinking-body {
+  margin-top: var(--s3);
+  padding: var(--s3);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+
+/* --------------------------------------------------------------------------
+   Шаги (steps) и группы шагов
+   -------------------------------------------------------------------------- */
+
+.step {
+  margin-bottom: var(--s1);
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+  text-align: left;
+}
+
+.step-row:hover {
+  background: var(--surface-3);
+  border-color: var(--line);
+}
+
+.step-caret {
+  color: var(--text-3);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.step-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-1);
+  flex-shrink: 0;
+}
+
+.step-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.step-status.success {
+  color: var(--sage);
+}
+
+.step-status.failed {
+  color: var(--clay);
+}
+
+.step-status.running {
+  color: var(--ochre);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.step-body {
+  margin-top: var(--s2);
+  padding: var(--s3);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.tool-args,
+.tool-output {
+  margin-bottom: var(--s3);
+}
+
+.tool-args pre,
+.tool-output pre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Группа шагов */
+.step-group {
+  margin-bottom: var(--s4);
+}
+
+.group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.group-toggle:hover {
+  background: var(--surface-3);
+}
+
+.group-caret {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.group-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.step-group.has-failures .group-label {
+  color: var(--clay);
+}
+
+.group-items {
+  margin-top: var(--s2);
+  padding-left: var(--s4);
+}
+
+/* --------------------------------------------------------------------------
+   Индикатор активности: что агент делает сейчас
+   -------------------------------------------------------------------------- */
+
+.activity {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ochre);
+  animation: pulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.activity-text {
+  font-size: 13px;
+  color: var(--text-2);
+  flex: 1;
+}
+
+.activity-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   План (plan widget)
+   -------------------------------------------------------------------------- */
+
+#plan-widget {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin-bottom: var(--s4);
+  padding: var(--s3);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--s3);
+}
+
+.plan-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.plan-title {
+  font-family: var(--font-caps);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+#plan-counter {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+#btn-plan-toggle {
+  padding: var(--s2) var(--s3);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+#btn-plan-toggle:hover {
+  color: var(--ochre);
+  border-color: var(--ochre);
+}
+
+.plan-progress {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: var(--s3);
+}
+
+#plan-progress-bar {
+  height: 100%;
+  background: var(--ochre);
+  transition: width 300ms var(--ease);
+}
+
+#plan-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.plan-step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  padding: var(--s2);
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+}
+
+.step-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.step-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-1);
+}
+
+.plan-step-item.completed .step-text {
+  color: var(--text-3);
+}
+
+.plan-step-item.in_progress .step-text {
+  color: var(--ochre);
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Кнопка «Новые сообщения»
+   -------------------------------------------------------------------------- */
+
+#btn-new-messages {
+  position: sticky;
+  bottom: var(--s4);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--s2) var(--s4);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--surface-0);
+  background: var(--ochre);
+  border: 1px solid var(--ochre-dim);
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: all var(--timing) var(--ease);
+  z-index: 10;
+}
+
+#btn-new-messages:hover {
+  background: var(--ochre-dim);
+}
+
+/* --------------------------------------------------------------------------
+   Композер: поле ввода и управление
+   -------------------------------------------------------------------------- */
+
+#task-form {
+  flex-shrink: 0;
+  padding: var(--s4);
+  background: var(--surface-1);
+  border-top: 1px solid var(--line);
+}
+
+#workspace-error {
+  padding: var(--s3);
+  margin-bottom: var(--s3);
+  background: var(--clay);
+  color: var(--surface-0);
+  font-size: 12px;
+  border-radius: var(--r-sm);
+}
+
+#cmd-popup {
+  padding: var(--s3);
+  margin-bottom: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.composer-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+  flex-wrap: wrap;
+}
+
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.composer-chip:hover {
+  background: var(--surface-3);
+  border-color: var(--ochre);
+  color: var(--text-1);
+}
+
+.composer-chip svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.composer-chip input {
+  width: 120px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-1);
+}
+
+.composer-chip input::placeholder {
+  color: var(--text-3);
+}
+
+.plus-wrap {
+  position: relative;
+}
+
+#plus-menu,
+#mode-menu,
+#preset-menu,
+#export-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: var(--s2);
+  min-width: 280px;
+  padding: var(--s2);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+}
+
+.menu-group {
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.menu-group:last-child {
+  border-bottom: none;
+}
+
+.menu-title {
+  font-family: var(--font-caps);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: var(--s2) var(--s3);
+  margin-bottom: var(--s2);
+}
+
+.menu-group button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--timing) var(--ease);
+  color: var(--text-1);
+}
+
+.menu-group button:hover {
+  background: var(--surface-2);
+}
+
+.menu-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+#web-mode-segments {
+  display: flex;
+  gap: var(--s1);
+  padding: 0 var(--s3);
+  margin-bottom: var(--s2);
+}
+
+#web-mode-segments button {
+  flex: 1;
+  padding: var(--s2);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  transition: all var(--timing) var(--ease);
+}
+
+#web-mode-segments button:hover {
+  background: var(--surface-3);
+}
+
+#web-mode-segments button.active {
+  background: var(--ochre);
+  color: var(--surface-0);
+  border-color: var(--ochre);
+}
+
+#deep-state {
+  margin-left: auto;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+#plus-skills {
+  padding: 0 var(--s3);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+#attach-list {
+  margin-bottom: var(--s3);
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+#task-form.composer {
+  display: block;
+  width: 100%;
+  padding: var(--s4);
+  background: var(--surface-1);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+}
+
+#task-form.composer > .composer-input-row {
+  display: flex;
+}
+
+.composer-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  transition: border-color var(--timing) var(--ease);
+}
+
+#task-form > .composer-header {
+  max-width: 780px;
+  margin: 0 auto var(--s3);
+}
+
+#task-form > #attach-list,
+#task-form > .composer,
+#task-form > .composer-input-row {
+  max-width: 780px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+#task-form > .composer-footer {
+  max-width: 780px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.composer:focus-within {
+  border-color: var(--ochre);
+}
+
+#task-input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 200px;
+  padding: var(--s3);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-1);
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+}
+
+#task-input::placeholder {
+  color: var(--text-3);
+}
+
+#submit-btn,
+#stop-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ochre);
+  color: var(--surface-0);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--timing) var(--ease);
+  font-size: 16px;
+}
+
+#submit-btn:hover,
+#stop-btn:hover {
+  background: var(--ochre-dim);
+  transform: scale(1.05);
+}
+
+#submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#submit-btn.is-stop {
+  background: var(--clay);
+}
+
+#stop-btn {
+  background: var(--clay);
+}
+
+.btn-run__label {
+  display: none;
+}
+
+#submit-btn::before {
+  content: "";
+  width: 0;
+  height: 0;
+  margin-left: 3px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 9px solid currentColor;
+}
+
+#submit-btn.is-stop::before {
+  width: 12px;
+  height: 12px;
+  margin-left: 0;
+  border: 0;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--s2);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+#composer-flags {
+  font-family: var(--font-mono);
+}
+
+/* --------------------------------------------------------------------------
+   Панель работы (внутренние элементы; позиционирование самой панели — выше,
+   #work-drawer как правый оверлей рядом с #app-layout)
+   -------------------------------------------------------------------------- */
+
+/* Внутренняя раскладка drawer задаётся здесь, а позиция/показ — в блоке выше. */
+#work-drawer {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body.is-resizing-work-panel,
+body.is-resizing-work-panel * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
+#work-resize-handle {
+  position: absolute;
+  left: -5px;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  background: transparent;
+  touch-action: none;
+  z-index: 20;
+  transition: background var(--timing) var(--ease);
+}
+
+#work-resize-handle:hover {
+  background: var(--ochre);
+}
+
+/* Внутренний ряд вкладок скрыт: переключение теперь идёт кнопками в шапке
+   «Артефакты/Превью/Изменения/Терминал». Оставляем в DOM ради #artifact-count. */
+.work-tabs {
+  display: none;
+}
+
+.tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--s3);
+  font-family: var(--font-caps);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.tab-btn:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+
+.tab-btn.active {
+  color: var(--ochre);
+  border-bottom-color: var(--ochre);
+}
+
+#artifact-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  margin-left: var(--s1);
+}
+
+.work-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tab-content {
+  display: none;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.tab-content.active {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+#artifacts-list {
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.artifact-card {
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.artifact-info {
+  display: flex;
+  gap: var(--s3);
+}
+
+.artifact-icon-wrap {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-3);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.artifact-details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.artifact-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artifact-meta {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artifact-actions {
+  display: flex;
+  gap: var(--s2);
+}
+
+.btn-artifact-view,
+.btn-artifact-undo {
+  padding: var(--s2) var(--s3);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--surface-3);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.btn-artifact-view:hover,
+.btn-artifact-undo:hover {
+  background: var(--surface-1);
+  border-color: var(--ochre);
+  color: var(--ochre);
+}
+
+/* --------------------------------------------------------------------------
+   Превью файлов
+   -------------------------------------------------------------------------- */
+
+#preview-filename {
+  padding: var(--s3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+#preview-actions {
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+#preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--s3);
+}
+
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white;
+}
+
+.preview-image {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: var(--r-md);
+}
+
+.preview-markdown {
+  padding: var(--s3);
+  line-height: 1.7;
+}
+
+/* --------------------------------------------------------------------------
+   Изменения (git diff)
+   -------------------------------------------------------------------------- */
+
+#tab-changes {
+  position: relative;
+}
+
+#changes-branch {
+  padding: var(--s3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+#btn-changes-refresh {
+  position: absolute;
+  top: var(--s3);
+  right: var(--s3);
+  padding: var(--s2) var(--s3);
+  font-size: 11px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+#btn-changes-refresh:hover {
+  border-color: var(--ochre);
+  color: var(--ochre);
+}
+
+#changes-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s3);
+}
+
+.diff-file {
+  margin-bottom: var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.diff-file__head {
+  padding: var(--s2) var(--s3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-1);
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.diff-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 2px var(--s3);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.diff-ctx {
+  color: var(--text-2);
+}
+
+.diff-hunk {
+  color: var(--text-3);
+  background: var(--surface-3);
+}
+
+.diff-added {
+  color: var(--sage);
+  background: rgba(127, 168, 139, 0.1);
+}
+
+.diff-removed {
+  color: var(--clay);
+  background: rgba(196, 84, 58, 0.1);
+}
+
+/* --------------------------------------------------------------------------
+   Терминал
+   -------------------------------------------------------------------------- */
+
+#tab-terminal {
+  position: relative;
+}
+
+#terminal-status {
+  padding: var(--s3);
+  font-size: 12px;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+#btn-terminal-restart {
+  position: absolute;
+  top: var(--s3);
+  right: var(--s3);
+  padding: var(--s2) var(--s3);
+  font-size: 11px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+#terminal-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  background: #000;
+}
+
+/* --------------------------------------------------------------------------
+   Модальные окна
+   -------------------------------------------------------------------------- */
+
+#settings-modal,
+#memory-modal,
+#commands-modal,
+#secrets-modal,
+#folder-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 560px;
+  max-height: 80vh;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.modal-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 24px;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: all var(--timing) var(--ease);
+}
+
+.modal-close:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s4);
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+#memory-list,
+#commands-list,
+#secrets-list {
+  margin: var(--s4) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+#memory-count,
+#commands-count,
+#secrets-count {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  margin-right: auto;
+}
+
+#fm-list,
+#fm-quick {
+  margin: var(--s3) 0;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+#fm-status,
+#fm-selected {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+#settings-note {
+  padding: var(--s3);
+  margin-top: var(--s3);
+  background: var(--amber);
+  color: var(--surface-0);
+  font-size: 12px;
+  border-radius: var(--r-sm);
+}
+
+#settings-path {
+  margin-top: var(--s3);
+  font-family: var(--font-mono);
+}
+
+/* --------------------------------------------------------------------------
+   Формы
+   -------------------------------------------------------------------------- */
+
+.form-group {
+  margin-bottom: var(--s4);
+}
+
+.form-label {
+  display: block;
+  margin-bottom: var(--s2);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 13px;
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.form-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ochre);
+  cursor: pointer;
+}
+
+.form-input {
+  width: 100%;
+  padding: var(--s3);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-1);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+  transition: border-color var(--timing) var(--ease);
+}
+
+.form-input:focus {
+  border-color: var(--ochre);
+}
+
+.form-input::placeholder {
+  color: var(--text-3);
+}
+
+textarea.form-input {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-hint {
+  display: block;
+  margin-top: var(--s2);
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.form-hint code {
+  font-family: var(--font-mono);
+  background: var(--surface-3);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   Кнопки
+   -------------------------------------------------------------------------- */
+
+.btn {
+  padding: var(--s2) var(--s4);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--timing) var(--ease);
+}
+
+.btn-primary {
+  background: var(--ochre);
+  color: var(--surface-0);
+  border-color: var(--ochre);
+}
+
+.btn-primary:hover {
+  background: var(--ochre-dim);
+  border-color: var(--ochre-dim);
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border-color: var(--line);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-3);
+  border-color: var(--ochre);
+  color: var(--text-1);
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: all var(--timing) var(--ease);
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* --------------------------------------------------------------------------
+   Пустые состояния
+   -------------------------------------------------------------------------- */
+
+.empty-state {
+  padding: var(--s5);
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* --------------------------------------------------------------------------
+   Drag & Drop overlay
+   -------------------------------------------------------------------------- */
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(200, 135, 63, 0.9);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.drop-overlay p {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--surface-0);
+}
+
+/* --------------------------------------------------------------------------
+   Скроллбары
+   -------------------------------------------------------------------------- */
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border: 2px solid var(--surface-1);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line);
+}
+
+/* --------------------------------------------------------------------------
+   Адаптивность
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  #feed-items::before {
+    display: none;
+  }
+  
+  #feed-items > *::before {
+    display: none;
+  }
+  
+  #task-form {
+    padding: var(--s3);
+  }
+  
+  .composer-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Анимации: учитываем prefers-reduced-motion
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Утилиты
+   -------------------------------------------------------------------------- */
+
+[hidden] {
+  display: none !important;
+}
+
+.is-open .step-body,
+.is-open .thinking-body {
+  display: block;
+}
+
+.is-collapsed .group-items {
+  display: none;
+}
+
+/* ============================================================== Кнопки панели работы в шапке */
+.work-toggles {
+  display: flex;
+  gap: 4px;
+  margin-right: 4px;
+}
+.work-toggle-btn {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-2, #9a948a);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm, 6px);
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background var(--timing) var(--ease), color var(--timing) var(--ease);
+}
+.work-toggle-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.work-toggle-btn.active {
+  background: var(--surface-2);
+  color: var(--text-1);
+  border-color: var(--line);
+}
+.wt-badge {
+  font-size: 10px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent, #cd7638);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wt-badge:empty, .wt-badge[data-zero="1"] { display: none; }
+
+@media (max-width: 1100px) {
+  /* На узких экранах прячем подписи, оставляем компактно */
+  .work-toggle-btn { padding: 5px 8px; font-size: 12px; }
+}

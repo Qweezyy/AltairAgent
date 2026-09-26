@@ -1,0 +1,325 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Базовая локаль — английская (для международной опенсорс-аудитории).
+     Русская — в values-ru/strings.xml. Устройство выбирает по своей локали. -->
+<resources>
+    <!-- Общие действия -->
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_back">Back</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_add">Add</string>
+    <string name="action_refresh">Refresh</string>
+
+    <!-- Разделы (боковое меню) -->
+    <string name="nav_library">Library</string>
+    <string name="nav_board">Chat board</string>
+    <string name="nav_secrets">Secrets vault</string>
+    <string name="nav_plugins">Plugins</string>
+    <string name="nav_recent">Recent</string>
+    <string name="nav_new_chat">New chat</string>
+    <string name="nav_search">Search</string>
+
+    <!-- Настройки -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_sub">Theme · %1$s</string>
+    <string name="settings_models">Models</string>
+    <string name="settings_bridge">PC bridge</string>
+    <string name="settings_account">Account</string>
+
+    <!-- Внешний вид / тема -->
+    <string name="theme_group">Theme</string>
+    <string name="theme_accent">Accent</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_black">Black</string>
+
+    <!-- Плагины (MCP) и навыки -->
+    <string name="plugins_title">Plugins</string>
+    <string name="plugins_mcp_hint">MCP servers are external tool sets. The phone connects to them directly over the network.</string>
+    <string name="plugins_no_servers">No servers yet. Add one (+) or sync with your PC.</string>
+    <string name="plugins_add_server">Add server</string>
+    <string name="plugins_skills_header">Skills (%1$d)</string>
+    <string name="plugins_no_skills">No skills yet.</string>
+    <string name="plugins_no_skills_pc">No skills yet. Sync with your PC.</string>
+    <string name="plugins_sync_pc">Sync with PC</string>
+    <string name="mcp_from_pc">from PC</string>
+    <string name="mcp_new_server">New MCP server</string>
+    <string name="mcp_field_name">Name</string>
+    <string name="mcp_field_url">URL (https://…)</string>
+    <string name="mcp_field_token">Token (Bearer, optional)</string>
+    <string name="mcp_test_connection">Test connection</string>
+
+    <!-- Language -->
+    <string name="lang_group">Language</string>
+    <string name="lang_system">System</string>
+    <string name="lang_en">English</string>
+    <string name="lang_ru">Русский</string>
+
+    <!-- App icon -->
+    <string name="icon_group">App icon</string>
+    <string name="icon_change_hint">The home-screen icon changes when you minimize the app.</string>
+    <string name="icon_deep">Deep</string>
+    <string name="icon_blue">Blue</string>
+    <string name="icon_aurora">Aurora</string>
+    <string name="icon_violet">Violet</string>
+    <string name="icon_ember">Ember</string>
+    <string name="icon_minimal">Minimal</string>
+    <string name="icon_milky">Milky</string>
+    <string name="icon_rose">Rose</string>
+
+    <!-- Welcome -->
+    <string name="welcome_title">How can I help?</string>
+    <string name="welcome_subtitle_bridge">Ask anything — web search, exact math, reading links, images and delegating to your PC.</string>
+    <string name="welcome_subtitle">Ask anything — web search, exact math, reading links, images and generation.</string>
+
+    <!-- PC bridge -->
+    <string name="bridge_intro">Link your phone with the PC agent to delegate development tasks.</string>
+    <string name="bridge_quick">Quick</string>
+    <string name="bridge_quick_hint">On the PC open “Link phone” — a QR and a link appear. Scan the QR with any camera (Altair opens and sets itself up) or paste the link here.</string>
+    <string name="bridge_link_label">Pairing link (altair://pair…)</string>
+    <string name="bridge_from_clipboard">Paste</string>
+    <string name="bridge_connect">Connect</string>
+    <string name="bridge_or_manual">…or manually</string>
+    <string name="bridge_pc_address">PC address (e.g. 100.102.19.29:8000)</string>
+    <string name="bridge_token">Bridge token (blank — keep current)</string>
+    <string name="bridge_workspace">Folder/project on PC</string>
+    <string name="bridge_test">Test connection</string>
+    <string name="bridge_not_set">not set</string>
+
+    <!-- Account -->
+    <string name="account_title">Account</string>
+    <string name="account_name_label">How should we address you</string>
+    <string name="account_name_hint">The name is only shown in the app and passed to the AI on this phone</string>
+    <string name="account_no_name">name not set</string>
+
+    <!-- Common -->
+    <string name="action_close">Close</string>
+
+    <!-- Message actions / remix -->
+    <string name="remix_table">Table</string>
+    <string name="remix_diagram">Diagram</string>
+    <string name="remix_list">List</string>
+    <string name="remix_simpler">Simpler</string>
+    <string name="remix_code">Code</string>
+    <string name="act_copy">Copy</string>
+    <string name="act_speak">Read aloud</string>
+    <string name="act_select_text">Select text…</string>
+    <string name="act_edit">Edit (answer will be redone)</string>
+    <string name="act_regenerate">Regenerate</string>
+    <string name="act_continue_new">Continue in a new chat</string>
+    <string name="act_revert_here">Revert here (erase the rest)</string>
+    <string name="edit_title">Edit message</string>
+    <string name="edit_redo">Redo answer</string>
+
+    <!-- Text selection actions -->
+    <string name="sel_hint">Select a fragment and choose an action</string>
+    <string name="sel_simpler">Simpler</string>
+    <string name="sel_more">More detail</string>
+    <string name="sel_translate">Translate</string>
+    <string name="sel_check">Check</string>
+    <string name="sel_reply">Reply</string>
+    <string name="sel_to_board">→ Board</string>
+    <string name="sel_to_chat_mem">→ Chat memory</string>
+    <string name="sel_to_global_mem">→ Shared memory</string>
+
+    <!-- Chat board -->
+    <string name="board_title">Chat board</string>
+    <string name="board_hint">Collect important fragments here: select text → “To board”.</string>
+    <string name="board_empty">Empty</string>
+    <string name="board_clear">Clear</string>
+    <string name="board_copy_all">Copy all</string>
+
+    <!-- Ask dialog -->
+    <string name="ask_title">Question from the assistant</string>
+    <string name="ask_done">Done</string>
+    <string name="ask_custom">Custom option</string>
+    <string name="ask_custom_hint">Your answer…</string>
+    <string name="ask_recommended">recommended</string>
+    <string name="ask_above">above</string>
+    <string name="ask_below">below</string>
+
+    <!-- Library -->
+    <string name="lib_title">Library</string>
+    <string name="lib_empty">Empty. Sent photos, videos, audio and files will appear here.</string>
+    <string name="lib_cant_show">Could not display the file as text.</string>
+    <string name="lib_loading">Loading…</string>
+
+    <!-- File request -->
+    <string name="req_file_needed">The assistant needs a file</string>
+    <string name="req_types">Types: %1$s\n</string>
+    <string name="req_multi">Several files allowed\n</string>
+    <string name="req_single">One file\n</string>
+    <string name="req_limit">Limit: %1$d MB</string>
+    <string name="req_required">\nRequired</string>
+    <string name="req_skip">Skip</string>
+    <string name="req_pick_file">Choose file</string>
+
+    <!-- Secret request / vault -->
+    <string name="sec_needed">The assistant needs a secret</string>
+    <string name="sec_name">Secret name</string>
+    <string name="sec_value_hidden">Value (hidden)</string>
+    <string name="sec_access">AI access:</string>
+    <string name="sec_always">Always</string>
+    <string name="sec_on_permission">With permission</string>
+    <string name="sec_state_always">always</string>
+    <string name="sec_state_ask">with permission</string>
+    <string name="sec_switch_ask">→ ask</string>
+    <string name="sec_switch_always">→ always</string>
+    <string name="secrets_title">Secrets vault</string>
+    <string name="secrets_empty">No secrets yet. The AI may ask you to enter one, or add them yourself (+).</string>
+    <string name="sec_new">New secret</string>
+    <string name="sec_value">Value</string>
+    <string name="sec_purpose">Purpose (optional)</string>
+
+    <!-- Memory prompt -->
+    <string name="mem_this_chat">to this chat\'s memory</string>
+    <string name="mem_global">to shared memory</string>
+    <string name="mem_remember_q">Remember this?</string>
+    <string name="mem_save_scope">Save %1$s?</string>
+    <string name="mem_remember">Remember</string>
+    <string name="mem_no">No need</string>
+
+    <!-- Approvals -->
+    <string name="approve_title">Allow the action?</string>
+    <string name="approve_body">The assistant wants to run “%1$s”.</string>
+    <string name="approve_once">Once</string>
+    <string name="approve_reject">Reject</string>
+    <string name="secreq_title">Allow access to the secret?</string>
+    <string name="secreq_body">The assistant wants to use the secret “%1$s”.</string>
+    <string name="allow">Allow</string>
+    <string name="deny">Deny</string>
+
+    <!-- Chat surface -->
+    <string name="chat_search_here">Search this chat…</string>
+    <string name="nothing_found">Nothing found</string>
+    <string name="menu">Menu</string>
+    <string name="search_in_chat">Search in chat</string>
+    <string name="chat_menu">Chat menu</string>
+    <string name="chat_summary">Chat summary</string>
+    <string name="chat_summary_sub">Decisions, facts, open questions — in one reply</string>
+    <string name="files_media">Files and media</string>
+    <string name="files_media_empty">Empty for now. Sent photos, videos and files will appear here.</string>
+    <string name="chat_memory">This chat\'s memory</string>
+    <string name="chat_memory_hint">You can edit and delete — clear the field to erase.</string>
+    <string name="chat_memory_ph">Notes/facts for this chat…</string>
+    <string name="search_all_chats">Search chats</string>
+    <string name="search_word_ph">Word or phrase…</string>
+    <string name="file_generic">file</string>
+    <string name="tool_label">Tool</string>
+    <string name="remix_shorter">Shorter</string>
+    <string name="remix_longer">Longer</string>
+    <string name="remix_formal">More formal</string>
+    <string name="version_prev">Previous version</string>
+    <string name="version_next">Next version</string>
+    <string name="pc_label">PC</string>
+    <string name="pc_busy">PC busy</string>
+    <string name="pc_offline">PC offline</string>
+
+    <!-- Composer / attachments -->
+    <string name="attach_enable_hint">Enable attachment types in “Settings → Models”.</string>
+    <string name="attach_camera">Camera</string>
+    <string name="attach_photo">Photo</string>
+    <string name="attach_draw">Drawing</string>
+    <string name="attach_video">Video</string>
+    <string name="attach_audio">Audio</string>
+    <string name="attach_files">Files</string>
+    <string name="attachment">Attachment</string>
+    <string name="remove">Remove</string>
+    <string name="steer_hint">I\'ll steer the answer on the fly</string>
+    <string name="attach">Attach</string>
+    <string name="ask_placeholder">Ask…</string>
+    <string name="steer_action">Steer on the fly</string>
+    <string name="stop">Stop</string>
+    <string name="send">Send</string>
+
+    <!-- Settings: reactions/haptics -->
+    <string name="reactions_title">AI reactions to my messages</string>
+    <string name="reactions_sub">The AI sometimes adds a light emoji reaction — just for liveliness</string>
+    <string name="haptics_title">Haptic feedback</string>
+    <string name="haptics_sub">Light vibration on events: thinking / needs you / done</string>
+
+    <!-- Settings: models -->
+    <string name="caps_text_only">text only</string>
+    <string name="add_model">Add model</string>
+    <string name="model_title">Name</string>
+    <string name="model_id">Model ID (e.g. 0x-alpha)</string>
+    <string name="api_key">API key</string>
+    <string name="model_accepts">Accepts as input:</string>
+    <string name="save_model">Save model</string>
+
+    <string name="copy_code">Copy code</string>
+    <string name="pair_ok">Bridge configured from link</string>
+    <string name="pair_fail">Pairing link not recognized</string>
+    <string name="notif_answer_ready">Answer ready</string>
+    <string name="notif_reminder">Reminder</string>
+    <string name="notif_agent_running">Agent is working…</string>
+
+    <!-- VM statuses -->
+    <string name="status_thinking">Thinking…</string>
+    <string name="status_processing">Processing: %1$s</string>
+    <string name="status_checking">Checking…</string>
+    <string name="status_no_key">⚠️ No API key set. Open settings and enter the model key.</string>
+    <string name="error_prefix">Error: %1$s</string>
+    <string name="status_reconnecting">Reconnecting %1$d/%2$d…</string>
+    <string name="status_tool">Tool: %1$s</string>
+    <string name="bridge_need_address">Enter the PC address</string>
+    <string name="bridge_ok">✓ Connected to PC</string>
+    <string name="mcp_need_url">Enter the server URL</string>
+    <string name="sync_pc">Syncing with PC…</string>
+    <string name="bridge_not_configured">PC bridge not configured</string>
+    <string name="sync_result">From PC: %1$d servers, %2$d skills</string>
+    <string name="sync_no_pc">No connection to PC (check the bridge)</string>
+    <string name="mem_shared_header"># Shared memory</string>
+    <string name="mem_chat_header"># Chat memory</string>
+    <string name="file_needed_short">File needed</string>
+    <string name="board_export_header"># Chat board</string>
+
+    <!-- Notification channels -->
+    <string name="channel_run_name">Agent running</string>
+    <string name="channel_run_desc">Shows that the agent is working on a task</string>
+    <string name="channel_done_desc">Notifies when the agent finishes while you are outside the app</string>
+    <string name="channel_remind_name">Reminders</string>
+    <string name="channel_remind_desc">Timers, events and conditional notifications from the agent</string>
+
+    <string name="pair_confirm_title">Link with this PC?</string>
+    <string name="pair_confirm_body">Connect the PC bridge to %1$s? Confirm only if you opened this link yourself from your own PC — otherwise your files and chats could end up on a stranger’s server.</string>
+    <string name="pair_confirm_ok">Link</string>
+    <string name="net_insecure">Refusing to send a key over unencrypted HTTP to a public address (%1$s). Use https:// or a local / Tailscale address.</string>
+    <string name="approve_uses_secrets">Will use your secrets: %1$s. Allow only if you trust where this command sends them.</string>
+    <string name="mcp_status_ok">✓ tools: %1$d</string>
+    <string name="mcp_status_failed">✗ %1$s</string>
+    <string name="mcp_bad_url">The URL must start with https:// (or http:// for a local address)</string>
+    <string name="mcp_bad_name">Name: latin letters, digits, dot, _ and -, up to 48 characters</string>
+    <string name="mcp_name_taken">A server named %1$s already exists</string>
+    <string name="mcp_saved">Saved: %1$s</string>
+    <string name="mcp_edit_server">Edit MCP server</string>
+    <string name="mcp_field_token_keep">New token (empty keeps the current one)</string>
+    <string name="mcp_headers">Headers: %1$s</string>
+    <string name="mcp_paste_json">Paste JSON</string>
+    <string name="mcp_manual">By hand</string>
+    <string name="mcp_paste_hint">Paste a config from Claude Desktop, Cursor or VS Code as is ({\"mcpServers\": …}). Remote servers (url) are added; local ones (command) run only on a PC.</string>
+    <string name="mcp_json_field">JSON config</string>
+    <string name="mcp_json_invalid">Not a valid config: %1$s</string>
+    <string name="mcp_import_added">Added: %1$s</string>
+    <string name="mcp_import_none">No servers the phone can connect to</string>
+    <string name="mcp_skip_local">%1$s: local (command) server — runs only on the PC</string>
+    <string name="mcp_skip_other">%1$s: skipped (%2$s)</string>
+    <string name="mcp_delete_title">Delete server %1$s?</string>
+    <string name="mcp_delete_pc_note">It came from the PC. Syncing will not bring it back.</string>
+    <string name="mcp_delete_body">Its tools will no longer be available to the agent.</string>
+    <string name="action_edit">Edit</string>
+    <string name="skill_import">Import skill</string>
+    <string name="skills_hint">Skills are tested recipes the agent finds on its own when a task fits. Import a SKILL.md or .zip, sync from the PC, or ask the agent to create one.</string>
+    <string name="skill_imported">Installed: %1$s</string>
+    <string name="skill_import_failed">Could not import: %1$s</string>
+    <string name="skill_replace_title">Replace skills?</string>
+    <string name="skill_replace_body">Already installed: %1$s. Replace with the new version?</string>
+    <string name="skill_replace_ok">Replace</string>
+    <string name="skill_delete_title">Delete skill %1$s?</string>
+    <string name="skill_delete_pc_note">It came from the PC. Syncing will not bring it back.</string>
+    <string name="skill_deleted">Deleted: %1$s</string>
+    <string name="skill_files">Files: %1$s</string>
+    <string name="sync_removed">" · removed: %1$d"</string>
+</resources>

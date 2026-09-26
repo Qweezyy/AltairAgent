@@ -1,0 +1,38 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The app UI only. Built-in browser tabs (webviews br-*) live in the same window but get NO permissions: the sites they show must not reach the app.",
+  "windows": [
+    "pane-*"
+  ],
+  "webviews": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
+    "core:window:allow-set-icon",
+    "core:window:allow-start-dragging",
+    "core:window:allow-create",
+    "core:webview:allow-create-webview-window",
+    "allow-set-app-icon",
+    "allow-browser-info",
+    "allow-browser-open",
+    "allow-browser-bounds",
+    "allow-browser-close",
+    "allow-browser-navigate",
+    "allow-browser-history",
+    "allow-browser-focus"
+  ]
+}
