@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from core.errors import PermissionDenied
+from core.errors import PathNotAllowed, PermissionDenied, ToolError
 from core.events import CheckpointCreated
 from core.i18n import tr
 from core.security.paths import resolve_path
@@ -72,9 +73,46 @@ def check_command(command: str) -> None:
             )
 
 
+def resolve_command_cwd(raw: str, ctx: ToolContext) -> tuple[Path, bool]:
+    """The folder a command runs in, and whether it lies outside the workspace sandbox.
+
+    File tools stay inside the sandbox, but commands may run anywhere the user wants to work
+    (another project, a system folder): that is what a terminal is for. The price is an
+    approval for every such command, and no rollback there — `outside` drives both.
+    """
+    try:
+        return resolve_path(raw, settings=ctx.settings, must_exist=True, must_be_dir=True), False
+    except PathNotAllowed:
+        text = (raw or ".").strip().strip('"').strip("'")
+        candidate = Path(text).expanduser()
+        if not candidate.is_absolute():
+            candidate = ctx.settings.workspace / candidate
+        try:
+            folder = candidate.resolve()
+        except OSError as exc:
+            raise ToolError(f"Bad folder '{raw}': {exc}") from exc
+        if not folder.is_dir():
+            raise ToolError(f"The folder '{folder}' does not exist.") from None
+        return folder, True
+
+
+def cwd_outside_workspace(raw: str, ctx: ToolContext) -> Path | None:
+    try:
+        folder, outside = resolve_command_cwd(raw, ctx)
+    except ToolError:
+        return None
+    return folder if outside else None
+
+
 class ExecuteCommandArgs(BaseModel):
     command: str = Field(description="A PowerShell (Windows) or sh (Linux/macOS) command")
-    cwd: str = Field(default=".", description="Working folder relative to the workspace")
+    cwd: str = Field(
+        default=".",
+        description=(
+            "Folder to run in: relative to the workspace, or an absolute path anywhere. Outside the "
+            "workspace the user approves every command and there is no rollback."
+        ),
+    )
     timeout: float | None = Field(default=None, description="Timeout in seconds (default from settings)")
 
 
@@ -91,15 +129,21 @@ class ExecuteCommandTool(Tool):
     timeout = None  # управляем таймаутом сами, внутри run()
 
     def approval_reason(self, args: ExecuteCommandArgs) -> str:  # type: ignore[override]
+        cwd = (args.cwd or ".").strip()
+        if cwd not in (".", "") and (Path(cwd).is_absolute() or ".." in cwd):
+            return tr("appr.shell_outside", cmd=args.command, cwd=cwd)
         return tr("appr.shell", cmd=args.command)
 
     def auto_verdict(self, args: ExecuteCommandArgs, ctx: ToolContext) -> str:  # type: ignore[override]
-        """В режиме «Авто» пропускаем только команды, которые ничего не меняют."""
+        """In "Auto" only commands that change nothing pass silently — and only inside the
+        workspace: outside it every command is the user's call."""
+        if cwd_outside_workspace(args.cwd, ctx) is not None:
+            return "ask"
         return "allow" if is_read_only_command(args.command) else "ask"
 
     async def run(self, args: ExecuteCommandArgs, ctx: ToolContext) -> ToolResult:
         check_command(args.command)
-        cwd = resolve_path(args.cwd, settings=ctx.settings, must_exist=True, must_be_dir=True)
+        cwd, outside = resolve_command_cwd(args.cwd, ctx)
         timeout = args.timeout or ctx.settings.shell_timeout
 
         from core.secrets_store import load_env
@@ -107,7 +151,8 @@ class ExecuteCommandTool(Tool):
         # Снимок «до» для отката: только у меняющих команд и если включены снимки.
         before_sha = None
         shadow = None
-        if ctx.checkpoints is not None and not is_read_only_command(args.command):
+        # Rollback snapshots cover the workspace only; outside it the user approved without one.
+        if ctx.checkpoints is not None and not outside and not is_read_only_command(args.command):
             shadow, before_sha = await _shadow_snapshot(ctx)
 
         result = await run_process(
@@ -122,6 +167,8 @@ class ExecuteCommandTool(Tool):
             await _register_command_checkpoints(ctx, shadow, before_sha)
 
         parts = [f"Код возврата: {result.returncode}"]
+        if outside:
+            parts.insert(0, f"(ran in {cwd}, outside the workspace — no rollback there)")
         if result.stdout.strip():
             parts.append(f"stdout:\n{result.stdout.strip()}")
         if result.stderr.strip():

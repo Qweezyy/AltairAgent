@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -22,9 +23,13 @@ from core.devserver import get_manager
 from core.devserver.manager import DevServerError
 from core.events import LogEvent
 from core.i18n import tr
-from core.security.paths import resolve_path
 from core.tools.base import Tool, ToolContext, ToolResult
-from core.tools.builtin.shell import check_command, is_read_only_command
+from core.tools.builtin.shell import (
+    check_command,
+    cwd_outside_workspace,
+    is_read_only_command,
+    resolve_command_cwd,
+)
 
 #: Максимум, сколько инструмент подождёт свежего вывода за один вызов.
 _MAX_WAIT = 20.0
@@ -44,7 +49,10 @@ def _auto_name() -> str:
 class RunBackgroundArgs(BaseModel):
     command: str = Field(description="Любая неинтерактивная команда: сборка, тесты, watcher и т.п.")
     name: str = Field(default="", description="Короткое имя для последующих обращений (пусто — назначу сам)")
-    cwd: str = Field(default=".", description="Рабочая папка относительно workspace")
+    cwd: str = Field(
+        default=".",
+        description="Folder to run in: relative to the workspace, or an absolute path (outside it needs approval)",
+    )
     wait_sec: float = Field(default=1.0, description="Сколько секунд подождать первого вывода (0–20)")
 
 
@@ -62,15 +70,21 @@ class RunBackgroundTool(Tool):
     timeout = None
 
     def approval_reason(self, args: RunBackgroundArgs) -> str:  # type: ignore[override]
-        return tr("appr.bg_run", name=args.name or tr("appr.auto"), cmd=args.command)
+        text = tr("appr.bg_run", name=args.name or tr("appr.auto"), cmd=args.command)
+        cwd = (args.cwd or ".").strip()
+        if cwd not in (".", "") and (Path(cwd).is_absolute() or ".." in cwd):
+            text += tr("appr.in_folder", cwd=cwd)
+        return text
 
     def auto_verdict(self, args: RunBackgroundArgs, ctx: ToolContext) -> str:  # type: ignore[override]
-        # Та же логика, что у execute_command: читающее — молча, меняющее — спросить.
+        # Same rule as execute_command: read-only runs silently, but never outside the workspace.
+        if cwd_outside_workspace(args.cwd, ctx) is not None:
+            return "ask"
         return "allow" if is_read_only_command(args.command) else "ask"
 
     async def run(self, args: RunBackgroundArgs, ctx: ToolContext) -> ToolResult:
         check_command(args.command)
-        cwd = resolve_path(args.cwd, settings=ctx.settings, must_exist=True, must_be_dir=True)
+        cwd, _ = resolve_command_cwd(args.cwd, ctx)
         name = args.name.strip() or _auto_name()
 
         from core.secrets_store import load_env
