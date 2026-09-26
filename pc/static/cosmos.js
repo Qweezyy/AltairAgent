@@ -12,7 +12,7 @@
    на скрытой вкладке, статичный кадр при prefers-reduced-motion). Следит за размером
    контейнера (ResizeObserver) — фон растягивается на всю область при скрытии рельса.
 
-   API: window.Cosmos.mount(container) / unmount()
+   API: window.Cosmos.mount(container) / unmount() / leave(done) — fade out after the first message
         .setStyle(name)        — выбрать стиль (сам поймёт, тёмный он или светлый)
         .applyTheme(isDark)    — переключить фон под тему (вызывается из applyTheme UI)
         .darkStyle()/.lightStyle() — текущие сохранённые предпочтения. */
@@ -123,7 +123,29 @@
     this.last = performance.now(); this.loop();
   };
 
+  // After the first message the sky does not cut to the plain background: it fades out while
+  // drifting slightly forward, as if flying past the stars (same timing as the Android app).
+  // Keeps animating while it fades; `done` runs once the canvas is gone.
+  Cosmos.prototype.leave = function (done) {
+    var c = this.canvas, self = this;
+    if (!c) { if (done) done(); return; }
+    var calm = reduced();
+    var ms = calm ? 350 : 1600;
+    c.style.transformOrigin = "50% 40%";
+    c.style.transition = "opacity " + ms + "ms cubic-bezier(.4,0,.2,1), transform " + ms + "ms cubic-bezier(.4,0,.2,1)";
+    void c.offsetWidth;  // commit the start state so the transition actually runs
+    c.style.opacity = "0";
+    if (!calm) c.style.transform = "scale(1.12)";
+    clearTimeout(this._leaveTimer);
+    this._leaveTimer = setTimeout(function () {
+      self._leaveTimer = 0;
+      if (self.canvas === c) self.unmount();
+      if (done) done();
+    }, ms + 60);
+  };
+
   Cosmos.prototype.unmount = function () {
+    if (this._leaveTimer) { clearTimeout(this._leaveTimer); this._leaveTimer = 0; }
     if (this.raf) cancelAnimationFrame(this.raf), this.raf = 0;
     window.removeEventListener("resize", this._onResize);
     document.removeEventListener("visibilitychange", this._onVis);

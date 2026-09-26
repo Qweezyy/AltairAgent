@@ -60,7 +60,15 @@ const send = (o) => { if (state.ws?.readyState === 1) state.ws.send(JSON.stringi
 
 // ------------------------------------------------------------------ feed helpers
 const append = (n) => { els.feedInner.appendChild(n); bumpStatus(); scrollFeed(); return n; };
-const clearWelcome = () => { $(".welcome", els.feedInner)?.remove(); window.Cosmos?.unmount(); els.app?.classList.remove("welcome-active"); };
+const clearWelcome = () => {
+  $(".welcome", els.feedInner)?.remove();
+  if (!els.app?.classList.contains("welcome-active")) { window.Cosmos?.unmount(); return; }
+  // The first message: the sky fades to the plain background instead of vanishing; meanwhile
+  // the header and feed stay see-through (.welcome-leaving) so the fade is visible.
+  els.app.classList.remove("welcome-active");
+  els.app.classList.add("welcome-leaving");
+  window.Cosmos ? window.Cosmos.leave(() => els.app.classList.remove("welcome-leaving")) : els.app.classList.remove("welcome-leaving");
+};
 function scrollFeed(force = false) {
   if (!force && !state.stickToBottom) { els.jump.hidden = false; return; }
   els.feed.scrollTop = els.feed.scrollHeight; els.jump.hidden = true;
@@ -833,6 +841,7 @@ function showWelcome() {
   $$(".starter", els.feedInner).forEach((b) => b.addEventListener("click", () => { els.input.value = b.dataset.text; autoGrow(); els.input.focus(); updateSendBtn(); }));
   // Живой космический фон на всё рабочее полотно — только на приветствии (до первого
   // сообщения). Стиль выбирается в «Настройки → Внешний вид» и следует за темой.
+  els.app?.classList.remove("welcome-leaving");
   els.app?.classList.add("welcome-active");
   window.Cosmos?.mount(els.work || els.chatCol);
   updateWorkspaceLock();   // на приветствии чат ещё не начат — папку можно выбрать

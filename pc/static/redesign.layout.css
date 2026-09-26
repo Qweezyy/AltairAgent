@@ -1131,11 +1131,16 @@ body.solo .pane { flex: 1 1 100%; }
    лента/композер поднимаются над холстом. */
 .work { position: relative; }
 .cosmos-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; display: block; }
-.app.welcome-active .topbar { background: transparent; position: relative; z-index: 1; }
-.app.welcome-active .work-body { position: relative; z-index: 1; }
+.app.welcome-active .topbar,
+.app.welcome-leaving .topbar { background: transparent; position: relative; z-index: 1; }
+.app.welcome-active .work-body,
+.app.welcome-leaving .work-body { position: relative; z-index: 1; }
 .app.welcome-active .feed,
 .app.welcome-active .feed-inner,
-.app.welcome-active .composer-wrap { background: transparent; }
+.app.welcome-active .composer-wrap,
+.app.welcome-leaving .feed,
+.app.welcome-leaving .feed-inner,
+.app.welcome-leaving .composer-wrap { background: transparent; }
 /* На тёмном космосе шапка светлеет для читаемости; на светлом небе — наоборот тёмная. */
 .app.welcome-active .topbar .chat-title { color: var(--text-1); }
 .app.welcome-active .ws-tag { background: color-mix(in srgb, var(--surface-2) 60%, transparent); backdrop-filter: blur(6px); }
