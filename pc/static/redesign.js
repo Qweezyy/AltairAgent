@@ -2063,12 +2063,20 @@ function renderSettingsSection(sec, main, s) {
   } else if (sec === "mcp") {
     window.ExtensionsSettings.renderMcp(main);
   } else if (sec === "browser") {
-    main.innerHTML = `<div class="settings-section"><h2>${esc(T("brw.title"))}</h2>
+    const netMode = s.browser_network || "auto";
+    const netBlock = `<div class="settings-section" style="margin-bottom:22px"><h2>${esc(T("brw.netTitle"))}</h2>
+      <p class="sr-desc" style="margin-bottom:12px">${esc(T("brw.netDesc"))}</p>
+      <div class="theme-seg" id="net-seg">${["auto", "direct", "vpn"].map((m) => `<button data-net="${m}" class="${netMode === m ? "on" : ""}">${esc(T("brw.net." + m))}</button>`).join("")}</div></div>`;
+    main.innerHTML = netBlock + `<div class="settings-section"><h2>${esc(T("brw.title"))}</h2>
       <p class="sr-desc" style="margin-bottom:16px">${esc(T("brw.desc"))}</p>
       <div class="form-row"><label class="form-label">${esc(T("brw.profile"))}</label><select class="field" id="ff-profile"><option value="">${esc(T("brw.loading"))}</option></select></div>
       <div class="row" style="gap:8px;margin:8px 0"><button class="btn btn-outline" id="ff-load">${esc(T("brw.showSites"))}</button><span class="grow"></span><button class="btn btn-primary" id="ff-import" disabled>${esc(T("brw.importSel"))}</button></div>
       <div id="ff-domains" class="ff-domains dim">${esc(T("brw.pickHint"))}</div>
     </div>`;
+    $$("#net-seg button", main).forEach((b) => b.addEventListener("click", () => {
+      $$("#net-seg button", main).forEach((x) => x.classList.toggle("on", x === b));
+      save({ browser_network: b.dataset.net });
+    }));
     const sel = $("#ff-profile", main), box = $("#ff-domains", main), importBtn = $("#ff-import", main);
     (async () => {
       try {

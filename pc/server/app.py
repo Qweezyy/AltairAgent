@@ -134,6 +134,15 @@ async def lifespan(app: FastAPI):
 
     reminder_task = asyncio.create_task(reminder_scheduler(app), name="reminder-scheduler")
 
+    # The built-in browser's network: direct or through the VPN, per site.
+    from core.browser_net import start_proxy, stop_proxy
+    from core.browser_session import browser_dir as _browser_dir
+
+    try:
+        await start_proxy(_browser_dir() / "network.json", settings.browser_network)
+    except OSError as exc:
+        logger.warning("browser network proxy did not start: %s", exc)
+
     # The phone bridge's network entrance (listeners on the LAN / Tailscale addresses).
     app.state.lan = LanBridge(app)
     if settings.bridge_lan:
@@ -146,6 +155,7 @@ async def lifespan(app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await reminder_task
         await app.state.lan.close()
+        await stop_proxy()
         await mcp.stop()
         await close_http_client()
         # Chromium живёт между запросами; без явного закрытия процесс останется
@@ -725,6 +735,12 @@ def create_app() -> FastAPI:
         app.state.settings = settings
         if "bridge_lan" in payload:
             await app.state.lan.apply(settings.bridge_lan)
+        if "browser_network" in payload:
+            from core.browser_net import MODES, get_proxy
+
+            net = get_proxy()
+            if net is not None and settings.browser_network in MODES:
+                net.default_mode = settings.browser_network
         return {
             "ok": True,
             "warnings": warnings,
@@ -747,6 +763,38 @@ def create_app() -> FastAPI:
         info = await asyncio.to_thread(pair_info, workspace, None, port, app.state.lan.listening())
         app.state.settings = _gs()  # мог появиться новый bridge_token
         return {"ok": True, **info}
+
+    @app.get("/api/browser/net")
+    async def browser_net_status(host: str = "") -> dict:
+        """How the built-in browser reaches sites (direct / through the VPN) and per-site rules."""
+        from core.browser_net import get_proxy
+
+        net = get_proxy()
+        if net is None:
+            return {"ok": False, "error": "the browser network proxy is not running"}
+        data = net.status()
+        if host:
+            mode, source = net.mode_for(host)
+            rule, site = net.rules.rule_for(host)
+            data["host"] = {"host": host, "mode": mode, "source": source, "rule": rule or "auto", "site": site,
+                            "last": net.recent.get(net.rules.normalize(host), {})}
+        return {"ok": True, **data}
+
+    @app.post("/api/browser/net")
+    async def browser_net_set(request: Request, payload: dict) -> dict:
+        """Set a site's route: {host, mode: auto|direct|vpn}."""
+        _local_only(request)
+        from core.browser_net import get_proxy
+
+        net = get_proxy()
+        if net is None:
+            return {"ok": False, "error": "the browser network proxy is not running"}
+        try:
+            site = await asyncio.to_thread(net.rules.set, str(payload.get("host") or ""), str(payload.get("mode") or ""))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        net.forget(site)
+        return {"ok": True, "site": site, "mode": payload.get("mode")}
 
     @app.get("/api/pair/firewall")
     async def pair_firewall() -> dict:

@@ -4,7 +4,7 @@ Catalog of every built-in tool the PC agent exposes to the model. Generated from
 the code (`core/tools/builtin/*`), not from memory. Keep it in sync — see the
 update rule at the bottom.
 
-- **Total: 116 tools** · last updated: 2026-09-23
+- **Total: 117 tools** · last updated: 2026-09-27
 - **Category** — how approval is gated: `read` (auto), `edit` / `execute` /
   `network` (may ask in manual mode). `⚠` marks a tool flagged `dangerous`
   (state-changing, asks by default).
@@ -48,7 +48,7 @@ update rule at the bottom.
 
 | Tool | Cat | Description | Source |
 |------|-----|-------------|--------|
-| `execute_command` | execute ⚠ | Run a non-interactive shell command; returns exit code, stdout, stderr. | shell |
+| `execute_command` | execute ⚠ | Run a non-interactive shell command; returns exit code, stdout, stderr. `cwd` may be any folder: outside the workspace every command asks the user and has no rollback. | shell |
 | `run_python` | execute ⚠ | Run Python in a separate process; no state kept between calls. | python_exec |
 | `run_background` | execute ⚠ | Start a command in the background and return immediately (builds, watchers). | background_tools |
 | `read_background` | read | New output since last read + status of a background command. | background_tools |
@@ -128,6 +128,7 @@ workspace (for testing the sites/apps the agent builds); links out of it are ref
 | `browser_tabs` | network | Tabs and history: list (marks the agent's vs the user's tabs) / new / select / close (own tabs freely, the user's ask) / back / forward / reload. | browser_tools |
 | `browser_handoff` | read | Hand control to the user (captcha, 2FA, sign-in); waits for "Done". | browser_tools |
 | `browser_downloads` | read | Downloads land in quarantine and are checked (Defender, disguised executables, risky types); list / move to Downloads or the workspace (approval; risky files always ask) / delete. | browser_tools |
+| `browser_network` | edit | Which network the built-in browser uses while a VPN is on: status, or route a site `auto` (direct first, VPN if blocked) / `direct` (bypass the VPN) / `vpn`. | browser_tools |
 
 ## Data & databases
 

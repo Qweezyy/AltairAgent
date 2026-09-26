@@ -1191,3 +1191,9 @@ body.solo .pane { flex: 1 1 100%; }
 .mcp-tools { margin-top: 4px; font-size: var(--fs-xs); color: var(--text-3); }
 .mcp-tools summary { cursor: pointer; }
 .mcp-tools .mono { margin-top: 4px; overflow-wrap: anywhere; }
+
+/* Browser network chip: this site direct or through the VPN */
+.br-net { flex: none; height: 24px; padding: 0 8px; border-radius: var(--r-full); border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.br-net:hover { border-color: var(--accent); color: var(--text-1); }
+.br-net[data-mode="direct"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.br-net[data-mode="vpn"] { color: #6aa8ff; border-color: color-mix(in srgb, #6aa8ff 45%, var(--border)); }

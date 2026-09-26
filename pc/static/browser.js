@@ -134,7 +134,43 @@
     return B.embedded ? B.tabs.map((t) => ({ id: t.id, title: t.title || (t.url === "about:blank" ? T("br.newTab") : t.url), active: t.id === B.active, loading: t.loading }))
       : B.fallbackTabs.filter((t) => !t.popup).map((t) => ({ id: t.id, title: t.title || t.url, active: t.active }));
   }
+  // --- network: this site direct or through the VPN (core/browser_net.py) ---------------
+  const NET_NEXT = { auto: "direct", direct: "vpn", vpn: "auto" };
+  function currentHost() {
+    const url = B.embedded ? (cur() && cur().url) : B.fallbackUrl;
+    try { const h = new URL(url).hostname; return /^(localhost|127\.|\[::1\])/.test(h) ? "" : h; } catch { return ""; }
+  }
+  async function netRefresh(force) {
+    const btn = $("#br-net"); if (!btn) return;
+    const host = currentHost();
+    if (!force && host === B.netHost && Date.now() - (B.netAt || 0) < 4000) return;
+    B.netHost = host; B.netAt = Date.now();
+    if (!host) { btn.hidden = true; return; }
+    let d; try { d = await (await fetch(`/api/browser/net?host=${encodeURIComponent(host)}`)).json(); } catch { return; }
+    if (!d.ok || !d.network || !d.network.vpn) { btn.hidden = true; return; }  // no VPN: nothing to choose
+    const h = d.host || {};
+    B.netRule = h.rule || "auto"; B.netSite = h.site || host;
+    const last = h.last && h.last.route ? T(h.last.route === "vpn" ? "brnet.nowVpn" : h.last.route === "direct" ? "brnet.nowDirect" : "brnet.nowFailed") : "";
+    btn.hidden = false;
+    btn.dataset.mode = B.netRule;
+    btn.textContent = T("brnet." + B.netRule);
+    btn.dataset.tip = T("brnet.tip", { host, now: last || T("brnet.nowUnknown") });
+  }
+  async function netCycle() {
+    const host = currentHost(); if (!host) return;
+    const mode = NET_NEXT[B.netRule || "auto"];
+    const site = B.netRule && B.netRule !== "auto" && B.netSite ? B.netSite : host;
+    try {
+      const r = await (await fetch("/api/browser/net", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ host: site, mode }) })).json();
+      if (!r.ok) { toast(r.error || T("t.error"), "error"); return; }
+      toast(T("brnet.set." + mode, { site: r.site }));
+      history("reload");
+      setTimeout(() => netRefresh(true), 1500);
+    } catch { toast(T("t.error"), "error"); }
+  }
+
   function render() {
+    netRefresh(false);
     const strip = $("#br-tabs"); if (!strip) return;
     strip.hidden = false;
     strip.innerHTML = tabList().map((t) => `<div class="browser-tab${t.active ? " active" : ""}${t.loading ? " loading" : ""}" data-id="${esc(t.id)}" title="${esc(t.title)}"><span class="browser-tab-title">${esc(t.title)}</span><button class="browser-tab-x" data-close="${esc(t.id)}" aria-label="${esc(T("br.closeTab"))}">${iconSvg("x", "icon icon-sm")}</button></div>`).join("")
@@ -250,6 +286,7 @@
     if (m.error) { if (!B.streaming && !B.embedded) viewEl().innerHTML = `<div class="browser-empty dim">${esc(m.error)}</div>`; else if (m.error) console.warn("browser:", m.error); return; }
     if (B.embedded) return;
     B.fallbackTabs = m.tabs || [];
+    if (m.url) B.fallbackUrl = m.url;
     if (m.url && m.url !== "about:blank" && !B.typing) urlEl().value = m.url;
     render();
   }
@@ -311,6 +348,7 @@
     $("#br-reload")?.addEventListener("click", () => history("reload"));
     $("#br-ext")?.addEventListener("click", () => { const u = normalizeTarget(url.value); if (u) window.open(u, "_blank"); });
     $("#br-dl")?.addEventListener("click", () => { B.shelf = !B.shelf; renderShelf(); });
+    $("#br-net")?.addEventListener("click", netCycle);
     $("#br-dl-shelf")?.addEventListener("click", (e) => { const b = e.target.closest("[data-dl]"); const item = e.target.closest(".dl-item"); if (b && item) downloadAction(item.dataset.id, b.dataset.dl); });
     $("#br-tabs")?.addEventListener("click", (e) => {
       const x = e.target.closest("[data-close]"); if (x) { e.stopPropagation(); tabAction("close", x.dataset.close); return; }

@@ -42,6 +42,7 @@ from core.tools.builtin.browser_tools import (
     BrowserHandoffTool,
     BrowserHoverTool,
     BrowserNavigateTool,
+    BrowserNetworkTool,
     BrowserPressTool,
     BrowserReadTool,
     BrowserScreenshotTool,
@@ -230,6 +231,7 @@ def builtin_tools() -> list[Tool]:
         BrowserUploadTool(),
         BrowserWaitTool(),
         BrowserDownloadsTool(),
+        BrowserNetworkTool(),
         # глубокое исследование
         BrowsePageTool(),
         ReadDocumentTool(),

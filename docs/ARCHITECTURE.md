@@ -273,6 +273,12 @@ automatically. `file://` is allowed only inside the workspace sandbox (the agent
 it builds), and a click that leads to a local file outside it is refused. Tabs remember who
 opened them: the agent closes its own tabs freely, closing the user's asks first.
 
+**Network** (`core/browser_net.py`). The browser goes through a local proxy (a PAC script with a
+DIRECT fallback, so pages still load if it is down). With a VPN on, each site is tried directly —
+DNS from the physical network and a socket bound to the physical adapter, which also bypasses TUN
+VPNs — and replayed through the VPN when it stalls or drops the TLS handshake; per-site rules and
+learned blocks live in `browser/network.json`, set from the panel chip or the `browser_network` tool.
+
 **Downloads** (`core/browser_downloads.py`). Every download is saved to a quarantine folder,
 never straight into the user's folders. It is then checked: Microsoft Defender scan
 (`MpCmdRun`), magic-byte sniffing for disguised executables, and a list of risky types. Threats

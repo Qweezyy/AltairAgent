@@ -239,6 +239,9 @@ class Settings(BaseSettings):
     #: следующем запуске). Нужно, чтобы телефон достучался до моста по Wi-Fi.
     #: Удалённый доступ всё равно защищён bridge_token. Меняется из UI связывания.
     bridge_lan: bool = False
+    #: How the built-in browser reaches sites when a VPN is on: "auto" (direct first, the VPN
+    #: when a site is unreachable directly), "direct" (always bypass the VPN) or "vpn".
+    browser_network: str = "auto"
 
     # --- Логи ---
     log_level: str = "INFO"

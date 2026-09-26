@@ -21,15 +21,40 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Shared by every tab: one WebView2 environment = one browser with one profile.
 pub struct BrowserHost {
     pub cdp_port: u16,
+    /// The backend's network proxy for the browser (core/browser_net.py): per site it goes
+    /// straight to the internet or through the user's VPN.
+    pub net_port: u16,
     pub dir: PathBuf,
 }
 
 impl BrowserHost {
-    pub fn new(cdp_port: u16) -> Self {
+    pub fn new(cdp_port: u16, net_port: u16) -> Self {
         let base = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
-        Self { cdp_port, dir: base.join("LocalAIAgent").join("browser") }
+        Self { cdp_port, net_port, dir: base.join("LocalAIAgent").join("browser") }
+    }
+
+    /// A PAC script instead of a fixed --proxy-server: "; DIRECT" keeps pages loading when
+    /// the backend's proxy is down, and local/LAN addresses never go through it.
+    fn pac_url(&self) -> String {
+        let script = format!(
+            "function FindProxyForURL(url, host) {{ if (isPlainHostName(host) || host == 'localhost' || \
+             shExpMatch(host, '127.*') || shExpMatch(host, '10.*') || shExpMatch(host, '192.168.*') || \
+             shExpMatch(host, '169.254.*') || shExpMatch(host, '172.1[6-9].*') || \
+             shExpMatch(host, '172.2[0-9].*') || shExpMatch(host, '172.3[01].*') || host == '[::1]') \
+             return 'DIRECT'; return 'PROXY 127.0.0.1:{}; DIRECT'; }}",
+            self.net_port
+        );
+        let mut out = String::from("data:application/x-ns-proxy-autoconfig,");
+        for b in script.bytes() {
+            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                out.push(b as char);
+            } else {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+        out
     }
 
     fn profile_dir(&self) -> PathBuf {
@@ -47,8 +72,8 @@ impl BrowserHost {
         // debugging port is open, which anti-bot checks read as "robot".
         format!(
             "--disable-features=msWebOOUI,msPdfOOUI --disable-blink-features=AutomationControlled \
-             --remote-debugging-port={} --remote-allow-origins=http://127.0.0.1:{}",
-            self.cdp_port, self.cdp_port
+             --remote-debugging-port={} --remote-allow-origins=http://127.0.0.1:{} --proxy-pac-url={}",
+            self.cdp_port, self.cdp_port, self.pac_url()
         )
     }
 }
@@ -525,7 +550,7 @@ mod native {
 
 #[tauri::command]
 pub fn browser_info(host: tauri::State<'_, BrowserHost>) -> serde_json::Value {
-    serde_json::json!({ "cdpPort": host.cdp_port, "dir": host.dir, "quarantine": host.quarantine_dir() })
+    serde_json::json!({ "cdpPort": host.cdp_port, "netPort": host.net_port, "dir": host.dir, "quarantine": host.quarantine_dir() })
 }
 
 #[tauri::command]

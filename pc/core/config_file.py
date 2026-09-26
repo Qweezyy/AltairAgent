@@ -51,6 +51,7 @@ EDITABLE_KEYS = {
     "VERIFICATION_GATE": "verification_gate",
     "BRIDGE_TOKEN": "bridge_token",
     "BRIDGE_LAN": "bridge_lan",
+    "BROWSER_NETWORK": "browser_network",
 }
 
 #: Настройки-переключатели: в .env пишем строго "true"/"false".
@@ -140,6 +141,7 @@ def read_public_settings(settings: Settings | None = None) -> dict:
         "app_dir": str(settings.app_dir),
         "bridge_token_set": bool(settings.bridge_token),
         "bridge_lan": settings.bridge_lan,
+        "browser_network": settings.browser_network,
     }
 
 

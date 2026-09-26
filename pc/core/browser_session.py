@@ -442,6 +442,11 @@ class AgentBrowser:
                 "--disable-backgrounding-occluded-windows",
                 "about:blank",
             ]
+            from core.browser_net import get_proxy, pac_url
+
+            net = get_proxy()
+            if net is not None and net.port:
+                args.insert(-1, f"--proxy-pac-url={pac_url(net.port)}")
             from core.utils.proc import no_window_kwargs
 
             self._chrome = await asyncio.to_thread(subprocess.Popen, args, **no_window_kwargs())

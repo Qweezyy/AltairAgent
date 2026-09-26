@@ -71,7 +71,48 @@ class BrowserNavigateTool(_ReadOnly):
         return tr("appr.br_open", url=args.url)
 
     async def run(self, args: NavigateArgs, ctx: ToolContext) -> str:
-        return await _guarded(ctx, await get_agent_browser().navigate(args.url, ctx.settings))
+        try:
+            view = await get_agent_browser().navigate(args.url, ctx.settings)
+        except ToolError as exc:
+            hint = _network_hint(args.url)
+            raise ToolError(f"{exc}{hint}") from exc
+        note = _network_note(view.url)
+        if note:
+            view.notes.append(note)
+        return await _guarded(ctx, view)
+
+
+def _host_of(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    return (urlsplit(url if "://" in url else f"https://{url}").hostname or "").lower()
+
+
+def _network_note(url: str) -> str:
+    """Which network the page came through — so the agent can tell a geo-block from a bug."""
+    from core.browser_net import get_proxy
+
+    net = get_proxy()
+    host = _host_of(url)
+    if net is None or not host or not net.topology.vpn:
+        return ""
+    last = net.recent.get(net.rules.normalize(host))
+    if not last:
+        return ""
+    route = "directly, bypassing the VPN" if last["route"] == "direct" else "through the VPN"
+    return f"network: {host} was loaded {route} ({last['why']}); change it with browser_network"
+
+
+def _network_hint(url: str) -> str:
+    from core.browser_net import get_proxy
+
+    net = get_proxy()
+    if net is None or not net.topology.vpn:
+        return ""
+    return (
+        " The user has a VPN on: if the site blocks VPN users or is blocked without a VPN, "
+        "switch its route with browser_network (mode direct or vpn) and open it again."
+    )
 
 
 class BrowserReadTool(_ReadOnly):
@@ -521,3 +562,65 @@ class BrowserDownloadsTool(Tool):
         if args.destination == "workspace":
             shown = safe_relpath(Path(item.moved_to), ctx.settings)
         return ToolResult(content=f"Moved {item.name} to {shown} (marked as downloaded from the internet).")
+
+# ------------------------------------------------------------ network (VPN or direct)
+
+
+class NetworkArgs(BaseModel):
+    action: Literal["status", "set"] = Field(default="status", description="status: what goes where; set: route a site")
+    site: str = Field(default="", description="Site for action=set, e.g. 'example.com' (covers its subdomains)")
+    mode: Literal["auto", "direct", "vpn"] = Field(
+        default="auto",
+        description="auto: direct first, the VPN if unreachable; direct: bypass the VPN; vpn: through the VPN",
+    )
+
+
+class BrowserNetworkTool(Tool):
+    name = "browser_network"
+    description = (
+        "How the built-in browser reaches sites when the user's VPN is on. By default each site is "
+        "tried directly (bypassing the VPN) and goes through the VPN only if it does not answer. "
+        "Use set when a site says it blocks VPNs/foreign visitors (mode=direct) or is blocked in "
+        "the user's country (mode=vpn), then reload the page. status shows the network and routes."
+    )
+    Args = NetworkArgs
+    category = "edit"
+    timeout = 15.0
+
+    def auto_verdict(self, args, ctx) -> str:  # type: ignore[override]
+        return "allow"  # only changes which network the app's own browser uses
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        if args.action == "set":
+            return tr("appr.br_net", site=args.site, mode=tr(f"appr.br_net_{args.mode}"))
+        return tr("appr.br_net_status")
+
+    async def run(self, args: NetworkArgs, ctx: ToolContext) -> ToolResult:
+        from core.browser_net import get_proxy
+
+        net = get_proxy()
+        if net is None:
+            return ToolResult.fail("The browser network proxy is not running; the browser uses the system network.")
+        if args.action == "set":
+            if not args.site.strip():
+                return ToolResult.fail("action=set needs a site, e.g. site='example.com'.")
+            site = await asyncio.to_thread(net.rules.set, args.site, args.mode)
+            net.forget(site)
+            return ToolResult(content=f"{site}: {args.mode}. Reload the page (browser_tabs action=reload) to apply.")
+        topo = net.topology
+        if not topo.vpn:
+            lines = ["No VPN detected: every site loads directly."]
+        else:
+            lines = [
+                f"VPN on ({topo.vpn_kind}{', adapter ' + topo.vpn_adapter if topo.vpn_adapter else ''}); "
+                f"direct traffic leaves via {topo.physical_adapter or 'the physical network'} ({topo.physical_ip or '?'})."
+            ]
+        lines.append(f"Default for sites without a rule: {net.default_mode}.")
+        if net.rules.sites:
+            lines.append("Rules: " + ", ".join(f"{k}={v}" for k, v in sorted(net.rules.sites.items())))
+        if net.rules.learned:
+            lines.append("Learned as blocked directly (go via VPN): " + ", ".join(sorted(net.rules.learned)[:20]))
+        recent = list(net.recent.items())[-10:]
+        if recent:
+            lines.append("Recent: " + "; ".join(f"{h} → {r['route']}" for h, r in reversed(recent)))
+        return ToolResult(content="\n".join(lines))

@@ -119,7 +119,12 @@ fn spawn_backend(port: u16, host: &browser::BrowserHost) -> Option<Child> {
     // port and reads downloads from its quarantine folder.
     let cdp = host.cdp_port.to_string();
     let browser_dir = host.dir.to_string_lossy().into_owned();
-    let extra = ["--browser-cdp-port", cdp.as_str(), "--browser-dir", browser_dir.as_str()];
+    let net = host.net_port.to_string();
+    let extra = [
+        "--browser-cdp-port", cdp.as_str(),
+        "--browser-dir", browser_dir.as_str(),
+        "--browser-net-port", net.as_str(),
+    ];
     // desktop/src-tauri -> desktop -> корень репозитория
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -174,7 +179,7 @@ pub fn run() {
             }
 
             let port = stable_port();
-            let host = browser::BrowserHost::new(free_port());
+            let host = browser::BrowserHost::new(free_port(), free_port());
             let child = spawn_backend(port, &host);
             app.manage(Backend(Mutex::new(child)));
             app.manage(host);

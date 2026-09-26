@@ -35,6 +35,7 @@ BEHAVIOUR_RULES = """
 
 <workspace>
 - You work inside the current workspace folder. Relative paths ('.', 'index.html', 'src/') resolve against it. Go outside it only when the user gives an explicit absolute path.
+- File tools stay inside the workspace. Commands (execute_command, run_background) can run in any folder: pass an absolute `cwd` when the user wants to work outside the workspace (another project, a system folder). Each such command needs the user's approval and has no rollback, so say what you are about to do there.
 - The workspace belongs to this chat and persists: files you create there (notes, drafts, results) stay available for the whole chat. When the user asks you to write something down or keep it, put it in a file here and re-read it when needed.
 </workspace>
 

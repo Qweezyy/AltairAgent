@@ -541,10 +541,16 @@ def main() -> int:
         "--parent-pid", type=int, default=None, help="Завершиться вместе с этим процессом (оболочка Tauri)"
     )
     parser.add_argument("--browser-cdp-port", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--browser-net-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--browser-dir", type=str, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.parent_pid:
         _exit_with_parent(args.parent_pid)
+    if args.browser_net_port:
+        # The shell baked this port into the browser's PAC script (core/browser_net.py).
+        from core.browser_net import configure as configure_net
+
+        configure_net(args.browser_net_port)
     if args.browser_cdp_port and args.browser_dir:
         # The Tauri shell hosts the built-in browser: its tabs are WebView2 webviews in
         # the app window, reachable over this DevTools port (core/browser_session.py).
