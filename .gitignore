@@ -29,6 +29,11 @@ android/.gradle/
 android/build/
 android/**/build/
 android/local.properties
+# Signing keys never go to git
+*.jks
+*.keystore
+*.p12
+keystore.properties
 *.apk
 *.aab
 

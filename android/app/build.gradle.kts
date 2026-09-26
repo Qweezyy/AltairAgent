@@ -1,8 +1,10 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
-    alias(libs.plugins.chaquopy) // встроенный Python (офлайн, обе сборки)
+    alias(libs.plugins.chaquopy) // embedded Python (offline, both flavors)
 }
 
 android {
@@ -16,17 +18,17 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // Chaquopy встраивает нативный CPython — ограничиваем один ABI, чтобы не раздувать
-        // APK (каждый ABI = +неск. МБ). arm64-v8a покрывает все актуальные устройства;
-        // для эмулятора при необходимости временно добавить "x86_64".
+        // Chaquopy bundles a native CPython, so a single ABI keeps the APK small (each ABI adds
+        // several MB). arm64-v8a covers every current device; add "x86_64" temporarily if an
+        // emulator needs it.
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
-    // Две сборки из одного кода:
-    //  • full — всё, включая мост к ПК (pc/server/ws.py) — ОСНОВНАЯ, её и обновляем;
-    //  • lite — то же приложение, но без моста к ПК и упоминаний — ЗАМОРОЖЕНА.
-    // Разница только в наборе исходников src/full vs src/lite (класс PcBridgeFacade).
-    // lite убрана из обычной сборки, но остаётся собираемой по требованию:
+    // Two builds from one codebase:
+    //  - full: everything, including the PC bridge (pc/server/ws.py). The MAIN build, kept up to date;
+    //  - lite: the same app without the PC bridge or any mention of it. FROZEN.
+    // They differ only in the src/full vs src/lite source sets (the PcBridgeFacade class).
+    // lite is left out of the regular build but can still be built on demand:
     //   ./gradlew -PwithLite assembleLiteDebug
     val withLite = project.hasProperty("withLite")
     flavorDimensions += "edition"
@@ -38,7 +40,7 @@ android {
         if (withLite) {
             create("lite") {
                 dimension = "edition"
-                // Отдельный applicationId — обе сборки можно поставить рядом.
+                // A separate applicationId, so both builds can be installed side by side.
                 applicationIdSuffix = ".lite"
                 versionNameSuffix = "-lite"
                 manifestPlaceholders["appLabel"] = "Altair Lite"
@@ -46,9 +48,31 @@ android {
         }
     }
 
+    // Release signing. The keystore lives outside git; its path and passwords come from
+    // android/local.properties (never committed) or the environment (CI). Without them a release
+    // build is simply left unsigned instead of failing, so debug work never needs the key.
+    val localProps = Properties().apply {
+        rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+    }
+    fun secret(prop: String, env: String): String? =
+        (localProps.getProperty(prop) ?: System.getenv(env))?.takeIf { it.isNotBlank() }
+    val storePath = secret("altair.keystore.file", "ALTAIR_KEYSTORE_FILE")
+    val releaseSigning = if (storePath != null && file(storePath).isFile) {
+        signingConfigs.create("release") {
+            storeFile = file(storePath)
+            storePassword = secret("altair.keystore.password", "ALTAIR_KEYSTORE_PASSWORD")
+            keyAlias = secret("altair.key.alias", "ALTAIR_KEY_ALIAS") ?: "altair"
+            keyPassword = secret("altair.key.password", "ALTAIR_KEY_PASSWORD")
+                ?: secret("altair.keystore.password", "ALTAIR_KEYSTORE_PASSWORD")
+        }
+    } else {
+        null
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = releaseSigning
         }
     }
     compileOptions {
@@ -63,14 +87,14 @@ android {
     }
 }
 
-// Встроенный интерпретатор Python (офлайн, в обеих сборках full/lite). Пакеты ставятся
-// во время сборки (pip у Chaquopy — build-time); в рантайме pip нет.
+// Embedded Python interpreter (offline, in both full and lite). Packages are installed at build
+// time (Chaquopy's pip runs during the build); there is no pip at runtime.
 chaquopy {
     defaultConfig {
         version = "3.12"
         pip {
-            install("sympy")   // точная символьная математика (интегралы/уравнения) — для учёбы
-            install("numpy")   // массивы/численные расчёты
+            install("sympy")   // exact symbolic math (integrals, equations) for studying
+            install("numpy")   // arrays and numeric computation
         }
     }
 }

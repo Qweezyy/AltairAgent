@@ -9,6 +9,8 @@ import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -283,8 +285,27 @@ fun ChatScreen(
             )
         },
     ) {
-        // Безграничный чат: без шапки, кнопки «плавают» поверх контента.
+        // Borderless chat: no top bar, the buttons float over the content.
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            // Live cosmos behind the empty chat. After the first message it does not cut to the plain
+            // background: it fades out while drifting slightly forward, as if flying past the stars.
+            val welcome = state.messages.isEmpty() && !searching
+            val cosmos by animateFloatAsState(
+                targetValue = if (welcome) 1f else 0f,
+                animationSpec = tween(if (welcome) 900 else 1600, easing = FastOutSlowInEasing),
+                label = "cosmos",
+            )
+            if (cosmos > 0.002f) {
+                CosmosBackground(
+                    dark = MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        alpha = cosmos
+                        val zoom = 1f + (1f - cosmos) * 0.12f
+                        scaleX = zoom
+                        scaleY = zoom
+                    },
+                )
+            }
             Column(Modifier.fillMaxSize()) {
                 val listState = rememberLazyListState()
                 val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -321,7 +342,7 @@ fun ChatScreen(
                         singleLine = true,
                     )
                 }
-                Crossfade(targetState = displayed.isEmpty(), modifier = Modifier.weight(1f), label = "chat") { empty ->
+                Crossfade(targetState = displayed.isEmpty(), modifier = Modifier.weight(1f), animationSpec = tween(700), label = "chat") { empty ->
                     if (empty) {
                         if (searching && searchQuery.isNotBlank()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1499,9 +1520,9 @@ private fun msgContentType(msg: ChatMessage): String = when {
     else -> "assistant"
 }
 
-// ---------------------------------------------------------------- маскот «Alti»
+// ---------------------------------------------------------------- mascot "Alti"
 
-/** Путь звезды-«Звёздыша» Alti (cubic-bezier из mascot.js, сетка 24×24), центр (cx,cy), R — до острия. */
+/** Alti's star outline (the cubic Béziers from mascot.js, 24×24 grid); center (cx, cy), R to a tip. */
 private fun altiPath(cx: Float, cy: Float, R: Float): Path {
     val s = R / 11.4f
     fun px(x: Float) = cx + (x - 12f) * s
@@ -1516,7 +1537,7 @@ private fun altiPath(cx: Float, cy: Float, R: Float): Path {
     }
 }
 
-/** Тело звезды: объёмный радиальный градиент + затемнение снизу + глянец + rim-контур (спека mascot.js). */
+/** The star body: a volumetric radial gradient, shading at the bottom, gloss and a rim (mascot.js spec). */
 private fun DrawScope.drawAltiBody(cx: Float, cy: Float, R: Float) {
     val path = altiPath(cx, cy, R)
     drawPath(
@@ -1526,12 +1547,12 @@ private fun DrawScope.drawAltiBody(cx: Float, cy: Float, R: Float) {
             center = Offset(cx - 0.28f * R, cy - 0.40f * R), radius = 1.7f * R,
         ),
     )
-    // затемнение к низу — объём
+    // darker toward the bottom for volume
     drawPath(
         path,
         Brush.verticalGradient(0f to Color.Transparent, 0.55f to Color.Transparent, 1f to Color(0x6B5A2D08), startY = cy - R, endY = cy + R),
     )
-    // глянцевый блик слева-сверху, внутри силуэта
+    // glossy highlight at the upper left, inside the outline
     clipPath(path) {
         drawCircle(
             Brush.radialGradient(listOf(Color.White.copy(alpha = 0.5f), Color.Transparent),
@@ -1539,86 +1560,73 @@ private fun DrawScope.drawAltiBody(cx: Float, cy: Float, R: Float) {
             radius = 0.95f * R, center = Offset(cx - 0.30f * R, cy - 0.45f * R),
         )
     }
-    // rim-контур
+    // rim outline
     drawPath(path, Brush.verticalGradient(listOf(Color(0xFFFFE9A8), Color(0xFFC9761A)), startY = cy - R, endY = cy + R),
         style = Stroke(width = R * 0.05f), alpha = 0.55f)
 }
 
-/** Маскот Alti: основная звезда + 2 спутника (3 тела) + минималистичное лицо. Лёгкое «дыхание» и glow. */
+/**
+ * Alti: the main star, two satellites (the three bodies) and a minimal face, animated like on the PC
+ * (redesign.layout.css): the core floats with a slight sway, its contact shadow shrinks as it rises,
+ * the satellites bob on their own rhythms, and the whole mascot pops in on appearance.
+ */
 @Composable
 private fun AltiMascot(size: Dp, satellites: Boolean = true) {
     val t = rememberInfiniteTransition(label = "alti")
-    val breathe by t.animateFloat(1f, 1.035f, infiniteRepeatable(tween(2600), RepeatMode.Reverse), label = "br")
+    val ease = androidx.compose.animation.core.CubicBezierEasing(0.45f, 0f, 0.55f, 1f)
+    fun spec(ms: Int) = infiniteRepeatable<Float>(tween(ms / 2, easing = ease), RepeatMode.Reverse)
+    val float by t.animateFloat(0f, 1f, spec(4500), label = "float")
+    val bobA by t.animateFloat(0f, 1f, spec(5500), label = "bobA")
+    val bobB by t.animateFloat(0f, 1f, spec(6800), label = "bobB")
     val glow by t.animateFloat(0.12f, 0.20f, infiniteRepeatable(tween(2200), RepeatMode.Reverse), label = "gl")
-    Canvas(Modifier.size(size)) {
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, tween(600, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f))) }
+
+    Canvas(Modifier.size(size).graphicsLayer {
+        alpha = appear.value
+        val sc = 0.82f + 0.18f * appear.value
+        scaleX = sc
+        scaleY = sc
+    }) {
         val w = this.size.width
         val cx = w / 2f
-        val cy = w / 2f
-        val R = w * 0.33f * breathe
+        val baseCy = w / 2f
+        val R = w * 0.33f
         val s = R / 11.4f
-        // задний golden glow
+        // Rise by 5% of the star with a ±1.5° sway, as in the PC keyframes.
+        val lift = -0.05f * (24f * s) * float
+        val sway = -1.5f + 3f * float
+        val cy = baseCy + lift
+
+        // contact shadow: narrower and fainter while the star is up
+        val shW = 6.2f * s * (1f - 0.14f * float)
+        drawOval(
+            Color.Black.copy(alpha = 0.28f - 0.10f * float),
+            topLeft = Offset(cx - shW, baseCy + 10.4f * s - 1.15f * s), size = Size(shW * 2, 2.3f * s),
+        )
         drawCircle(
             Brush.radialGradient(listOf(Brand.glow.copy(alpha = glow), Color.Transparent), center = Offset(cx, cy), radius = R * 2f),
             radius = R * 2f, center = Offset(cx, cy),
         )
-        // спутники (позади, как в mascot.js)
         if (satellites) {
-            drawAltiBody(cx + (20.6f - 12f) * s, cy + (4.4f - 12f) * s, R * 0.40f)
-            drawAltiBody(cx + (3.6f - 12f) * s, cy + (19.2f - 12f) * s, R * 0.28f)
+            val aY = -0.08f * (0.4f * 24f * s) * bobA
+            drawAltiBody(cx + (20.6f - 12f) * s, baseCy + (4.4f - 12f) * s + aY, R * 0.40f * (1f + 0.07f * bobA))
+            val bY = 0.08f * (0.28f * 24f * s) * bobB
+            drawAltiBody(cx + (3.6f - 12f) * s, baseCy + (19.2f - 12f) * s + bY, R * 0.28f * (1f - 0.08f * bobB))
         }
-        // основная звезда
-        drawAltiBody(cx, cy, R)
-        // лицо: два глаза-пилюли + мягкий блик (минимализм, без щёчек)
-        val eye = Color(0xFF241608)
-        val ew = 1.5f * s
-        val eh = 3.0f * s
-        val er = 0.75f * s
-        val ey = cy + (12.4f - 12f) * s
-        val ex1 = cx + (9.7f - 12f) * s
-        val ex2 = cx + (14.3f - 12f) * s
-        drawRoundRect(eye, topLeft = Offset(ex1 - ew / 2, ey - eh / 2), size = Size(ew, eh), cornerRadius = CornerRadius(er, er))
-        drawRoundRect(eye, topLeft = Offset(ex2 - ew / 2, ey - eh / 2), size = Size(ew, eh), cornerRadius = CornerRadius(er, er))
-        drawCircle(Color.White.copy(alpha = 0.9f), radius = 0.42f * s, center = Offset(ex1 + 0.45f * s, ey - eh / 2 + 0.55f * s))
-        drawCircle(Color.White.copy(alpha = 0.9f), radius = 0.42f * s, center = Offset(ex2 + 0.45f * s, ey - eh / 2 + 0.55f * s))
-    }
-}
-
-/** Одна звезда живого фона. */
-private data class Sf(val x: Float, val y: Float, val r: Float, val seed: Float, val a: Float, val warm: Boolean)
-
-/** Живой космический фон приветствия (порт cosmos.js «nebula»): туманности + мерцающие звёзды. */
-@Composable
-private fun StarfieldBackground(modifier: Modifier = Modifier) {
-    val stars = remember {
-        val rnd = java.util.Random(7)
-        List(90) {
-            Sf(rnd.nextFloat(), rnd.nextFloat(), 0.6f + rnd.nextFloat() * 1.7f,
-                rnd.nextFloat(), 0.25f + rnd.nextFloat() * 0.6f, rnd.nextFloat() < 0.25f)
-        }
-    }
-    val t = rememberInfiniteTransition(label = "sf")
-    val phase by t.animateFloat(0f, 1f, infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "ph")
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        // туманности (цвета из cosmos.js nebula)
-        listOf(
-            Triple(0.22f, 0.30f, Color(0x28604AD2)),
-            Triple(0.80f, 0.24f, Color(0x1E3A78DC)),
-            Triple(0.66f, 0.82f, Color(0x22463CB4)),
-            Triple(0.14f, 0.80f, Color(0x18965AC8)),
-        ).forEach { (nx, ny, c) ->
-            val cxn = nx * w
-            val cyn = ny * h
-            val rn = 0.55f * w
-            drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), center = Offset(cxn, cyn), radius = rn),
-                radius = rn, center = Offset(cxn, cyn))
-        }
-        // мерцающие звёзды
-        stars.forEach { st ->
-            val tw = 0.5f + 0.5f * kotlin.math.sin((2.0 * Math.PI * (phase + st.seed)).toFloat())
-            val col = if (st.warm) Color(0xFFFFE6B0) else Color.White
-            drawCircle(col.copy(alpha = (st.a * (0.4f + 0.6f * tw)).coerceIn(0f, 1f)), radius = st.r, center = Offset(st.x * w, st.y * h))
+        rotate(sway, pivot = Offset(cx, cy)) {
+            drawAltiBody(cx, cy, R)
+            val eye = Color(0xFF241608)
+            val ew = 1.5f * s
+            val eh = 3.0f * s
+            val er = 0.75f * s
+            val ey = cy + (12.4f - 12f) * s
+            val ex1 = cx + (9.7f - 12f) * s
+            val ex2 = cx + (14.3f - 12f) * s
+            drawRoundRect(eye, topLeft = Offset(ex1 - ew / 2, ey - eh / 2), size = Size(ew, eh), cornerRadius = CornerRadius(er, er))
+            drawRoundRect(eye, topLeft = Offset(ex2 - ew / 2, ey - eh / 2), size = Size(ew, eh), cornerRadius = CornerRadius(er, er))
+            drawCircle(Color.White.copy(alpha = 0.9f), radius = 0.42f * s, center = Offset(ex1 + 0.45f * s, ey - eh / 2 + 0.55f * s))
+            drawCircle(Color.White.copy(alpha = 0.9f), radius = 0.42f * s, center = Offset(ex2 + 0.45f * s, ey - eh / 2 + 0.55f * s))
         }
     }
 }
@@ -1626,7 +1634,6 @@ private fun StarfieldBackground(modifier: Modifier = Modifier) {
 @Composable
 private fun WelcomeState(modifier: Modifier = Modifier) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        StarfieldBackground(Modifier.matchParentSize())
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             AltiMascot(size = 118.dp)
             Text(stringResource(R.string.welcome_title), style = MaterialTheme.typography.headlineSmall,
