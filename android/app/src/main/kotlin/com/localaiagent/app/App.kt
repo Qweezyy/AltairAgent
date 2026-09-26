@@ -44,14 +44,14 @@ class App : Application(), ImageLoaderFactory {
     }
 
     override fun newImageLoader(): ImageLoader {
-        // ВАЖНО: Wikimedia (upload.wikimedia.org) отдаёт 403 на дефолтный
-        // User-Agent OkHttp — их политика требует описательный UA.
+        // Wikimedia (upload.wikimedia.org) answers 403 to OkHttp's default User-Agent: its policy
+        // requires a descriptive one.
         val client = OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val req = chain.request().newBuilder()
                     .header(
                         "User-Agent",
-                        "LocalAIAgent/0.1 (Android; +https://github.com/local-ai-agent) Coil",
+                        "Altair/${BuildConfig.VERSION_NAME} (Android; +https://github.com/Qweezyy/AltairAgent) Coil",
                     )
                     .build()
                 chain.proceed(req)
@@ -68,16 +68,21 @@ class App : Application(), ImageLoaderFactory {
         const val CHANNEL_DONE = "agent_done"
         const val CHANNEL_REMIND = "agent_remind"
 
-        /** true, пока хотя бы одна Activity видима (приложение на переднем плане). */
+        /** True while at least one activity is visible (the app is in the foreground). */
         val isForeground: Boolean get() = ForegroundTracker.started > 0
+
+        /** Called on the main thread each time the app comes back to the foreground. */
+        @Volatile var onForeground: (() -> Unit)? = null
     }
 
-    /** Считает видимые Activity — грубый, но надёжный признак переднего плана. */
+    /** Counts visible activities: a rough but reliable foreground signal. */
     private object ForegroundTracker : ActivityLifecycleCallbacks {
         var started = 0
             private set
 
-        override fun onActivityStarted(activity: Activity) { started++ }
+        override fun onActivityStarted(activity: Activity) {
+            if (started++ == 0) onForeground?.invoke()
+        }
         override fun onActivityStopped(activity: Activity) { if (started > 0) started-- }
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
         override fun onActivityResumed(activity: Activity) {}

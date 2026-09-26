@@ -7,6 +7,17 @@ plugins {
     alias(libs.plugins.chaquopy) // embedded Python (offline, both flavors)
 }
 
+// The one product version lives in the repository root VERSION file (shared with the PC app), so the
+// APK can never drift from it. versionCode is derived: MAJOR*10000 + MINOR*100 + PATCH (0.1.0 -> 100),
+// which keeps every release strictly increasing as Android requires for updates.
+val altairVersion: String = rootProject.file("../VERSION").takeIf { it.isFile }?.readText()?.trim()
+    ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
+    ?: error("VERSION at the repository root must hold MAJOR.MINOR.PATCH")
+val altairVersionCode: Int = altairVersion.split('.').map { it.toInt() }.let { (ma, mi, pa) ->
+    require(mi < 100 && pa < 100) { "MINOR and PATCH must be below 100 for versionCode" }
+    ma * 10_000 + mi * 100 + pa
+}
+
 android {
     namespace = "com.localaiagent.app"
     compileSdk = 35
@@ -15,8 +26,8 @@ android {
         applicationId = "com.altair"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = altairVersionCode
+        versionName = altairVersion
 
         // Chaquopy bundles a native CPython, so a single ABI keeps the APK small (each ABI adds
         // several MB). arm64-v8a covers every current device; add "x86_64" temporarily if an
@@ -84,6 +95,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // BuildConfig.VERSION_NAME for the MCP client info, User-Agent and Settings
     }
 }
 

@@ -5,6 +5,7 @@
 
 package com.localaiagent.app.ui
 
+import kotlinx.coroutines.flow.first
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -317,21 +318,14 @@ fun ChatScreen(
                         state.messages.filter { it.text.contains(searchQuery, ignoreCase = true) }
                     else state.messages
                 }
-                // Новое сообщение — плавно проматываем вниз.
+                // The feed is laid out bottom-up (reverseLayout): item 0 is the newest message and the
+                // bottom edge is the anchor. A streaming answer then grows upward on its own, with no
+                // scroll call per token — the per-token scrollToItem used to jerk the list every frame
+                // (the flicker). A new message only scrolls if the reader is already at the bottom.
+                val newestFirst = remember(displayed) { displayed.asReversed() }
                 LaunchedEffect(state.messages.size) {
-                    if (state.messages.isNotEmpty() && !searching) listState.animateScrollToItem(state.messages.size - 1)
-                }
-                // P3: во время стрима держим ленту прижатой к низу по мере роста последнего
-                // пузыря — но только если пользователь и так у низа (не мешаем читать выше).
-                val lastLen = state.messages.lastOrNull()?.text?.length ?: 0
-                LaunchedEffect(lastLen) {
-                    if (state.running && !searching && state.messages.isNotEmpty()) {
-                        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                        // Прижимаем к НИЗУ последнего сообщения (большой offset → клэмп к концу),
-                        // а не к его верху — иначе растущий ответ «прыгал» вверх (мигание).
-                        if (lastVisible >= state.messages.size - 2) {
-                            listState.scrollToItem(state.messages.size - 1, Int.MAX_VALUE)
-                        }
+                    if (state.messages.isNotEmpty() && !searching && listState.firstVisibleItemIndex <= 1) {
+                        listState.animateScrollToItem(0)
                     }
                 }
                 if (searching) {
@@ -353,18 +347,24 @@ fun ChatScreen(
                     } else {
                         LazyColumn(
                             state = listState,
+                            reverseLayout = true,
                             modifier = Modifier.fillMaxSize().padding(horizontal = Dims.screenPad),
-                            verticalArrangement = Arrangement.spacedBy(Dims.messageGap),
+                            // Short chats still start at the top, like before.
+                            verticalArrangement = Arrangement.spacedBy(Dims.messageGap, Alignment.Top),
                             contentPadding = PaddingValues(top = if (searching) 8.dp else topClear, bottom = 16.dp),
                         ) {
                             itemsIndexed(
-                                displayed,
+                                newestFirst,
                                 key = { _, it -> it.id },
                                 contentType = { _, it -> msgContentType(it) },
-                            ) { index, msg ->
+                            ) { revIndex, msg ->
+                                val index = displayed.lastIndex - revIndex
                                 val actionsEnabled = !(searching && searchQuery.isNotBlank())
                                 Box(
-                                    Modifier.animateItem().fillMaxWidth().combinedClickable(
+                                    // Fade items in and out, but never animate their placement: a growing
+                                    // answer moves the items above it every frame, and a placement spring
+                                    // on that is a visible wobble.
+                                    Modifier.animateItem(placementSpec = null).fillMaxWidth().combinedClickable(
                                         enabled = actionsEnabled,
                                         onClick = {},
                                         onLongClick = {
@@ -955,7 +955,8 @@ private fun MessageBubble(
                 // (напр. после ответа-картинки) не «мигает» вечно.
                 if (statusText.isNotBlank()) ThinkingIndicator(statusText)
             } else {
-                MarkdownText(msg.text, Modifier.fillMaxWidth())
+                // While the answer streams, reveal it at a steady pace instead of in network bursts.
+                MarkdownText(rememberSmoothReveal(msg.text, active = statusText.isNotBlank()), Modifier.fillMaxWidth())
                 // Показываем полный индикатор под текстом ТОЛЬКО во время инструмента (напр.
                 // «Инструмент: run_python»). Для обычного стрима токенов — тонкая каретка-искра
                 // в конце (пока прогон идёт, т.е. statusText непустой), чтобы было видно «печатает».
@@ -1937,6 +1938,11 @@ private fun SettingsScreen(
                         state.nickname.ifBlank { stringResource(R.string.account_no_name) },
                     ) { section = "account" }
                 }
+                Text(
+                    stringResource(R.string.settings_version, com.localaiagent.app.BuildConfig.VERSION_NAME),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp), textAlign = TextAlign.Center,
+                )
             }
         }
     }
@@ -2322,4 +2328,45 @@ private fun FilterChipLike(label: String, selected: Boolean, onClick: () -> Unit
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
         }
     }
+}
+
+
+/**
+ * Text revealed at a steady, backlog-adaptive pace: max(80 chars/s, backlog / 0.5 s), advanced once
+ * per frame (the approach of the TokenFlow reference client). Network chunks arrive in bursts; without
+ * this the answer jumps by whole lines. When the stream ends, the rest drains at the same pace instead
+ * of snapping. A message that never streamed here (history, a switched version) shows in full at once.
+ * The frame loop runs only while there is a backlog.
+ */
+@Composable
+private fun rememberSmoothReveal(target: String, active: Boolean): String {
+    val latest by androidx.compose.runtime.rememberUpdatedState(target)
+    val isActive by androidx.compose.runtime.rememberUpdatedState(active)
+    var streamed by remember { mutableStateOf(active) }
+    if (active) streamed = true
+    var shown by remember { androidx.compose.runtime.mutableIntStateOf(if (active) 0 else target.length) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            androidx.compose.runtime.snapshotFlow { latest.length != shown }.first { it }
+            if (!streamed || latest.length < shown) {
+                shown = latest.length // not a live stream, or the text was replaced: no typing effect
+                continue
+            }
+            var last = androidx.compose.runtime.withFrameNanos { it }
+            while (shown < latest.length) {
+                androidx.compose.runtime.withFrameNanos { now ->
+                    val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                    last = now
+                    val backlog = latest.length - shown
+                    // After the stream ends, finish within ~0.3 s so the action bar is not kept waiting.
+                    val rate = if (isActive) maxOf(80f, backlog / 0.5f) else maxOf(240f, backlog / 0.3f)
+                    shown = minOf(latest.length, shown + maxOf(1, (rate * dt).toInt()))
+                }
+            }
+        }
+    }
+    var end = shown.coerceIn(0, target.length)
+    // Never cut a surrogate pair (emoji) in half.
+    if (end in 1 until target.length && Character.isHighSurrogate(target[end - 1])) end++
+    return if (end >= target.length) target else target.substring(0, end)
 }

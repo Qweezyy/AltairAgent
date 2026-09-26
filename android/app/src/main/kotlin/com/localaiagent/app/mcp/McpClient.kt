@@ -245,7 +245,7 @@ class McpClient(private val server: McpServer) {
     private fun initParams(): JsonObject = buildJsonObject {
         put("protocolVersion", "2025-03-26")
         putJsonObject("capabilities") {}
-        putJsonObject("clientInfo") { put("name", "Altair"); put("version", "0.1.0") }
+        putJsonObject("clientInfo") { put("name", "Altair"); put("version", com.localaiagent.app.BuildConfig.VERSION_NAME) }
     }
 
     private fun rpcError(el: JsonElement): String {

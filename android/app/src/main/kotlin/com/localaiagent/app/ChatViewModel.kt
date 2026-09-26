@@ -211,10 +211,13 @@ enum class PcPresence {
     BUSY,
 }
 
-/** Как часто проверяем присутствие ПК (мс), пока приложение на переднем плане. */
+/** How often PC presence is re-checked while the PC is online and the app is in the foreground (ms). */
 private const val PRESENCE_INTERVAL_MS = 30_000L
 
-/** Потолок ожидания одной пробы присутствия (мс). */
+/** While the PC is offline it is re-checked more often, so "offline" never lingers after it is back. */
+private const val PRESENCE_OFFLINE_INTERVAL_MS = 10_000L
+
+/** Upper bound for one presence probe (ms). */
 private const val PRESENCE_TIMEOUT_MS = 8_000L
 
 private class Chat(
@@ -321,12 +324,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (PcBridgeFacade.SUPPORTED) startPresenceProbe()
     }
 
+    /** Wakes the presence loop for an immediate re-check (foreground, network change, new bridge). */
+    private val presencePoke = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+
+    fun pokePresence() {
+        presencePoke.trySend(Unit)
+    }
+
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
     /**
-     * Живое присутствие ПК: периодически (пока приложение на переднем плане и мост
-     * настроен) проверяем связь и отражаем в плашке среды. Пока идёт делегирование —
-     * держим BUSY и не трогаем. Проба лёгкая (WS → ready → close), сессию на ПК не плодит.
+     * Live PC presence for the chip next to the menu. A plain timer was not enough: after one failed
+     * probe the chip said "offline" for up to 30 s after the PC came back, and not at all while the
+     * app was in the background. Now a probe also runs right away when the app returns to the
+     * foreground, when the network changes and when the bridge is (re)configured; while offline it
+     * repeats every 10 s. During a delegation the chip stays BUSY. The probe is light (WS → ready →
+     * close) and opens no session on the PC.
      */
     private fun startPresenceProbe() {
+        App.onForeground = { pokePresence() }
+        runCatching {
+            val cm = getApplication<Application>().getSystemService(android.net.ConnectivityManager::class.java)
+            val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) = pokePresence()
+                override fun onLost(network: android.net.Network) = pokePresence()
+            }
+            cm.registerDefaultNetworkCallback(cb)
+            networkCallback = cb
+        }
         viewModelScope.launch {
             while (true) {
                 val cfg = settings.loadBridge()
@@ -342,9 +367,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     setPresenceIfNotBusy(if (result == null) PcPresence.ONLINE else PcPresence.OFFLINE)
                 }
-                kotlinx.coroutines.delay(PRESENCE_INTERVAL_MS)
+                val wait = if (_ui.value.pcPresence == PcPresence.OFFLINE) PRESENCE_OFFLINE_INTERVAL_MS else PRESENCE_INTERVAL_MS
+                kotlinx.coroutines.withTimeoutOrNull(wait) { presencePoke.receive() }
             }
         }
+    }
+
+    override fun onCleared() {
+        App.onForeground = null
+        networkCallback?.let { cb ->
+            runCatching {
+                getApplication<Application>().getSystemService(android.net.ConnectivityManager::class.java)
+                    .unregisterNetworkCallback(cb)
+            }
+        }
+        super.onCleared()
     }
 
     private fun setPresenceIfNotBusy(p: PcPresence) {
@@ -1336,8 +1373,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val config = settings.activeConfig()
                 if (config.apiKey.isBlank()) {
+                    // Explain in the chat what to do instead of throwing the user into Settings:
+                    // a sudden screen change right after sending was confusing.
                     appendToLast(tr(R.string.status_no_key))
-                    _ui.value = _ui.value.copy(needsKey = true)
                     return@launch
                 }
                 if (config.apiKey.isNotBlank() && insecureForCredentials(config.baseUrl)) {
@@ -1502,6 +1540,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val token = pcToken.trim().ifBlank { cur.token }
             settings.saveBridge(pcUrl.trim(), token, pcWorkspace.trim())
             _ui.value = _ui.value.copy(pcUrl = pcUrl.trim(), pcWorkspace = pcWorkspace.trim())
+            pokePresence()
         }
     }
 
@@ -1557,6 +1596,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             val err = PcBridgeFacade.testConnection(cfg)
             _ui.value = _ui.value.copy(bridgeStatus = if (err == null) tr(R.string.bridge_ok) else "✗ $err" + bridgeHint(err))
+            // A manual test of the saved bridge is a fresh probe: reflect it in the chip right away.
+            if (cfg.url.trim() == settings.loadBridge().url.trim()) {
+                setPresenceIfNotBusy(if (err == null) PcPresence.ONLINE else PcPresence.OFFLINE)
+            }
         }
     }
 

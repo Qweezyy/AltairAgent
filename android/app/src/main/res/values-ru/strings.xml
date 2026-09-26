@@ -259,7 +259,7 @@
     <string name="status_thinking">Думаю…</string>
     <string name="status_processing">Обрабатываю: %1$s</string>
     <string name="status_checking">Проверяю…</string>
-    <string name="status_no_key">⚠️ Не задан API-ключ. Открой настройки и введи ключ модели.</string>
+    <string name="status_no_key">**У модели ещё не задан API-ключ**, поэтому ответить не могу.\n\nКак исправить:\n1. Открой меню ☰ (слева вверху) и внизу нажми круглую кнопку профиля рядом с **Новый чат** — откроются настройки.\n2. Перейди в **Модели** и открой активную модель.\n3. Вставь API-ключ провайдера и нажми **Сохранить**.\n4. Отправь сообщение ещё раз.\n\nКлюч хранится на телефоне в зашифрованном виде. Локальной модели (Ollama, LM Studio) ключ может быть не нужен — тогда впиши любую заглушку, например `local`.</string>
     <string name="error_prefix">Ошибка: %1$s</string>
     <string name="status_reconnecting">Переподключение %1$d/%2$d…</string>
     <string name="status_tool">Инструмент: %1$s</string>
@@ -327,4 +327,5 @@
     <string name="bridge_hint_unreachable">ПК не отвечает. Проверь: 1) телефон и ПК в одной сети Wi-Fi (с мобильного интернета до домашнего ПК не достучаться) или оба в Tailscale; 2) на ПК включён доступ для телефона и приложение перезапущено; 3) брандмауэр Windows пропускает порт.</string>
     <string name="bridge_hint_refused">ПК отклонил подключение: Altair на ПК не запущен или слушает только сам компьютер. Включи доступ для телефона в приложении на ПК и перезапусти его.</string>
     <string name="bridge_hint_unknown_host">Имя ПК не найдено. Укажи его IP-адрес (или адрес в Tailscale).</string>
+    <string name="settings_version">Altair %1$s</string>
 </resources>
