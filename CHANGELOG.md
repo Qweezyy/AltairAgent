@@ -22,7 +22,7 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   layers are already Android-independent Kotlin); the open questions are background autonomy
   (iOS limits background work heavily) and distribution (TestFlight / sideloading).
 
-## [0.1.0] — Unreleased (first public release)
+## [0.1.0] — 2026-09-26 (first public release)
 
 The first public, **early-stage** release. Expect rough edges — see the disclaimer in the README.
 
