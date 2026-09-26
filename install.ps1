@@ -34,7 +34,7 @@ try {
         -Headers @{ "User-Agent" = "AltairInstaller"; "Accept" = "application/vnd.github+json" }
 } catch {
     Warn "No published release found for $Repo yet."
-    Warn "Once $AppName 0.1.0 is released this command will install it automatically."
+    Warn "Once the first $AppName release is published this command will install it automatically."
     Warn "For now you can run from source: clone the repo and run 'python pc/main.py'."
     return
 }

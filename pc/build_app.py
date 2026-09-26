@@ -171,6 +171,13 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="только проверить готовность к сборке")
     parser.add_argument("--no-shell", action="store_true", help="не собирать оболочку Tauri (Altair.exe)")
     args = parser.parse_args()
+    # VERSION is the one source: stamp it into package.json / Cargo.toml / pyproject.toml,
+    # which cannot read another file themselves (see version_sync.py).
+    from version_sync import sync as sync_version
+
+    stamped = sync_version()
+    if stamped:
+        print("Version from VERSION stamped into: " + ", ".join(stamped))
 
     if shutil.which("pyinstaller") is None:
         try:

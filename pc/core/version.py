@@ -30,8 +30,10 @@ def _read_version() -> str:
                 if value:
                     return value
         except OSError:
-            pass
-    return "0.1.0"
+            continue
+    # VERSION missing means a broken build: say so instead of passing for a real release
+    # (a stale real-looking number would also confuse the update check).
+    return "0.0.0"
 
 
 __version__ = _read_version()
