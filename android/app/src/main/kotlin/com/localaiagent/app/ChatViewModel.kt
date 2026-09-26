@@ -369,6 +369,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Добавить/обновить профиль модели. */
+    /** The UI opened Settings for a missing key; clear the request so the screen can be closed. */
+    fun consumeKeyPrompt() {
+        _ui.value = _ui.value.copy(needsKey = false)
+    }
+
     fun saveModel(profile: ModelProfile, makeActive: Boolean = true) {
         viewModelScope.launch {
             val (models, active) = settings.loadModels()
@@ -1519,6 +1524,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _ui.value = _ui.value.copy(language = lang)
     }
 
+    /** A plain-language next step for a failed bridge connection, or "" when the raw error says enough. */
+    private fun bridgeHint(error: String): String {
+        val id = when (com.localaiagent.app.bridge.BridgeDiagnostics.classify(error)) {
+            com.localaiagent.app.bridge.BridgeDiagnostics.Problem.UNREACHABLE -> R.string.bridge_hint_unreachable
+            com.localaiagent.app.bridge.BridgeDiagnostics.Problem.REFUSED -> R.string.bridge_hint_refused
+            com.localaiagent.app.bridge.BridgeDiagnostics.Problem.UNKNOWN_HOST -> R.string.bridge_hint_unknown_host
+            else -> return ""
+        }
+        return "\n\n" + tr(id)
+    }
+
     fun testBridge(pcUrl: String, pcToken: String) {
         viewModelScope.launch {
             _ui.value = _ui.value.copy(bridgeStatus = tr(R.string.status_checking))
@@ -1531,12 +1547,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.value = _ui.value.copy(bridgeStatus = tr(R.string.bridge_need_address))
                 return@launch
             }
+            com.localaiagent.app.bridge.BridgeDiagnostics.invalidIp(cfg.url)?.let { bad ->
+                _ui.value = _ui.value.copy(bridgeStatus = "✗ " + tr(R.string.bridge_bad_ip, bad))
+                return@launch
+            }
             if (cfg.token.isNotBlank() && insecureForCredentials(cfg.url)) {
                 _ui.value = _ui.value.copy(bridgeStatus = "✗ " + tr(R.string.net_insecure, cfg.url))
                 return@launch
             }
             val err = PcBridgeFacade.testConnection(cfg)
-            _ui.value = _ui.value.copy(bridgeStatus = if (err == null) tr(R.string.bridge_ok) else "✗ $err")
+            _ui.value = _ui.value.copy(bridgeStatus = if (err == null) tr(R.string.bridge_ok) else "✗ $err" + bridgeHint(err))
         }
     }
 

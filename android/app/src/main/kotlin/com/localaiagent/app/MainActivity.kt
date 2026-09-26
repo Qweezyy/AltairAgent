@@ -173,6 +173,7 @@ class MainActivity : ComponentActivity() {
                         clearNotice = vm::clearMcpNotice,
                     ),
                     bridgeSyncSupported = vm.bridgeSyncSupported,
+                    onKeyPromptShown = vm::consumeKeyPrompt,
                 )
             }
         }

@@ -322,4 +322,10 @@
     <string name="skill_deleted">Deleted: %1$s</string>
     <string name="skill_files">Files: %1$s</string>
     <string name="sync_removed">" · removed: %1$d"</string>
+    <string name="bridge_scan_qr">Scan QR code from PC</string>
+    <string name="bridge_scan_prompt">Point the camera at the QR code in the PC app (Settings → Phone)</string>
+    <string name="bridge_bad_ip">“%1$s” is not a valid IP address: each number must be 0–255. Check for a typo.</string>
+    <string name="bridge_hint_unreachable">The PC does not answer. Check: 1) the phone and the PC are on the same Wi-Fi (mobile data will not reach a home PC) or both are in Tailscale; 2) phone access is enabled in the PC app and the app was restarted; 3) the Windows firewall allows the port.</string>
+    <string name="bridge_hint_refused">The PC refused the connection: Altair on the PC is not running, or it only listens to the computer itself. Enable phone access in the PC app and restart it.</string>
+    <string name="bridge_hint_unknown_host">The PC name could not be found. Use its IP address (or its Tailscale address) instead.</string>
 </resources>

@@ -321,4 +321,10 @@
     <string name="skill_deleted">Удалено: %1$s</string>
     <string name="skill_files">Файлы: %1$s</string>
     <string name="sync_removed">" · удалено: %1$d"</string>
+    <string name="bridge_scan_qr">Сканировать QR-код с ПК</string>
+    <string name="bridge_scan_prompt">Наведи камеру на QR-код в приложении на ПК (Настройки → Телефон)</string>
+    <string name="bridge_bad_ip">«%1$s» — неверный IP-адрес: каждое число должно быть от 0 до 255. Проверь, нет ли опечатки.</string>
+    <string name="bridge_hint_unreachable">ПК не отвечает. Проверь: 1) телефон и ПК в одной сети Wi-Fi (с мобильного интернета до домашнего ПК не достучаться) или оба в Tailscale; 2) на ПК включён доступ для телефона и приложение перезапущено; 3) брандмауэр Windows пропускает порт.</string>
+    <string name="bridge_hint_refused">ПК отклонил подключение: Altair на ПК не запущен или слушает только сам компьютер. Включи доступ для телефона в приложении на ПК и перезапусти его.</string>
+    <string name="bridge_hint_unknown_host">Имя ПК не найдено. Укажи его IP-адрес (или адрес в Tailscale).</string>
 </resources>

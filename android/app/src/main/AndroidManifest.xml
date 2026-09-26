@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Агент ходит в интернет к LLM/поиску. Камера — позже, для view_image. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -22,6 +23,12 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.LocalAIAgent">
+
+        <!-- The QR scanner follows the phone's orientation instead of the library's forced landscape. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="screenOrientation" />
 
         <activity
             android:name=".MainActivity"

@@ -112,6 +112,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
     implementation(libs.okhttp)
+    // In-app QR scanner for PC pairing (ZXing, Apache-2.0, no Google Play Services).
+    implementation(libs.zxing.embedded)
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)

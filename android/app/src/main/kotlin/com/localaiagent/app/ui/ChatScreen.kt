@@ -238,6 +238,7 @@ fun ChatScreen(
     onSetSecretAvailability: (String, String) -> Unit = { _, _ -> },
     // Plugins (MCP) and skills
     pluginActions: PluginActions = PluginActions(),
+    onKeyPromptShown: () -> Unit = {},
     bridgeSyncSupported: Boolean = false,
 ) {
     var showSettings by remember { mutableStateOf(false) }
@@ -441,7 +442,15 @@ fun ChatScreen(
         }
     }
 
-    if (showSettings || state.needsKey) {
+    // A missing API key opens Settings once. It is a one-shot request, not a lock: the screen must
+    // stay closable, and saving a model with a key goes through a different path.
+    LaunchedEffect(state.needsKey) {
+        if (state.needsKey) {
+            showSettings = true
+            onKeyPromptShown()
+        }
+    }
+    if (showSettings) {
         SettingsScreen(
             state = state,
             onTest = onTestBridge,
@@ -2138,15 +2147,45 @@ private fun BridgeScreen(
                 modifier = Modifier.padding(start = 4.dp))
             val shape = RoundedCornerShape(16.dp)
 
-            // ---- Быстрое связывание: QR / ссылка (без ручного ввода) ----
+            // ---- Quick pairing: scan the PC's QR code or paste its link (no typing) ----
             val clipboard = LocalClipboardManager.current
             var link by remember { mutableStateOf("") }
+            val scanCtx = androidx.compose.ui.platform.LocalContext.current
+            // Camera apps and Google Lens rarely open custom altair:// links, so the phone scans the
+            // PC's QR code itself.
+            val scanQr = rememberLauncherForActivityResult(com.journeyapps.barcodescanner.ScanContract()) { res ->
+                val text = res.contents ?: return@rememberLauncherForActivityResult
+                val p = parsePairLink(text)
+                if (p == null) {
+                    android.widget.Toast.makeText(scanCtx, scanCtx.getString(R.string.pair_fail), android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                    link = text
+                    if (p.url.isNotBlank()) pcUrl = p.url
+                    if (p.token.isNotBlank()) pcToken = p.token
+                    if (p.workspace.isNotBlank()) pcWorkspace = p.workspace
+                    onSaveBridge(pcUrl, pcToken, pcWorkspace)
+                    onTest(pcUrl, pcToken)
+                }
+            }
             SettingsGroup(stringResource(R.string.bridge_quick)) {
                 Text(
                     stringResource(R.string.bridge_quick_hint),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
+                val scanPrompt = stringResource(R.string.bridge_scan_prompt)
+                Button(
+                    onClick = {
+                        scanQr.launch(
+                            com.journeyapps.barcodescanner.ScanOptions()
+                                .setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+                                .setPrompt(scanPrompt)
+                                .setBeepEnabled(false)
+                                .setOrientationLocked(false),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) { Text(stringResource(R.string.bridge_scan_qr)) }
                 OutlinedTextField(
                     link, { link = it }, label = { Text(stringResource(R.string.bridge_link_label)) },
                     singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = shape,
