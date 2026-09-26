@@ -68,6 +68,10 @@ The first public, **early-stage** release. Expect rough edges — see the discla
 - The PC agent is **Windows-only** for now (Linux and macOS are planned).
 - The Windows build is **not code-signed** — SmartScreen may warn on first launch.
 - Some server-side messages and descriptions of on-demand tools are still in Russian.
+- Phone ↔ PC works only on the same local network (e.g. one Wi-Fi); a shared Tailscale network works
+  as a workaround.
+- Scanning the pairing QR code from the phone does not work yet — pair by entering the PC address and
+  bridge token manually. A fix is in progress.
 - Phone ↔ PC chat sync is not there yet (specified, planned after 0.1.0).
 - Auto-update is off until an update feed is published.
 - Python on PATH is needed for the agent's own code checks (tests/linters) in your projects.

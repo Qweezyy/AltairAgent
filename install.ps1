@@ -1,4 +1,4 @@
-# Altair — one-command installer for Windows.
+# Altair - one-command installer for Windows.
 #
 #   irm https://raw.githubusercontent.com/Qweezyy/AltairAgent/main/install.ps1 | iex
 #
@@ -24,7 +24,7 @@ function Ok($m)   { Write-Host "  $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  $m" -ForegroundColor Yellow }
 
 Write-Host ""
-Write-Host "  ★ $AppName installer" -ForegroundColor Yellow
+Write-Host "  == $AppName installer ==" -ForegroundColor Yellow
 Write-Host ""
 
 # 1. Latest release from the GitHub API.
@@ -33,9 +33,16 @@ try {
     $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" `
         -Headers @{ "User-Agent" = "AltairInstaller"; "Accept" = "application/vnd.github+json" }
 } catch {
-    Warn "No published release found for $Repo yet."
-    Warn "Once the first $AppName release is published this command will install it automatically."
-    Warn "For now you can run from source: clone the repo and run 'python pc/main.py'."
+    $status = $null
+    try { $status = [int]$_.Exception.Response.StatusCode } catch {}
+    if ($status -eq 404) {
+        Warn "No published release found for $Repo yet."
+        Warn "Once the first $AppName release is published this command will install it automatically."
+        Warn "For now you can run from source: clone the repo and run 'python pc/main.py'."
+    } else {
+        Warn "Couldn't reach GitHub to look up the latest release: $($_.Exception.Message)"
+        Warn "Check your internet connection (or proxy) and run the command again."
+    }
     return
 }
 
@@ -88,7 +95,9 @@ try {
         Start-Sleep -Milliseconds 500
         if (Test-Path $Root) { Remove-Item $Root -Recurse -Force }
         New-Item -ItemType Directory -Path $Root -Force | Out-Null
-        Expand-Archive -Path $file -DestinationPath $Root -Force
+        Info "Unpacking..."
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($file, $Root)
 
         # Flatten a single top-level folder from the zip, if present.
         $entries = @(Get-ChildItem $Root)
@@ -115,6 +124,18 @@ try {
         }
         Ok "$AppName installed into $Root (shortcuts created)."
 
+        $wv2 = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+        $hasWebView2 = @(
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$wv2",
+            "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$wv2",
+            "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$wv2"
+        ) | Where-Object { (Get-ItemProperty -Path $_ -Name pv -ErrorAction SilentlyContinue).pv } |
+            Select-Object -First 1
+        if (-not $hasWebView2) {
+            Warn "The $AppName window needs the Microsoft Edge WebView2 Runtime, which was not found."
+            Warn "Install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703 if the window doesn't open."
+        }
+
         Info "Launching $AppName..."
         Start-Process $exe.FullName
     }
@@ -127,6 +148,6 @@ try {
 }
 
 Write-Host ""
-Ok "Done. Enjoy $AppName ✨"
+Ok "Done. Enjoy $AppName!"
 Write-Host ""
 }

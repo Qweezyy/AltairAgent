@@ -1,11 +1,21 @@
-# Altair
+<p align="center">
+  <img src="pc/desktop/src-tauri/icons/128x128@2x.png" alt="Altair logo" width="128" height="128">
+</p>
 
-### The autonomous engineer you can leave alone.
+<h1 align="center">Altair</h1>
 
-**Version 0.1.0 · alpha** — early days, built in the open with [Claude Code](https://claude.com/claude-code). Release history: [CHANGELOG.md](CHANGELOG.md).
+<p align="center"><b>The autonomous engineer you can leave alone.</b></p>
 
-[![CI](https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml"><img src="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0%20alpha-orange.svg" alt="Version 0.1.0 alpha"></a>
+</p>
+
+<p align="center">
+  Early days — built in the open with <a href="https://claude.com/claude-code">Claude Code</a>.
+  Release history: <a href="CHANGELOG.md">CHANGELOG.md</a>.
+</p>
 
 A private AI agent that lives **on your own hardware** — your PC, your phone, and, if you want,
 your servers — under **one identity and one shared set of chats**. It reads and edits files,
@@ -15,14 +25,25 @@ a snapshot before every edit and **one-click undo**. No cloud. Your own keys (BY
 > The goal of the project is an agent you can trust to take a task **all the way to a result**
 > without breaking your machine — with checks, rollback, and a clear "receipt" for every action.
 
-**Why Altair**
-- 🔒 **Local and private.** Runs on your hardware, your keys, open code — your data never goes to a cloud.
-- ↩️ **Safe autonomy.** Per-file snapshots + a "shadow git" give precise rollback of any edits and
-  command side effects (see "Undo edits"). You can walk away and let it work.
-- 📱 **One identity across bodies.** PC + Android already exist and talk over a local bridge; full chat
-  sync between them is next on the roadmap.
-- 🧩 **Extensible.** MCP servers and skills (Markdown) plug in without rewriting the core.
-- 🆓 **BYOK, no per-seat.** Any OpenAI-compatible provider or local models (Ollama / LM Studio).
+## Why Altair?
+
+Most agent harnesses are one more chat window for code. Altair is built around two ideas instead:
+**you should be able to leave it alone**, and **it should live on every device you own, not in a cloud.**
+
+- ↩️ **Safe autonomy.** A snapshot before every edit and a "shadow git" for command side effects give
+  one-click undo of anything the agent did. A health-gate runs your checks before it calls a task done,
+  and rolls the run back if they fail. You can walk away and let it work.
+- 📱 **One agent, several bodies.** The PC agent and the Android app are one identity: the phone brings
+  camera, files, location and notifications, the PC brings the heavy tools, and they hand tasks to
+  each other over a local bridge.
+- 🔒 **Local and private.** Runs on your hardware with your keys and open code — no Altair cloud, no
+  account, no telemetry. Your data goes only to the model provider you choose.
+- 🆓 **BYOK, no per-seat pricing.** Any OpenAI-compatible provider, Anthropic natively, or local models
+  (Ollama / LM Studio). Fallback models take over when the main one fails.
+- 🧩 **Extensible.** MCP servers (local or remote) and Markdown skills plug in live, without rewriting
+  the core.
+- 🤝 **Honest by design.** The agent says when a check did not run or a tool failed instead of claiming
+  success — and the project's status below does the same.
 
 ## Vision (where the project is heading)
 
@@ -55,6 +76,15 @@ And two modes per task: **"Autopilot"** (leave it alone — gates and rollback) 
 **In progress / planned:** a server tier and a pool of servers with automatic task placement; a single
 account and chat sync (keypair + QR pairing); deploy and self-heal "to production"; Autopilot/Co-pilot
 modes; generative media (via your keys); frictionless onboarding of all bodies in a couple of steps.
+
+**Known limitations in 0.1.0:**
+- **Phone ↔ PC works only on the same local network** (e.g. one Wi-Fi) for now. The bridge and
+  everything synced over it — memory, skills, MCP servers — needs both devices on one network.
+  Workaround: put both on one [Tailscale](https://tailscale.com/) network and use the PC's Tailscale address.
+- **Scanning the pairing QR code from the phone does not work yet** — a fix is in progress. Pair by
+  typing the PC address and the bridge token shown on the PC into the app's bridge settings.
+- Chat history is not synced between the phone and the PC yet (specified, planned next).
+- The PC agent is Windows-only; the Windows build is not code-signed (SmartScreen may warn).
 
 > ⚠️ **Early-stage software — use at your own risk.** Altair is in very early development and is built
 > largely with [Claude Code](https://claude.com/claude-code). It has had relatively little mileage on
@@ -93,6 +123,13 @@ icon in the header; on first launch a prompt bar appears (BYOK; saved to `.env` 
 
 > The build is not code-signed yet, so Windows SmartScreen may warn on first launch
 > ("More info" → "Run anyway"). You can always run from source instead (below).
+
+## Install on Android
+
+Download the `.apk` from the [latest release](https://github.com/Qweezyy/AltairAgent/releases/latest)
+on your phone and open it (Android asks once to allow installs from your browser or file manager).
+Android 8.0+ is required. To connect it to the PC, see "Known limitations" above — for now both
+devices need to be on the same network.
 
 ## Quick start from source (Windows)
 
