@@ -10,6 +10,7 @@ from core.analytics.charts import Chart, ChartError, Series, build_chart_html
 from core.analytics.finance import StatementError, analyze_statement
 from core.errors import ToolError
 from core.events import ArtifactCreated
+from core.i18n import tr
 from core.security.paths import resolve_path, safe_relpath
 from core.tools.base import Tool, ToolContext
 
@@ -45,6 +46,12 @@ class CreateChartTool(Tool):
     Args = CreateChartArgs
     category = "edit"
     timeout = 30.0
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        name = args.path.strip() or f"{_safe_name(args.title or args.kind)}.html"
+        if not name.lower().endswith(".html"):
+            name += ".html"
+        return tr("appr.chart", path=name)
 
     async def run(self, args: CreateChartArgs, ctx: ToolContext) -> str:
         chart = Chart(

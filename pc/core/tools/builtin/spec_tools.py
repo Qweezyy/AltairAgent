@@ -15,6 +15,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from core.events import ArtifactCreated, PlanStep, PlanUpdate
+from core.i18n import tr
 from core.security.paths import resolve_path, safe_relpath
 from core.tools.base import Tool, ToolContext, ToolResult
 
@@ -84,6 +85,9 @@ class WritePlanTool(Tool):
         # План-документ безопасен и обратим (снимок делается автоматически):
         # не дёргаем пользователя подтверждением ради него.
         return "allow"
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.plan", title=args.title)
 
     async def run(self, args: WritePlanArgs, ctx: ToolContext) -> ToolResult:
         content = _render(args)

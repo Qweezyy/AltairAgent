@@ -309,11 +309,12 @@ function diffHtml(name, args) {
 }
 function roundAddTool(call_id, name, args) {
   const round = state.round || startRound();
-  const L = stepLabel(name, args);
+  const L = stepLabel(name, args, "run");
   const row = el(`<div class="tool-row" data-open="0"><button class="tool-row-head" type="button"><span class="tr-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="tr-ico">${iconSvg(L.icon, "icon icon-sm")}</span><span class="tr-label">${L.label}</span>${diffHtml(name, args)}<span class="tr-status"><span class="spin">${iconSvg("refresh", "icon icon-sm")}</span></span></button><div class="tool-row-out" hidden></div></div>`);
   $(".tools-body", round).appendChild(row);
   round._rows.set(call_id, row);
-  round._tools.push({ label: L.label });
+  row._summary = { label: L.label };
+  round._tools.push(row._summary);
   // Живой счётчик времени выполнения инструмента: видно, что долгий инструмент
   // (deep_research и т.п.) реально работает, а не завис (#4).
   row._t0 = Date.now();
@@ -335,7 +336,8 @@ function roundFinishTool(call_id, name, args, ok, output) {
   $(".tr-elapsed", row)?.remove();
   if ((name || "").includes("research")) { state.researchEl?.remove(); state.researchEl = null; }
   row.classList.add(ok ? "ok" : "fail");
-  const L = stepLabel(name, args);
+  const L = stepLabel(name, args, ok ? "ok" : "fail");
+  if (row._summary) row._summary.label = L.label;
   // Обновляем метку и дифф (аргументы приходят полными только сейчас).
   $(".tr-label", row).innerHTML = L.label;
   const head = $(".tool-row-head", row);
@@ -372,7 +374,7 @@ function startHistoryRound() {
   return node;
 }
 function historyAddRow(round, e) {
-  const L = stepLabel(e.name, e.args); const ok = e.ok !== false;
+  const ok = e.ok !== false; const L = stepLabel(e.name, e.args, ok ? "ok" : "fail");
   const row = el(`<div class="tool-row ${ok ? "ok" : "fail"}" data-open="0"><button class="tool-row-head" type="button"><span class="tr-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="tr-ico">${iconSvg(L.icon, "icon icon-sm")}</span><span class="tr-label">${L.label}</span>${diffHtml(e.name, e.args)}<span class="tr-status">${ok ? iconSvg("check", "icon icon-sm") : iconSvg("x", "icon icon-sm")}</span></button><div class="tool-row-out" hidden></div></div>`);
   const outBox = $(".tool-row-out", row); let built = false;
   $(".tool-row-head", row).addEventListener("click", () => { const open = row.dataset.open === "1"; row.dataset.open = open ? "0" : "1"; if (!open && !built) { built = true; outBox.innerHTML = toolOutputHtml(e.name, e.args, e.output || ""); } outBox.hidden = open; });
@@ -416,24 +418,30 @@ function diffCounts(name, args) {
   } catch {}
   return null;
 }
-// Человеческая метка вызова инструмента (как в Claude Code) + иконка + доп-инфо.
-function stepLabel(name, args) {
+// Human label for a tool call (as in Claude Code) + icon + extra info. `phase` keeps it honest:
+// "run" — started or still waiting for approval ("Creating hello.txt"), "ok" — done
+// ("Created hello.txt"), "fail" — denied or failed ("Did not create hello.txt").
+function stepLabel(name, args, phase = "ok") {
   args = args || {};
   const q = (s) => `<span class="step-quote">«${esc(String(s).slice(0, 90))}»</span>`;
   const diff = diffCounts(name, args);
   const dh = diff ? ` <span class="step-diff"><span class="add">+${diff.add}</span> <span class="del">-${diff.del}</span></span>` : "";
+  const P = phase === "run" ? ".run" : phase === "fail" ? ".fail" : "";
+  const t = (key, params) => T(key + P, params);
   switch (name) {
-    case "execute_command": case "run_background": return { icon: "terminal", label: T("tool.cmd"), extra: args.command ? `<span class="mono step-quote">${esc(String(args.command).slice(0, 80))}</span>` : "" };
-    case "write_file": return { icon: "doc", label: T("tool.wrote", { f: esc(fileOf(args.path)) }), extra: dh };
-    case "edit_file": case "apply_patch": return { icon: "doc", label: T("tool.edited", { f: esc(fileOf(args.path) || T("tool.filesFallback")) }), extra: dh };
-    case "read_file": case "read_document": return { icon: "eye", label: T("tool.read", { f: esc(fileOf(args.path)) }), extra: "" };
-    case "list_directory": return { icon: "folder", label: T("tool.list", { f: esc(fileOf(args.path) || ".") }), extra: "" };
-    case "web_search": return { icon: "globe", label: T("tool.websearch"), extra: args.query ? q(args.query) : "" };
-    case "fetch_url": case "browse_page": return { icon: "globe", label: T("tool.openPage"), extra: args.url ? `<span class="step-quote">${esc(String(args.url).slice(0, 70))}</span>` : "" };
-    case "deep_research": return { icon: "flask", label: T("tool.research"), extra: args.query ? q(args.query) : "" };
-    case "grep_search": case "find_files": case "ast_search": return { icon: "search", label: T("tool.codeSearch"), extra: (args.pattern || args.query) ? q(args.pattern || args.query) : "" };
-    case "run_tests": return { icon: "check", label: T("tool.runTests"), extra: "" };
-    case "delete_path": return { icon: "trash", label: T("tool.deleted", { f: esc(fileOf(args.path)) }), extra: "" };
+    case "execute_command": case "run_background": return { icon: "terminal", label: t("tool.cmd"), extra: args.command ? `<span class="mono step-quote">${esc(String(args.command).slice(0, 80))}</span>` : "" };
+    case "write_file": return { icon: "doc", label: t("tool.wrote", { f: esc(fileOf(args.path)) }), extra: dh };
+    case "edit_file": case "apply_patch": return { icon: "doc", label: t("tool.edited", { f: esc(fileOf(args.path) || T("tool.filesFallback")) }), extra: dh };
+    case "read_file": case "read_document": return { icon: "eye", label: t("tool.read", { f: esc(fileOf(args.path)) }), extra: "" };
+    case "list_directory": return { icon: "folder", label: t("tool.list", { f: esc(fileOf(args.path) || ".") }), extra: "" };
+    case "web_search": return { icon: "globe", label: t("tool.websearch"), extra: args.query ? q(args.query) : "" };
+    case "fetch_url": case "browse_page": return { icon: "globe", label: t("tool.openPage"), extra: args.url ? `<span class="step-quote">${esc(String(args.url).slice(0, 70))}</span>` : "" };
+    case "deep_research": return { icon: "flask", label: t("tool.research"), extra: args.query ? q(args.query) : "" };
+    case "grep_search": case "find_files": case "ast_search": return { icon: "search", label: t("tool.codeSearch"), extra: (args.pattern || args.query) ? q(args.pattern || args.query) : "" };
+    case "run_tests": return { icon: "check", label: t("tool.runTests"), extra: "" };
+    case "delete_path": return { icon: "trash", label: t("tool.deleted", { f: esc(fileOf(args.path)) }), extra: "" };
+    case "create_chart": return { icon: "doc", label: t("tool.chart", { f: esc(fileOf(args.path) || args.title || "") }), extra: "" };
+    case "tool_search": return { icon: "search", label: t("tool.toolSearch"), extra: "" };
     default: {
       const a = Object.entries(args).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(" ").slice(0, 90);
       return { icon: "wrench", label: esc(name), extra: a ? `<span class="step-arg">${esc(a)}</span>` : "" };

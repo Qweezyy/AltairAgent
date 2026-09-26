@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from core.i18n import tr
 from core.tools.base import Tool, ToolContext, ToolResult
 
 #: Дольше трёх минут держать пользователя телефона в ожидании бессмысленно.
@@ -53,6 +54,9 @@ class PhoneRequestFileTool(Tool):
     category = "network"
     timeout = None  # ждём человека столько, сколько нужно
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.phone_file", hint=args.hint or "—")
+
     async def run(self, args: HintArgs, ctx: ToolContext) -> str | ToolResult:
         conn = _connection(ctx)
         if conn is None:
@@ -78,6 +82,9 @@ class PhoneRequestPhotoTool(Tool):
     Args = HintArgs
     category = "network"
     timeout = None
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.phone_photo", hint=args.hint or "—")
 
     async def run(self, args: HintArgs, ctx: ToolContext) -> str | ToolResult:
         conn = _connection(ctx)
@@ -114,6 +121,9 @@ class PhoneAskUserTool(Tool):
     category = "network"
     timeout = None
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.phone_ask", question=args.question)
+
     async def run(self, args: PhoneAskArgs, ctx: ToolContext) -> str | ToolResult:
         conn = _connection(ctx)
         if conn is None:
@@ -148,6 +158,9 @@ class PhoneCapabilityTool(Tool):
     Args = PhoneCapabilityArgs
     category = "network"
     timeout = None
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.phone_cap", capability=args.capability, task=args.task or "")
 
     async def run(self, args: PhoneCapabilityArgs, ctx: ToolContext) -> str | ToolResult:
         conn = _connection(ctx)

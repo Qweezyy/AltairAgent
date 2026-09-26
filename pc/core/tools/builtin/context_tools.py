@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from core.agent.session import estimate_tokens
 from core.events import ContextUsage
+from core.i18n import tr
 from core.tools.base import Tool, ToolContext, ToolResult
 
 
@@ -80,6 +81,9 @@ class ContextCompressTool(Tool):
     category = "edit"
     timeout = 15.0
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.ctx_compress", n=args.keep_last)
+
     async def run(self, args: ContextCompressArgs, ctx: ToolContext) -> str | ToolResult:
         session = _session(ctx)
         if session is None:
@@ -118,6 +122,9 @@ class ContextDropTool(Tool):
     Args = ContextDropArgs
     category = "edit"
     timeout = 15.0
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.ctx_drop", what=args.what)
 
     async def run(self, args: ContextDropArgs, ctx: ToolContext) -> str | ToolResult:
         session = _session(ctx)

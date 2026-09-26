@@ -138,6 +138,25 @@ def truncate_output(text: str, limit: int) -> str:
     )
 
 
+
+def args_summary(values: dict[str, Any], limit: int = 240) -> str:
+    """Short human view of tool arguments: key: value, long text cut, lists counted."""
+    parts: list[str] = []
+    for key, value in values.items():
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, str):
+            text = value if len(value) <= 80 else value[:77] + "…"
+        elif isinstance(value, (list, tuple)) and len(value) > 3:
+            text = f"[{len(value)}]"
+        else:
+            text = json.dumps(value, ensure_ascii=False)
+            text = text if len(text) <= 80 else text[:77] + "…"
+        parts.append(f"{key}: {text}")
+    summary = "; ".join(parts)
+    return summary if len(summary) <= limit else summary[: limit - 1] + "…"
+
+
 class Tool(ABC):
     """Базовый инструмент агента."""
 
@@ -208,8 +227,12 @@ class Tool(ABC):
         return "ask"
 
     def approval_reason(self, args: BaseModel) -> str:
-        preview = json.dumps(args.model_dump(), ensure_ascii=False)[:400]
-        return tr("appr.generic", name=self.name, args=preview)
+        """What the approval card says. Tools should override this with the concrete action
+        ("Create the chart file x.html"); this fallback at least names the kind of effect
+        instead of claiming every tool "will change your system"."""
+        key = {"edit": "appr.generic.edit", "execute": "appr.generic.execute",
+               "network": "appr.generic.network"}.get(self.category, "appr.generic")
+        return tr(key, name=self.name, args=args_summary(args.model_dump()))
 
     def parse_args(self, raw: dict[str, Any] | str | None) -> BaseModel:
         """Валидирует аргументы модели. Кидает ToolInputError с понятным текстом."""

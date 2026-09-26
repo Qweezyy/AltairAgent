@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from core.i18n import tr
 from core.research.images import find_images
 from core.tools.base import Tool, ToolContext, ToolResult
 
@@ -33,6 +34,9 @@ class FindImagesTool(Tool):
 
     def auto_verdict(self, args: FindImagesArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         return "allow"  # чтение из репутабельных источников, ничего не меняет
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.images", query=args.query)
 
     async def run(self, args: FindImagesArgs, ctx: ToolContext) -> ToolResult:
         found = await find_images(args.query, settings=ctx.settings, limit=args.limit)

@@ -86,6 +86,9 @@ class WebSearchTool(Tool):
         """Поиск только читает."""
         return "allow"
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.web_search", query=args.query)
+
     async def run(self, args: SearchArgs, ctx: ToolContext) -> str:
         results = await search_web(
             args.query,
@@ -134,6 +137,9 @@ class FetchUrlTool(Tool):
     def auto_verdict(self, args, ctx) -> str:  # type: ignore[override]
         """Чтение страницы безопасно."""
         return "allow"
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.open_url", url=args.url)
 
     async def run(self, args: FetchUrlArgs, ctx: ToolContext) -> str:
         url = _require_http_url(args.url)

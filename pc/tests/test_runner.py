@@ -134,6 +134,31 @@ async def test_verification_gate_satisfied_by_running_tests(settings):
     assert len(runner.llm.calls) == 3
 
 
+class _FailingTool(_NamedTool):
+    """A write that did not happen (denied by the user or failed)."""
+
+    async def run(self, args: PingArgs, ctx: ToolContext) -> str:
+        from core.errors import ToolError
+
+        raise ToolError("the user declined the call")
+
+
+async def test_denied_write_does_not_count_as_a_code_change(settings):
+    """Honesty: a declined write changed nothing — no "code changed but nothing was checked"
+    nudge and no health-gate run; the model's own final answer goes through."""
+    events = EventCollector()
+    turns = [
+        AssistantTurn(tool_calls=[tool_call("write_file", value="x")]),
+        AssistantTurn(content="The file was not created"),
+    ]
+    runner = make_runner(turns, settings, tools=[_FailingTool("write_file")], emitter=events)
+    result = await runner.run("create hello.txt")
+    assert result.text == "The file was not created"
+    assert len(runner.llm.calls) == 2  # no nudge round
+    logs = [getattr(e, "message", "") for e in events.events]
+    assert not any("nothing was checked" in str(m) for m in logs)
+
+
 async def test_verification_gate_disabled(settings):
     s = settings.model_copy(update={"verification_gate": False})
     turns = [

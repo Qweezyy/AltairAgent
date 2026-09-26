@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from core.errors import ToolError
+from core.i18n import tr
 from core.llm.openai_client import OpenAICompatClient
 from core.research.browser import render_page
 from core.research.documents import FORMATS, DocumentError, extract_document
@@ -44,6 +45,9 @@ class BrowsePageTool(Tool):
     def auto_verdict(self, args, ctx) -> str:  # type: ignore[override]
         """Открыть страницу — то же чтение, что и fetch_url."""
         return "allow"
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.open_url", url=args.url)
 
     async def run(self, args: BrowsePageArgs, ctx: ToolContext) -> str:
         page = await render_page(args.url, wait_for=args.wait_for or None, timeout=45.0)
@@ -185,6 +189,9 @@ class DeepResearchTool(Tool):
     def auto_verdict(self, args, ctx) -> str:  # type: ignore[override]
         """Исследование только читает открытые источники."""
         return "allow"
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.research", question=args.question)
 
     async def run(self, args: DeepResearchArgs, ctx: ToolContext) -> str:
         model = ctx.settings.research_model or ctx.settings.default_model

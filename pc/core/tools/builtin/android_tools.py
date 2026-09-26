@@ -219,6 +219,9 @@ class AndroidStopTool(Tool):
     def auto_verdict(self, args: EmptyArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         return "allow"
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.android_stop")
+
     async def run(self, args: EmptyArgs, ctx: ToolContext) -> ToolResult:
         stopped = await asyncio.to_thread(_MANAGER.stop)
         return ToolResult(content="Эмулятор остановлен." if stopped else "Запущенный приложением эмулятор не найден.")
@@ -235,6 +238,9 @@ class AndroidInstallTool(Tool):
     Args = AndroidApkArgs
     category = "execute"
     dangerous = True
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.android_install", apk=args.apk)
 
     async def run(self, args: AndroidApkArgs, ctx: ToolContext) -> ToolResult:
         try:

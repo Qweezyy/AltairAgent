@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from core.chat_search import search_chats
 from core.folder_memory import FolderMemory
+from core.i18n import tr
 from core.memory import CATEGORIES, MemoryStore
 from core.security.approval import ApprovalRequest
 from core.tools.base import Tool, ToolContext, ToolResult
@@ -197,6 +198,10 @@ class MemoryRemoveTool(Tool):
     category = "edit"
     timeout = 15.0
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        what = args.contains or (f"#{args.index}" if args.index is not None else "")
+        return tr("appr.mem_remove", scope=args.scope, what=what)
+
     async def run(self, args: MemoryRemoveArgs, ctx: ToolContext) -> str | ToolResult:
         if args.index is None and not args.contains.strip():
             return ToolResult.fail("нужен index или contains")
@@ -235,6 +240,9 @@ class MemoryReplaceTool(Tool):
     Args = MemoryReplaceArgs
     category = "edit"
     timeout = 15.0
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.mem_replace", scope=args.scope)
 
     async def run(self, args: MemoryReplaceArgs, ctx: ToolContext) -> str | ToolResult:
         by_index = args.index is not None and args.new_text.strip()

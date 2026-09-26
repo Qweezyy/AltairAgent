@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from core.i18n import tr
 from core.reminders import OPERATORS, SIGNALS, Reminder, ReminderStore, new_id
 from core.tools.base import Tool, ToolContext, ToolResult
 
@@ -58,6 +59,9 @@ class SetReminderTool(Tool):
     category = "edit"
     timeout = 15.0
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.remind", note=args.note)
+
     async def run(self, args: SetReminderArgs, ctx: ToolContext) -> str | ToolResult:
         note = args.note.strip()
         if not note:
@@ -102,6 +106,9 @@ class WatchConditionTool(Tool):
     category = "edit"
     timeout = 15.0
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.watch", note=args.note, signal=args.signal, op=args.op, value=args.value)
+
     async def run(self, args: WatchConditionArgs, ctx: ToolContext) -> str | ToolResult:
         note = args.note.strip()
         if not note:
@@ -141,6 +148,9 @@ class CancelReminderTool(Tool):
     Args = CancelReminderArgs
     category = "edit"
     timeout = 15.0
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.remind_cancel", id=args.id)
 
     async def run(self, args: CancelReminderArgs, ctx: ToolContext) -> str | ToolResult:
         reminder_id = args.id.strip()

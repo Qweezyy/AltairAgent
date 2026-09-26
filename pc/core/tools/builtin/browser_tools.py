@@ -67,6 +67,9 @@ class BrowserNavigateTool(_ReadOnly):
     Args = NavigateArgs
     timeout = 90.0
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.br_open", url=args.url)
+
     async def run(self, args: NavigateArgs, ctx: ToolContext) -> str:
         return await _guarded(ctx, await get_agent_browser().navigate(args.url, ctx.settings))
 
@@ -119,6 +122,9 @@ class BrowserClickTool(Tool):
     dangerous = True
     timeout = 60.0
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.br_click", ref=args.ref)
+
     async def run(self, args: ClickArgs, ctx: ToolContext) -> str:
         async def action(page, target) -> None:
             if args.double:
@@ -143,6 +149,10 @@ class BrowserTypeTool(Tool):
     category = "network"
     dangerous = True
     timeout = 60.0
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        text = args.text if len(args.text) <= 120 else args.text[:117] + "…"
+        return tr("appr.br_type_submit" if args.submit else "appr.br_type", text=text, ref=args.ref)
 
     async def run(self, args: TypeArgs, ctx: ToolContext) -> str:
         async def action(page, target) -> None:
@@ -176,6 +186,9 @@ class BrowserPressTool(Tool):
     dangerous = True
     timeout = 30.0
 
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.br_press", combo=args.key)
+
     async def run(self, args: PressArgs, ctx: ToolContext) -> str:
         async def action(page, target) -> None:
             if target is not None:
@@ -198,6 +211,9 @@ class BrowserSelectTool(Tool):
     category = "network"
     dangerous = True
     timeout = 30.0
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        return tr("appr.br_select", values=", ".join(args.values), ref=args.ref)
 
     async def run(self, args: SelectArgs, ctx: ToolContext) -> str:
         async def action(page, target) -> None:
@@ -360,6 +376,13 @@ class BrowserTabsTool(Tool):
         if args.action == "close" and not get_agent_browser().opened_by_agent(args.tab):
             return "ask"
         return "allow"
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        if args.action == "close":
+            return tr("appr.br_tab_close", tab=args.tab)
+        if args.action == "new":
+            return tr("appr.br_tab_new", url=args.url or "about:blank")
+        return tr("appr.br_tabs", action=args.action)
 
     async def run(self, args: TabsArgs, ctx: ToolContext) -> str:
         b = get_agent_browser()

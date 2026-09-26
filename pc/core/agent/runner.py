@@ -148,6 +148,9 @@ class AgentRunner:
         )
         #: Имена инструментов, вызванных за текущий запуск (заполняется в run()).
         self._called_tools: set[str] = set()
+        #: Edit tools that really ran: a denied or failed write changed nothing and must not
+        #: trigger the health-gate or the "code changed but nothing was checked" nudge.
+        self._changed_tools: set[str] = set()
 
     # ------------------------------------------------------------------
 
@@ -166,6 +169,7 @@ class AgentRunner:
         step = 0
         #: Имена инструментов, вызванных за этот запуск — для «ворот проверки».
         self._called_tools = set()
+        self._changed_tools = set()
         nudged_verify = False
         gate_cycles = 0  # сколько раз health-gate возвращал агента чинить проверки
         # Свежий запуск не наследует фоновые уведомления/наблюдатели прошлого.
@@ -243,7 +247,7 @@ class AgentRunner:
                 await self._report_usage(usage_total, pricing)
 
                 if not turn.wants_tools:
-                    edited = bool(self._called_tools & EDIT_TOOL_NAMES)
+                    edited = bool(self._changed_tools & EDIT_TOOL_NAMES)
 
                     # Health-gate: если правился код — перед завершением АВТОМАТИЧЕСКИ
                     # прогоняем тесты. Красно → возвращаем агента чинить (до лимита);
@@ -522,6 +526,8 @@ class AgentRunner:
             )
         )
         logger.info("Инструмент %s -> ok=%s за %d мс", call.name, result.ok, elapsed)
+        if result.ok:
+            self._changed_tools.add(call.name)
         return result
 
     async def _manage_context(self) -> None:
