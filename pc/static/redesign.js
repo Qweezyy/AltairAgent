@@ -2139,10 +2139,13 @@ async function renderPairSection(main) {
     if (!d || !d.ok) { body.textContent = T("pair.error"); return; }
     body.classList.remove("dim");
     const qr = d.qr_svg ? `<div class="pair-qr-box">${d.qr_svg}</div>` : `<div class="pair-qr-box pair-qr-missing">${esc(T("pair.qrUnavailable"))}</div>`;
-    const lanWarn = d.loopback_only && !d.bridge_lan
-      ? `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(T("pair.lanOff"))}</span></div>` : "";
-    const restartHint = d.bridge_lan && d.loopback_only
-      ? `<div class="pair-note">${esc(T("pair.restartHint"))}</div>` : "";
+    // What the phone will really reach: the addresses the bridge listens on right now.
+    const lanWarn = !d.bridge_lan
+      ? `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(T("pair.lanOff"))}</span></div>`
+      : d.loopback_only
+        ? `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(T("pair.lanFailed"))}</span></div>`
+        : `<div class="pair-note">${esc(T("pair.listening", { addrs: (d.listening || []).join(", ") }))}</div>`;
+    const restartHint = d.bridge_lan && !d.loopback_only ? `<div id="pair-fw"></div>` : "";
     body.innerHTML = `
       <p class="sr-desc" style="margin-bottom:16px">${esc(T("pair.desc"))}</p>
       ${lanWarn}
@@ -2168,11 +2171,32 @@ async function renderPairSection(main) {
     $("#pair-lan", body).addEventListener("click", async (e) => {
       const on = !e.currentTarget.classList.contains("on");
       e.currentTarget.classList.toggle("on", on);
-      try { await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bridge_lan: on }) }); toast(T("pair.restartHint")); } catch { toast(T("t.error"), "error"); }
+      try { await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bridge_lan: on }) }); } catch { toast(T("t.error"), "error"); }
       load();
     });
+    const fwBox = $("#pair-fw", body);
+    if (fwBox) renderFirewall(fwBox, load);
   };
   load();
+}
+
+// Windows Firewall: a missed or cancelled first-run prompt leaves the phone timing out with no
+// hint. Show it plainly and offer the one-click fix (Windows asks for confirmation itself).
+async function renderFirewall(box, reload) {
+  let fw;
+  try { fw = await (await fetch("/api/pair/firewall")).json(); } catch { return; }
+  if (!fw || !fw.supported) return;
+  if (fw.allowed) { box.innerHTML = `<div class="pair-note">${esc(T("pair.fwOk"))}</div>`; return; }
+  box.innerHTML = `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(T(fw.blocked ? "pair.fwBlocked" : "pair.fwMissing"))}</span>
+    <button class="btn btn-primary small" id="pair-fw-allow" style="margin-left:auto">${esc(T("pair.fwAllow"))}</button></div>`;
+  $("#pair-fw-allow", box).addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      const r = await (await fetch("/api/pair/firewall", { method: "POST" })).json();
+      toast(T(r.ok ? "pair.fwDone" : "pair.fwCancelled"), r.ok ? undefined : "error");
+    } catch { toast(T("t.error"), "error"); }
+    reload();
+  });
 }
 
 // ------------------------------------------------------------------ обзор папок

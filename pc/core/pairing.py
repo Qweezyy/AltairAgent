@@ -105,18 +105,24 @@ def rotate_bridge_token(settings: Settings | None = None) -> str:
     return token
 
 
-def bridge_base_url(settings: Settings | None = None, port: int | None = None) -> str:
-    """HTTP-адрес ПК-моста для телефона: http://<lan-ip>:<port>.
+def bridge_base_url(settings: Settings | None = None, port: int | None = None,
+                    listening: list[str] | None = None) -> str:
+    """HTTP-адрес ПК-моста для телефона: http://<ip>:<port>.
 
-    Телефон сам достроит его до ws://…/ws?token=…, поэтому отдаём именно базу.
-    `port` — реальный порт сервера (из запроса); при отсутствии берём из настроек.
+    `listening` — адреса, на которых мост реально принимает подключения (server/lan_bridge):
+    из них берём самый «домашний» (Wi-Fi/Ethernet раньше Tailscale). Телефон сам достроит
+    адрес до ws://…/ws?token=…, поэтому отдаём именно базу.
     """
     settings = settings or get_settings()
-    return f"http://{local_ip()}:{port or settings.port}"
+    candidates = [ip for ip in (listening or []) if _ip_score(ip) >= 0]
+    ip = max(candidates, key=_ip_score) if candidates else local_ip()
+    return f"http://{ip}:{port or settings.port}"
 
 
-def is_loopback_only(settings: Settings | None = None) -> bool:
-    """True, если сервер слушает только localhost — телефон не подключится."""
+def is_loopback_only(settings: Settings | None = None, listening: list[str] | None = None) -> bool:
+    """True, если мост не принимает подключений из сети — телефон не подключится."""
+    if listening is not None:
+        return not listening
     settings = settings or get_settings()
     host = (settings.host or "").strip().lower()
     return host in _LOOPBACK
@@ -155,14 +161,16 @@ def qr_svg(data: str, scale: int = 6) -> str | None:
         return None
 
 
-def pair_info(workspace: str = "", settings: Settings | None = None, port: int | None = None) -> dict:
+def pair_info(workspace: str = "", settings: Settings | None = None, port: int | None = None,
+              listening: list[str] | None = None) -> dict:
     """Полный набор для интерфейса связывания: адрес, токен, ссылка, QR, статус сети.
 
-    `port` — реальный порт сервера (из запроса), чтобы телефон шёл на верный порт.
+    `port` — реальный порт сервера (из запроса), чтобы телефон шёл на верный порт;
+    `listening` — адреса, на которых мост сейчас реально слушает сеть.
     """
     settings = settings or get_settings()
     real_port = port or settings.port
-    url = bridge_base_url(settings, real_port)
+    url = bridge_base_url(settings, real_port, listening)
     token = ensure_bridge_token(settings)
     ws = (workspace or "").strip()
     link = build_pair_link(url, token, ws)
@@ -174,6 +182,7 @@ def pair_info(workspace: str = "", settings: Settings | None = None, port: int |
         "qr_svg": qr_svg(link),
         "lan_ip": local_ip(),
         "port": real_port,
-        "loopback_only": is_loopback_only(settings),
+        "listening": list(listening or []),
+        "loopback_only": is_loopback_only(settings, listening),
         "bridge_lan": settings.bridge_lan,
     }

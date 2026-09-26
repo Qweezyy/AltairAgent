@@ -47,6 +47,7 @@ from server.files import (
     resolve_preview_path,
 )
 from server.folder_dialog import has_native_window, pick_files, pick_folder
+from server.lan_bridge import LanBridge
 from server.remote_auth import RemoteAuthMiddleware
 from server.swarm_ws import SwarmConnection, default_config
 from server.terminal_ws import serve_terminal
@@ -133,12 +134,18 @@ async def lifespan(app: FastAPI):
 
     reminder_task = asyncio.create_task(reminder_scheduler(app), name="reminder-scheduler")
 
+    # The phone bridge's network entrance (listeners on the LAN / Tailscale addresses).
+    app.state.lan = LanBridge(app)
+    if settings.bridge_lan:
+        await app.state.lan.apply(True)
+
     try:
         yield
     finally:
         reminder_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await reminder_task
+        await app.state.lan.close()
         await mcp.stop()
         await close_http_client()
         # Chromium живёт между запросами; без явного закрытия процесс останется
@@ -716,6 +723,8 @@ def create_app() -> FastAPI:
 
         # Новые настройки должны действовать сразу, включая новые подключения.
         app.state.settings = settings
+        if "bridge_lan" in payload:
+            await app.state.lan.apply(settings.bridge_lan)
         return {
             "ok": True,
             "warnings": warnings,
@@ -735,9 +744,25 @@ def create_app() -> FastAPI:
         from core.settings import get_settings as _gs
 
         port = request.url.port
-        info = await asyncio.to_thread(pair_info, workspace, None, port)
+        info = await asyncio.to_thread(pair_info, workspace, None, port, app.state.lan.listening())
         app.state.settings = _gs()  # мог появиться новый bridge_token
         return {"ok": True, **info}
+
+    @app.get("/api/pair/firewall")
+    async def pair_firewall() -> dict:
+        """Пропустит ли брандмауэр Windows телефон к приложению."""
+        from core import firewall
+
+        return {"ok": True, **(await firewall.status())}
+
+    @app.post("/api/pair/firewall")
+    async def pair_firewall_allow(request: Request) -> dict:
+        """Разрешить входящие подключения моста (Windows покажет запрос UAC)."""
+        _local_only(request)
+        from core import firewall
+
+        allowed = await firewall.allow()
+        return {"ok": allowed, **(await firewall.status())}
 
     @app.post("/api/pair/rotate")
     async def pair_rotate(request: Request, payload: dict | None = None) -> dict:
@@ -748,7 +773,7 @@ def create_app() -> FastAPI:
         workspace = (payload or {}).get("workspace", "") if payload else ""
         port = request.url.port
         await asyncio.to_thread(rotate_bridge_token)
-        info = await asyncio.to_thread(pair_info, workspace, None, port)
+        info = await asyncio.to_thread(pair_info, workspace, None, port, app.state.lan.listening())
         app.state.settings = _gs()
         return {"ok": True, **info}
 

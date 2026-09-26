@@ -556,13 +556,14 @@ def main() -> int:
     host = args.host or settings.host
     port = args.port or settings.port
 
-    # Доступ по сети для телефонного моста: если включён bridge_lan и хост не задан
-    # явно, слушаем 0.0.0.0 (чтобы телефон достучался по Wi-Fi), а окно приложения
-    # всё равно открываем на 127.0.0.1. Удалённый доступ защищён bridge_token.
+    # The phone bridge does not change what the main server binds: the app window is always
+    # on 127.0.0.1, and with "access over the network" on, server/lan_bridge.py adds listeners
+    # on the PC's network addresses (live, no restart). The shell passes --host 127.0.0.1, which
+    # used to keep the bridge loopback-only even when it was switched on.
     bind_host = host
-    if not args.host and settings.bridge_lan and host in ("127.0.0.1", "localhost", "::1"):
-        bind_host = "0.0.0.0"
-        host = "127.0.0.1"
+    from server.lan_bridge import configure as configure_lan
+
+    configure_lan(port)
 
     if args.check:
         return asyncio.run(run_check())
