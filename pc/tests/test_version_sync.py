@@ -31,19 +31,27 @@ def test_android_reads_version_file():
 
 def test_sync_bumps_only_the_package_versions(tmp_path, monkeypatch):
     for name, src in {"VERSION": version_sync.VERSION_FILE, "package.json": version_sync.PACKAGE_JSON,
-                      "Cargo.toml": version_sync.CARGO_TOML, "pyproject.toml": version_sync.PYPROJECT}.items():
+                      "Cargo.toml": version_sync.CARGO_TOML, "pyproject.toml": version_sync.PYPROJECT,
+                      "Cargo.lock": version_sync.CARGO_LOCK, "package-lock.json": version_sync.PACKAGE_LOCK}.items():
         shutil.copy(src, tmp_path / name)
     (tmp_path / "VERSION").write_text("2.3.4\n", encoding="utf-8")
     monkeypatch.setattr(version_sync, "REPO", tmp_path)
     monkeypatch.setattr(version_sync, "PC", tmp_path)
     for attr, name in (("VERSION_FILE", "VERSION"), ("PACKAGE_JSON", "package.json"),
-                       ("CARGO_TOML", "Cargo.toml"), ("PYPROJECT", "pyproject.toml")):
+                       ("CARGO_TOML", "Cargo.toml"), ("PYPROJECT", "pyproject.toml"),
+                       ("CARGO_LOCK", "Cargo.lock"), ("PACKAGE_LOCK", "package-lock.json")):
         monkeypatch.setattr(version_sync, attr, tmp_path / name)
 
-    assert sorted(version_sync.sync()) == ["Cargo.toml", "package.json", "pyproject.toml"]
+    assert sorted(version_sync.sync()) == ["Cargo.lock", "Cargo.toml", "package-lock.json", "package.json",
+                                           "pyproject.toml"]
     assert set(version_sync.stamped_versions().values()) == {"2.3.4"}
     cargo = (tmp_path / "Cargo.toml").read_text(encoding="utf-8")
     assert 'tauri = { version = "2.11.3"' in cargo  # dependency versions are left alone
+    lock = (tmp_path / "Cargo.lock").read_text(encoding="utf-8")
+    assert lock.count('version = "2.3.4"') == 1  # only the shell's own entry, not a dependency
+    npm = json.loads((tmp_path / "package-lock.json").read_text(encoding="utf-8"))
+    assert npm["version"] == npm["packages"][""]["version"] == "2.3.4"
+    assert npm["packages"]["node_modules/@tauri-apps/cli"]["version"] != "2.3.4"
     assert version_sync.sync() == []  # idempotent
 
 
