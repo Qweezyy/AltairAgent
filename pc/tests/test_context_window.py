@@ -35,14 +35,19 @@ def test_stale_page_snapshots_and_screenshots_are_dropped():
     dropped, freed = session.supersede_page_states()
 
     assert dropped == (10 - KEEP_PAGE_STATES) + (5 - KEEP_PAGE_STATES)
-    pages = [m for m in session.messages if m.get("role") == "tool"]
+    view = session.view()                                            # what the model gets
+    pages = [m for m in view if m.get("role") == "tool"]
     assert all(m["content"].startswith(CLEARED_MARK) for m in pages[:-KEEP_PAGE_STATES])
     assert "https://example.com/0" in pages[0]["content"]          # which page it was stays
     assert all(m["content"].startswith("URL:") for m in pages[-KEEP_PAGE_STATES:])
-    shots = [m for m in session.messages if m["role"] == "user" and TOOL_MEDIA_MARK in str(m["content"])]
+    shots = [m for m in view if m["role"] == "user" and TOOL_MEDIA_MARK in str(m["content"])]
     assert all(isinstance(m["content"], str) for m in shots[:-KEEP_PAGE_STATES])  # image gone, text kept
     assert all(isinstance(m["content"], list) for m in shots[-KEEP_PAGE_STATES:])
-    assert isinstance(session.messages[0]["content"], list)        # the user's own image is kept
+    assert isinstance(view[0]["content"], list)                    # the user's own image is kept
+    # The chat itself keeps every page and screenshot whole.
+    stored = [m for m in session.messages if m.get("role") == "tool"]
+    assert all(m["content"].startswith("URL:") for m in stored)
+    assert all(isinstance(m["content"], list) for m in session.messages if m["role"] == "user")
     assert session.token_estimate() < before / 3 and freed > 0
     assert session.supersede_page_states() == (0, 0)               # idempotent
 
@@ -193,7 +198,7 @@ def _page_history(shapes: str) -> Session:
 def test_page_diffs_keep_the_page_they_were_taken_against():
     session = _page_history("FddFdddFdddddd")
     session.supersede_page_states(keep=2, min_free_chars=0)
-    tools = [m["content"] for m in session.messages if m["role"] == "tool"]
+    tools = [m["content"] for m in session.view() if m["role"] == "tool"]
     alive = "".join("x" if c.startswith(CLEARED_MARK) else ("F" if c.count("\n") > 100 else "d") for c in tools)
     # Everything before the second-to-last whole page goes; that page and all after it stay.
     assert alive == "xxxFdddFdddddd"

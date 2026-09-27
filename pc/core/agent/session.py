@@ -1,9 +1,15 @@
-"""История диалога одной сессии.
+"""The conversation of one chat.
 
-Главная задача — держать историю валидной. Ключевое правило OpenAI-совместимых
-API: у каждого сообщения role="tool" должен быть предшествующий assistant с
-соответствующим tool_call_id. Обрезка истории обязана это сохранять, иначе
-провайдер вернёт 400 и агент «сломается» без видимой причины.
+Two rules:
+
+* Nothing of the conversation is ever lost. `messages` keeps every message as it was
+  written, across versions, restarts and model switches. What the model gets is a *view*
+  of it (`view()` / `snapshot()`): old tool outputs masked, stale page states replaced,
+  the oldest part folded into a summary. Those are marks next to the original message
+  (`_view`, `_hidden`, `_drop_calls`), never an edit of it, so the full text stays in the
+  chat file for the user, for search and for the agent's own recall.
+* The view stays valid for the provider: every role="tool" message follows the assistant
+  message with its tool_call_id, or the API answers 400.
 """
 
 from __future__ import annotations
@@ -29,8 +35,10 @@ TOKENS_PER_MEDIA_PART = 1500
 
 #: Prefix of a cleared tool output (see Session.clear_old_tool_results).
 CLEARED_MARK = "[Earlier"
-#: Tools whose outputs are never cleared: user answers and skill recipes are not
-#: reproducible by re-running a tool.
+#: Marks on a message that shape the model's view of it; the message itself is kept whole.
+VIEW = "_view"            # the content the model gets instead of the original
+HIDDEN = "_hidden"        # not sent at all (folded into a summary)
+DROP_CALLS = "_drop_calls"  # sent without its tool calls (their results were dropped)
 #: The text that opens a message carrying images from tools (browser/vision screenshots),
 #: so they can be told apart from the user's own attachments and dropped once stale.
 TOOL_MEDIA_MARK = "[Tool screenshot]"
@@ -41,6 +49,8 @@ PAGE_CHANGES_MARK = "Page changes since your previous look"
 #: Keep this many of the newest page snapshots / tool screenshots in full.
 KEEP_PAGE_STATES = 2
 
+#: Tools whose outputs are never cleared: user answers and skill recipes are not
+#: reproducible by re-running a tool.
 CLEARING_PROTECTED_TOOLS = frozenset({"ask", "read_skill", "phone_ask_user", "request_secret", "tool_search"})
 
 
@@ -60,6 +70,20 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
             total += len(str(call.get("function", {}).get("arguments", "")))
         total += 8  # служебные поля роли/разделители
     return total // CHARS_PER_TOKEN
+
+
+def model_view(message: dict[str, Any]) -> dict[str, Any] | None:
+    """What the model gets of one stored message: None when it is folded away."""
+    if message.get(HIDDEN):
+        return None
+    out = {k: v for k, v in message.items() if not k.startswith("_")}
+    if VIEW in message:
+        out["content"] = message[VIEW]
+    if message.get(DROP_CALLS):
+        out.pop("tool_calls", None)
+        if not str(out.get("content") or "").strip():
+            out["content"] = "[tool calls folded]"
+    return out
 
 
 def _first_text(content: list[Any]) -> str:
@@ -165,7 +189,7 @@ class Session:
         которая умеет её читать. Иначе провайдер вернёт «no endpoints found
         that support image input» — и виноватым будет выглядеть агент.
         """
-        for message in self.messages:
+        for message in self.view():
             content = message.get("content")
             if isinstance(content, list) and any(
                 isinstance(part, dict) and part.get("type") != "text" for part in content
@@ -187,11 +211,10 @@ class Session:
         )
         self.updated_at = time.time()
 
-    def append_timeline(self, entry: dict[str, Any], limit: int = 400) -> None:
-        """Добавляет запись в ленту интерфейса (вопрос, шаг, ответ)."""
+    def append_timeline(self, entry: dict[str, Any]) -> None:
+        """Adds an entry to the UI feed (a question, a step, an answer). The whole feed is
+        kept: it used to keep only the last 400 entries, and the start of long chats was lost."""
         self.timeline.append(entry)
-        if len(self.timeline) > limit:
-            del self.timeline[: len(self.timeline) - limit]
 
     def add_note(self, text: str) -> None:
         """Служебная реплика системы внутри диалога (например, лимит шагов)."""
@@ -243,24 +266,31 @@ class Session:
 
     # ------------------------------------------------------------------
 
+    def view(self) -> list[dict[str, Any]]:
+        """The conversation as the model gets it (see the module docstring)."""
+        return [v for m in self.messages if (v := model_view(m)) is not None]
+
     def token_estimate(self) -> int:
-        return estimate_tokens(self.messages)
+        return estimate_tokens(self.view())
 
     def _start_index(self) -> int:
-        """Индекс первого сообщения после системного промпта."""
+        """Index of the first message after the system prompt."""
         return 1 if self.messages and self.messages[0].get("role") == "system" else 0
 
-    def overflow_count(self, budget_tokens: int, keep_recent: int = 6) -> int:
-        """Сколько самых старых сообщений нужно убрать, чтобы влезть в бюджет.
+    def _visible_tail(self) -> list[int]:
+        """Indexes of the messages after the system prompt that the model still sees."""
+        return [i for i in range(self._start_index(), len(self.messages)) if not self.messages[i].get(HIDDEN)]
 
-        Считает целыми группами assistant→tool (обрывать пару нельзя — провайдер
-        вернёт 400). Не мутирует историю.
+    def overflow_count(self, budget_tokens: int, keep_recent: int = 6) -> int:
+        """How many of the oldest visible messages to fold so the view fits the budget.
+
+        Counts whole assistant→tool groups (a pair must not be split: the provider would
+        answer 400). Changes nothing.
         """
-        start = self._start_index()
-        tail = self.messages[start:]
+        tail = [model_view(self.messages[i]) or {} for i in self._visible_tail()]
         if len(tail) <= keep_recent:
             return 0
-        total = estimate_tokens(self.messages)
+        total = self.token_estimate()
         if total <= budget_tokens:
             return 0
 
@@ -277,20 +307,23 @@ class Session:
         return removed
 
     def peek_prefix(self, count: int) -> list[dict[str, Any]]:
-        """Копии первых `count` сообщений после системного промпта."""
-        start = self._start_index()
-        return [dict(m) for m in self.messages[start : start + count]]
+        """The model's view of the first `count` visible messages after the system prompt."""
+        return [model_view(self.messages[i]) or {} for i in self._visible_tail()[:count]]
 
     def replace_prefix(self, count: int, note: str) -> int:
-        """Убирает первые `count` сообщений после системного промпта и вставляет
-        вместо них одну служебную реплику `note`. Возвращает, сколько убрано."""
-        if count <= 0:
+        """Folds the first `count` visible messages after the system prompt into one note.
+
+        The messages stay in the chat (marked hidden from the model); the note goes where
+        they end, so the history keeps its order. Returns how many were folded.
+        """
+        folded = self._visible_tail()[:count] if count > 0 else []
+        if not folded:
             return 0
-        start = self._start_index()
-        del self.messages[start : start + count]
-        self.messages.insert(start, {"role": "system", "content": note})
+        for i in folded:
+            self.messages[i][HIDDEN] = True
+        self.messages.insert(folded[-1] + 1, {"role": "system", "content": note, "_summary": True})
         self.updated_at = time.time()
-        return count
+        return len(folded)
 
     def clear_old_tool_results(
         self,
@@ -299,15 +332,16 @@ class Session:
         min_free_chars: int = 0,
         protected: frozenset[str] = CLEARING_PROTECTED_TOOLS,
     ) -> tuple[int, int]:
-        """Replaces old, large tool outputs with a short note ("observation masking").
+        """Masks old, large tool outputs for the model with a short note ("observation masking").
 
         The call itself (tool name and arguments) stays, so the model still knows what it
-        did and can repeat it. The newest `keep_recent` outputs, small ones and outputs of
-        `protected` tools (user answers, skills) are kept. Nothing happens unless at least
-        `min_free_chars` would be freed: each clearing invalidates the prompt cache from
-        that point, so it must be worth it. Returns (outputs cleared, chars freed).
+        did and can repeat it; the output stays in the chat too, only the model's view of it
+        changes. The newest `keep_recent` outputs, small ones and outputs of `protected`
+        tools (user answers, skills) are kept. Nothing happens unless at least
+        `min_free_chars` would be freed: each change invalidates the prompt cache from
+        that point, so it must be worth it. Returns (outputs masked, chars freed).
         """
-        tool_indexes = [i for i, m in enumerate(self.messages) if m.get("role") == "tool"]
+        tool_indexes = [i for i, m in enumerate(self.messages) if m.get("role") == "tool" and not m.get(HIDDEN)]
         # The latest whole page stays: the page diffs after it are read against it.
         base = self._latest_full_page()
         candidates = []
@@ -318,7 +352,7 @@ class Session:
                 isinstance(content, str)
                 and len(content) >= min_chars
                 and message.get("name") not in protected
-                and not content.startswith(CLEARED_MARK)
+                and VIEW not in message
                 and index != base
             ):
                 candidates.append(index)
@@ -329,11 +363,11 @@ class Session:
         for index in candidates:
             message = self.messages[index]
             size = len(message["content"])
-            message["content"] = (
+            message[VIEW] = (
                 f"{CLEARED_MARK} output of {message.get('name') or 'tool'} ({size} chars) was cleared to "
                 "save context. Run the tool again if you need it.]"
             )
-            freed -= len(message["content"])
+            freed -= len(message[VIEW])
         self.updated_at = time.time()
         return len(candidates), freed
 
@@ -350,7 +384,7 @@ class Session:
         """
         pages = [i for i, m in enumerate(self.messages)
                  if m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_")
-                 and isinstance(m.get("content"), str) and not m["content"].startswith(CLEARED_MARK)]
+                 and isinstance(m.get("content"), str) and VIEW not in m and not m.get(HIDDEN)]
         full = [i for i in pages if FULL_PAGE_MARK in self.messages[i]["content"]
                 or len(self.messages[i]["content"]) >= 1_500 and PAGE_CHANGES_MARK not in self.messages[i]["content"]]
         # The newest `keep` whole pages stay, and every page diff after the oldest of them:
@@ -361,6 +395,7 @@ class Session:
                      and (i in full_set or PAGE_CHANGES_MARK in self.messages[i]["content"])]
         shots = [i for i, m in enumerate(self.messages)
                  if m.get("role") == "user" and isinstance(m.get("content"), list)
+                 and VIEW not in m and not m.get(HIDDEN)
                  and _first_text(m["content"]).startswith(TOOL_MEDIA_MARK)
                  and any(isinstance(p, dict) and p.get("type") != "text" for p in m["content"])]
         stale_snapshots = snapshots
@@ -374,42 +409,39 @@ class Session:
         for index in stale_snapshots:
             message = self.messages[index]
             first_line = message["content"].strip().splitlines()[0][:160]
-            message["content"] = (
+            message[VIEW] = (
                 f"{CLEARED_MARK} page state from {message.get('name')}: {first_line} ... "
                 f"({len(message['content'])} chars) is superseded by a later snapshot.]"
             )
         for index in stale_shots:
             text = _first_text(self.messages[index]["content"])
-            self.messages[index]["content"] = f"{text}\n{CLEARED_MARK} screenshot removed: a newer one supersedes it.]"
+            self.messages[index][VIEW] = f"{text}\n{CLEARED_MARK} screenshot removed: a newer one supersedes it.]"
         self.updated_at = time.time()
         return len(stale_snapshots) + len(stale_shots), freed
 
     def _latest_full_page(self) -> int:
         for index in range(len(self.messages) - 1, -1, -1):
             m = self.messages[index]
-            if (m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_")
+            if (m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_") and not m.get(HIDDEN)
                     and isinstance(m.get("content"), str) and FULL_PAGE_MARK in m["content"]):
                 return index
         return -1
 
     def trim(self, budget_tokens: int, keep_recent: int = 6) -> int:
-        """Убирает самые старые сообщения, пока история не влезет в бюджет.
-
-        Грубый вариант (просто выброс с пометкой) — запасной для компакции.
-        Возвращает количество удалённых сообщений.
-        """
+        """Folds the oldest messages until the view fits the budget (the fallback when a
+        summary cannot be made). Returns how many were folded."""
         count = self.overflow_count(budget_tokens, keep_recent)
         if not count:
             return 0
         return self.replace_prefix(
             count,
-            f"[Начало диалога свёрнуто: удалено {count} старых сообщений. "
-            "Если нужны детали — перечитай файлы инструментами.]",
+            f"[The start of the conversation ({count} messages) is folded to fit the context. It is "
+            "kept in this chat: search it with the chat search tool if you need the details.]",
         )
 
     def snapshot(self) -> list[dict[str, Any]]:
-        """Копия истории для передачи в LLM (защита от мутаций во время запроса)."""
-        return [dict(message) for message in self.messages]
+        """The model's view as fresh dicts (safe from changes while a request runs)."""
+        return self.view()
 
     def to_dict(self) -> dict[str, Any]:
         return {

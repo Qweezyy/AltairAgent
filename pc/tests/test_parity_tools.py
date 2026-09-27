@@ -135,10 +135,10 @@ async def test_context_compress_folds_prefix(settings):
         ContextCompressTool.Args(summary="Обсудили приветствие и чтение файла.", keep_last=1), ctx
     )
     assert "Сжато" in out
-    assert len(session.messages) < before
-    # Резюме на месте, последнее сообщение сохранено.
-    assert any("Сжатый контекст" in str(m.get("content")) for m in session.messages)
-    assert session.messages[-1]["content"] == "последнее сообщение"
+    assert len(session.view()) < before             # the model gets less...
+    assert len(session.messages) == before + 1      # ...the chat keeps everything, plus the summary
+    assert any("Сжатый контекст" in str(m.get("content")) for m in session.view())
+    assert session.view()[-1]["content"] == "последнее сообщение"
     assert any(isinstance(e, ContextUsage) for e in cap.events)
 
 
@@ -147,9 +147,11 @@ async def test_context_drop_tools_removes_orphans(settings):
     session = _session_with_history()
     ctx = ToolContext(settings=settings, session=session)
     await ContextDropTool().run(ContextDropTool.Args(what="tools"), ctx)
-    assert all(m.get("role") != "tool" for m in session.messages)
-    # У assistant не осталось «висячих» tool_calls.
-    assert all(not m.get("tool_calls") for m in session.messages)
+    view = session.view()
+    assert all(m.get("role") != "tool" for m in view)
+    # No assistant keeps tool calls whose results are gone (the provider would answer 400).
+    assert all(not m.get("tool_calls") for m in view)
+    assert any(m.get("role") == "tool" for m in session.messages)  # the chat keeps them
 
 
 @pytest.mark.asyncio
@@ -167,8 +169,8 @@ async def test_context_drop_images_strips_parts(settings):
     )
     ctx = ToolContext(settings=settings, session=session)
     await ContextDropTool().run(ContextDropTool.Args(what="images"), ctx)
-    user = session.messages[-1]
-    assert user["content"] == "что на фото?"  # осталась только текстовая часть
+    assert session.view()[-1]["content"] == "что на фото?"  # the model gets the text only
+    assert isinstance(session.messages[-1]["content"], list)  # the chat keeps the photo
 
 
 # ------------------------------------------------------------------ канвас

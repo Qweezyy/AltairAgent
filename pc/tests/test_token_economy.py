@@ -131,9 +131,11 @@ def test_clearing_replaces_old_outputs_and_keeps_recent():
     cleared, freed = session.clear_old_tool_results(keep_recent=4)
 
     assert cleared == 8 and freed > 30_000
-    tools = [m for m in session.messages if m["role"] == "tool"]
+    tools = [m for m in session.view() if m["role"] == "tool"]
     assert all(m["content"].startswith(CLEARED_MARK) for m in tools[:8])
     assert all(m["content"].startswith("output") for m in tools[8:])
+    # The outputs themselves stay in the chat; only the model's view is masked.
+    assert all(m["content"].startswith("output") for m in session.messages if m["role"] == "tool")
     # Calls stay intact, so the history remains valid for the provider.
     assert sum(1 for m in session.messages if m.get("tool_calls")) == 12
 

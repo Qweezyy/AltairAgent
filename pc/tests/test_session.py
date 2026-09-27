@@ -37,8 +37,9 @@ def test_trim_keeps_system_prompt_and_recent():
     removed = session.trim(budget_tokens=400)
 
     assert removed > 0
-    assert len(session.messages) < before
-    assert session.messages[0]["role"] == "system"
+    assert len(session.view()) < before                # the model gets less...
+    assert len(session.messages) == before + 1         # ...the chat keeps all, plus the note
+    assert session.view()[0]["role"] == "system"
     assert session.token_estimate() < before * 100
 
 
@@ -46,9 +47,10 @@ def test_trim_never_leaves_orphan_tool_messages():
     session = build_session(10)
     session.trim(budget_tokens=300)
 
-    for index, message in enumerate(session.messages):
+    view = session.view()
+    for index, message in enumerate(view):
         if message["role"] == "tool":
-            previous = session.messages[index - 1]
+            previous = view[index - 1]
             assert previous["role"] in {"assistant", "tool"}
             if previous["role"] == "assistant":
                 assert previous.get("tool_calls")
@@ -208,9 +210,13 @@ def test_replace_prefix_inserts_summary_note():
     assert len(old) == count
 
     session.replace_prefix(count, "[Ранее: краткое резюме беседы]")
-    assert session.messages[0]["role"] == "system"  # промпт
-    assert "краткое резюме" in session.messages[1]["content"]
-    # После вставки заметки orphan-tool не появилось.
-    for i, m in enumerate(session.messages):
+    view = session.view()
+    assert view[0]["role"] == "system"  # the prompt
+    assert "краткое резюме" in view[1]["content"]
+    # No orphan tool message after the note.
+    for i, m in enumerate(view):
         if m["role"] == "tool":
-            assert session.messages[i - 1]["role"] in {"assistant", "tool"}
+            assert view[i - 1]["role"] in {"assistant", "tool"}
+    # The folded messages are still in the chat, in order, before the note.
+    assert [m for m in session.messages if m.get("_hidden")] and "краткое резюме" in str(
+        session.messages[count + 1]["content"])

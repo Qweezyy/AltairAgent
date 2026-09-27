@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from core.agent.session import estimate_tokens
+from core.agent.session import DROP_CALLS, HIDDEN, VIEW, estimate_tokens, model_view
 from core.events import ContextUsage
 from core.i18n import tr
 from core.tools.base import Tool, ToolContext, ToolResult
@@ -39,7 +39,7 @@ class ContextInfoTool(Tool):
             return ToolResult.fail("контекст сессии недоступен")
         budget = ctx.settings.context_token_budget
         buckets = {"system": 0, "user": 0, "assistant": 0, "tool": 0}
-        for message in session.messages:
+        for message in session.view():  # what the model actually gets
             role = str(message.get("role") or "")
             key = role if role in buckets else "assistant"
             buckets[key] += estimate_tokens([message])
@@ -91,9 +91,7 @@ class ContextCompressTool(Tool):
         summary = args.summary.strip()
         if not summary:
             return ToolResult.fail("нужно summary — краткое резюме сворачиваемой части")
-        start = session._start_index()
-        tail_len = len(session.messages) - start
-        count = tail_len - args.keep_last
+        count = len(session._visible_tail()) - args.keep_last
         if count <= 0:
             return "Сжимать нечего — сообщений слишком мало."
         removed = session.replace_prefix(
@@ -131,26 +129,24 @@ class ContextDropTool(Tool):
         if session is None:
             return ToolResult.fail("контекст сессии недоступен")
         before = session.token_estimate()
+        # Only the model's view changes: the chat keeps every message (session.py).
         if args.what == "tools":
-            session.messages = [_strip_tool_calls(m) for m in session.messages if m.get("role") != "tool"]
+            for m in session.messages:
+                if m.get("role") == "tool":
+                    m[HIDDEN] = True
+                elif m.get("role") == "assistant" and m.get("tool_calls"):
+                    m[DROP_CALLS] = True
         else:  # images
-            session.messages = [_strip_images(m) for m in session.messages]
+            for m in session.messages:
+                seen = model_view(m)
+                if seen is not None:
+                    stripped = _strip_images(seen)
+                    if stripped is not seen:
+                        m[VIEW] = stripped["content"]
         session.updated_at = time.time()
         after = session.token_estimate()
         await ctx.emitter(ContextUsage(tokens=after))
         return f"Убрано ({args.what}). Было ~{before}, стало ~{after} токенов."
-
-
-def _strip_tool_calls(message: dict[str, Any]) -> dict[str, Any]:
-    """Убирает tool_calls у assistant, иначе останутся «висячие» вызовы без ответов
-    (провайдер вернёт 400, когда tool-сообщения удалены)."""
-    if message.get("role") == "assistant" and message.get("tool_calls"):
-        clone = dict(message)
-        clone.pop("tool_calls", None)
-        if not str(clone.get("content") or "").strip():
-            clone["content"] = "[вызовы инструментов свёрнуты]"
-        return clone
-    return message
 
 
 def _strip_images(message: dict[str, Any]) -> dict[str, Any]:

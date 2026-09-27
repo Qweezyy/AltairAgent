@@ -104,15 +104,26 @@ state and only grows — adding a tool changes the tools block once, not on ever
 
 ## 5a. Token economy
 
-Three layers keep long runs cheap, from cheapest to most expensive:
+Nothing of a conversation is ever deleted to save tokens. `Session.messages` and the UI feed
+(`Session.timeline`) keep everything, across restarts, updates and model switches; the model
+gets a *view* of it (`Session.view()`, sent via `snapshot()`), shaped by marks stored next to
+the original messages (`_view`, `_hidden`, `_drop_calls`) and stripped before sending. The
+agent can still reach the folded part with `search_chats`.
+
+The view is kept small in layers, from cheapest to most expensive:
 
 1. **Truncation at the source** — tools page and filter their output (`read_file` ranges,
-   `grep_search` output modes, `tool_output_limit` head+tail cut).
-2. **Clearing old tool outputs** (`Session.clear_old_tool_results`, `tool_result_clearing`) —
-   past half the context budget, old large outputs become a one-line note while the calls stay.
-   Done in one batch that frees a meaningful amount, because every change to earlier messages
-   invalidates the provider's prompt cache from that point.
-3. **Summarization** (`context_compaction`) — only when the history still exceeds the budget.
+   `grep_search` output modes, `tool_output_limit` head+tail cut), and the browser returns
+   only what changed on a page after an action.
+2. **Superseding page states** (`Session.supersede_page_states`) — browser snapshots and tool
+   screenshots made stale by newer ones are masked.
+3. **Clearing old tool outputs** (`Session.clear_old_tool_results`, `tool_result_clearing`) —
+   past half the context budget (at most 100K tokens), old large outputs are masked with a
+   one-line note while the calls stay. Done in one batch that frees a meaningful amount,
+   because every change to earlier messages invalidates the provider's prompt cache from
+   that point.
+4. **Summarization** (`context_compaction`) — only when the view still exceeds the budget:
+   the oldest messages are folded behind a summary note.
 
 ## 6. The LLM layer
 

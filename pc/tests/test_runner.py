@@ -533,8 +533,9 @@ async def test_compaction_falls_back_to_trim_on_summary_failure(settings):
 
     result = await runner.run("вопрос")
     assert result.ok
-    joined = " ".join(str(m.get("content")) for m in session.messages if m.get("role") == "system")
-    assert "удалено" in joined  # сработал запасной trim
+    joined = " ".join(str(m.get("content")) for m in session.view() if m.get("role") == "system")
+    assert "is folded to fit the context" in joined  # the fallback trim ran
+    assert sum(1 for m in session.messages if m.get("role") == "user") == 13  # nothing lost
 
 
 # ------------------------------------------------- health-gate + авто-откат
