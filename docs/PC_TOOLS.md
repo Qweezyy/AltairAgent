@@ -121,7 +121,7 @@ workspace (for testing the sites/apps the agent builds); links out of it are ref
 | `browser_press` | network | Press a key or combination, optionally on an element. | browser_tools |
 | `browser_select` | network | Choose option(s) in a drop-down by ref. | browser_tools |
 | `browser_hover` | read | Hover an element (menus, tooltips). | browser_tools |
-| `browser_upload` | network | Attach workspace files to a file-upload field. | browser_tools |
+| `browser_upload` | network | Attach workspace files to a file-upload field or upload button, without the OS file dialog (fills the hidden or on-click input directly). | browser_tools |
 | `browser_scroll` | read | Scroll the page or bring an element into view. | browser_tools |
 | `browser_wait` | read | Wait for text to appear/disappear or a fixed time. | browser_tools |
 | `browser_screenshot` | read | Screenshot the active tab and attach it to the conversation for the model to see. | browser_tools |

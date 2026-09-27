@@ -18,7 +18,7 @@ import asyncio
 import time
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -284,13 +284,64 @@ class BrowserHoverTool(_ReadOnly):
 
 
 class UploadArgs(BaseModel):
-    ref: str = Field(description="Ref of the file input (or the button that opens the file chooser)")
+    ref: str = Field(description="Ref of the file input, or of the button/area that opens the file chooser")
     paths: list[str] = Field(description="Workspace files to upload")
+
+
+# The file input a ref stands for: the element itself, the input of its <label>, one inside it,
+# or the only one near it or on the page. Sites hide the real input behind a styled button.
+_FIND_FILE_INPUT = """(el) => {
+  const isFile = (n) => n && n.tagName === "INPUT" && n.type === "file";
+  if (isFile(el)) return el;
+  const label = el.tagName === "LABEL" ? el : el.closest("label");
+  if (label && isFile(label.control)) return label.control;
+  const inner = el.querySelector && el.querySelector('input[type="file"]');
+  if (inner) return inner;
+  for (let n = el.parentElement, depth = 0; n && depth < 4; n = n.parentElement, depth++) {
+    const near = n.querySelectorAll('input[type="file"]');
+    if (near.length === 1) return near[0];
+  }
+  const all = document.querySelectorAll('input[type="file"]');
+  return all.length === 1 ? all[0] : null;
+}"""
+
+# Many editors create the input only on click (input.click() / showPicker()) and never put it in
+# the page. Catch it instead of letting the OS file dialog open, which the agent cannot operate.
+_CATCH_FILE_INPUT = """() => {
+  if (window.__altairUpload) return;
+  const proto = HTMLInputElement.prototype, saved = { click: proto.click, showPicker: proto.showPicker };
+  const box = window.__altairUpload = { input: null, saved };
+  const grab = (orig) => function (...args) {
+    if (this.type === "file") { box.input = this; return undefined; }
+    return orig.apply(this, args);
+  };
+  proto.click = grab(saved.click);
+  if (saved.showPicker) proto.showPicker = grab(saved.showPicker);
+}"""
+
+_RELEASE_FILE_INPUT = """() => {
+  const box = window.__altairUpload; if (!box) return;
+  HTMLInputElement.prototype.click = box.saved.click;
+  if (box.saved.showPicker) HTMLInputElement.prototype.showPicker = box.saved.showPicker;
+  delete window.__altairUpload;
+}"""
+
+# A caught input that is not in the page: attach it (hidden) so files can be set on it; its own
+# change handler still fires, which is what the site listens to.
+_CAUGHT_INPUT = """() => {
+  const box = window.__altairUpload, input = box && box.input;
+  if (input && !input.isConnected) { input.style.display = "none"; document.body.appendChild(input); }
+  return input || null;
+}"""
 
 
 class BrowserUploadTool(Tool):
     name = "browser_upload"
-    description = "Attaches workspace files to a file-upload field of the page."
+    description = (
+        "Attaches workspace files to a file-upload field of the page. Give the ref of the input or of "
+        "the upload button itself - do not click the button first: that opens the system file dialog, "
+        "which you cannot operate."
+    )
     Args = UploadArgs
     category = "network"
     dangerous = True
@@ -303,14 +354,49 @@ class BrowserUploadTool(Tool):
         files = [str(resolve_path(p, settings=ctx.settings, must_exist=True, must_be_file=True)) for p in args.paths]
 
         async def action(page, target) -> None:
-            try:
-                await target.set_input_files(files, timeout=5000)
-            except Exception:  # noqa: BLE001 — a styled button: catch the chooser it opens
-                async with page.expect_file_chooser(timeout=10000) as chooser:
-                    await target.click()
-                await (await chooser.value).set_files(files)
+            if target is None:
+                raise ToolError("Give the ref of the file input or of the upload button.")
+            await upload_files(page, target, files)
 
         return await _guarded(ctx, await get_agent_browser().act(action, args.ref, sandbox=ctx.settings))
+
+
+async def upload_files(page: Any, target: Any, files: list[str]) -> str:
+    """Sets `files` on the upload field `target` stands for, without the OS file dialog.
+
+    The embedded browser is driven over CDP, where the "file chooser opened" event does not
+    reach us, so waiting for it (the usual way) times out. The input is filled directly
+    instead. Returns how it was found (for tests and the log).
+    """
+    found = (await target.evaluate_handle(_FIND_FILE_INPUT)).as_element()
+    if found is not None:
+        await found.set_input_files(files, timeout=10000)
+        return "input"
+    await page.evaluate(_CATCH_FILE_INPUT)
+    try:
+        await target.click(timeout=10000)
+        caught = None
+        for _ in range(20):  # the site may open it a moment after the click
+            caught = (await page.evaluate_handle(_CAUGHT_INPUT)).as_element()
+            if caught is not None:
+                break
+            await asyncio.sleep(0.1)
+        if caught is not None:
+            await caught.set_input_files(files, timeout=10000)
+            return "caught"
+    finally:
+        await page.evaluate(_RELEASE_FILE_INPUT)
+    # Last resort, for browsers that do report the chooser (the Chrome fallback).
+    try:
+        async with page.expect_file_chooser(timeout=3000) as chooser:
+            await target.click(timeout=5000)
+        await (await chooser.value).set_files(files)
+        return "chooser"
+    except Exception as exc:  # noqa: BLE001 - reported to the agent with a way forward
+        raise ToolError(
+            "No file field found for this element and clicking it opened none. Look for another "
+            "upload button or area (a snapshot may show an input of type file), or ask the user."
+        ) from exc
 
 
 class ScrollArgs(BaseModel):
