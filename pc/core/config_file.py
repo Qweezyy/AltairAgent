@@ -49,6 +49,7 @@ EDITABLE_KEYS = {
     "TOOL_RESULT_CLEARING": "tool_result_clearing",
     "TOOL_SEARCH": "tool_search",
     "VERIFICATION_GATE": "verification_gate",
+    "CHAT_TITLES": "chat_titles",
     "BRIDGE_TOKEN": "bridge_token",
     "BRIDGE_LAN": "bridge_lan",
     "BROWSER_NETWORK": "browser_network",
@@ -57,7 +58,7 @@ EDITABLE_KEYS = {
 #: Настройки-переключатели: в .env пишем строго "true"/"false".
 BOOL_KEYS = {
     "ALLOW_SUBAGENTS", "CONTEXT_COMPACTION", "TOOL_RESULT_CLEARING", "TOOL_SEARCH",
-    "VERIFICATION_GATE", "MODEL_ROUTING", "BRIDGE_LAN",
+    "VERIFICATION_GATE", "MODEL_ROUTING", "BRIDGE_LAN", "CHAT_TITLES",
 }
 
 #: Ключи, значения которых нельзя показывать целиком.
@@ -132,6 +133,7 @@ def read_public_settings(settings: Settings | None = None) -> dict:
         "tool_result_clearing": settings.tool_result_clearing,
         "tool_search": settings.tool_search,
         "verification_gate": settings.verification_gate,
+        "chat_titles": settings.chat_titles,
         "searxng_url": settings.searxng_url,
         "tavily_key_set": bool(settings.tavily_api_key),
         "tavily_key_hint": mask_secret(settings.tavily_api_key),

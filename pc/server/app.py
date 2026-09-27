@@ -251,6 +251,39 @@ def create_app() -> FastAPI:
         sessions = await store.async_list()
         return {"sessions": sessions}
 
+    @app.get("/api/sessions/search")
+    async def search_sessions(q: str = "") -> dict:
+        """Chats whose title or text contains the words: one row per chat, with the best
+        fragment — the rail opens the chat right at that spot."""
+        from core.chat_search import search_chats
+
+        query = q.strip()
+        if not query:
+            return {"results": []}
+        store: SessionStore = app.state.store
+        hits = await asyncio.to_thread(search_chats, store.storage_dir, query, limit=200)
+        words = [w for w in query.lower().split() if len(w) > 1]
+
+        def lead(snippet: str) -> str:
+            # The rail shows two lines: bring the matched word near the start of the fragment.
+            text = " ".join(snippet.split())
+            at = min((i for i in (text.lower().find(w) for w in words) if i >= 0), default=-1)
+            return "…" + text[at - 30:].lstrip() if at > 40 else text
+
+        results: dict[str, dict] = {}
+        for hit in hits:
+            if hit.session_id not in results:
+                results[hit.session_id] = {"id": hit.session_id, "title": hit.title, "snippet": lead(hit.snippet),
+                                           "role": "user" if hit.role == "запрос" else "agent",
+                                           "updated_at": hit.updated_at}
+        low = query.lower()
+        for item in await store.async_list():
+            if item["id"] not in results and low in (item.get("title") or "").lower():
+                results[item["id"]] = {"id": item["id"], "title": item.get("title", ""), "snippet": "",
+                                       "role": "", "updated_at": item.get("updated_at", 0)}
+        ordered = sorted(results.values(), key=lambda r: r["updated_at"], reverse=True)
+        return {"results": ordered[:50], "query": query}
+
     @app.get("/api/sessions/{session_id}")
     async def get_session(session_id: str) -> dict:
         store: SessionStore = app.state.store
@@ -763,6 +796,26 @@ def create_app() -> FastAPI:
         info = await asyncio.to_thread(pair_info, workspace, None, port, app.state.lan.listening())
         app.state.settings = _gs()  # мог появиться новый bridge_token
         return {"ok": True, **info}
+
+    @app.get("/api/providers")
+    async def providers_get(request: Request) -> dict:
+        """The providers/models list with keys — for the app window on this PC only."""
+        _local_only(request)
+        from core import providers
+
+        return {"providers": await asyncio.to_thread(providers.load, app.state.settings)}
+
+    @app.post("/api/providers")
+    async def providers_put(request: Request, payload: dict) -> dict:
+        """The window mirrors its providers list here; keys are resolved from it per model."""
+        _local_only(request)
+        from core import providers
+
+        items = payload.get("providers")
+        if not isinstance(items, list):
+            return {"ok": False, "error": "providers must be a list"}
+        await asyncio.to_thread(providers.save, items, app.state.settings)
+        return {"ok": True}
 
     @app.get("/api/browser/net")
     async def browser_net_status(host: str = "") -> dict:

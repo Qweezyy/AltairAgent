@@ -573,7 +573,7 @@ const HANDLERS = {
     if (restoreId && restoreId !== m.session_id) { send({ type: "load_session", session_id: restoreId }); }
     else { loadSession(m.session); }
     if ((m.warnings || []).some((w) => /LLM_API_KEY/i.test(w))) toast(T("ev.noApiKey"), "error");
-    refreshSessions(); loadModels(); checkUpdate();
+    refreshSessions(); syncProviders().then(loadModels); checkUpdate();
     // The server's own texts (approvals, the run log, errors) follow the UI language.
     send({ type: "ui_lang", lang: window.I18N?.lang?.() || "en" });
     window.BrowserPanel?.onReady();
@@ -587,7 +587,8 @@ const HANDLERS = {
   browser_agent_active: (m) => window.BrowserPanel?.handle(m),
   "browser.handoff": (m) => showHandoff(m),
   state(m) { setRunning(m.state === "running" || m.state === "waiting_approval"); setStatus(m.state); },
-  "session.loaded"(m) { setWorkspace(m.workspace); if (m.mode) updateMode(m.mode); state.autoWorkspace = !!m.auto_workspace; loadSession(m.session); refreshSessions(); },
+  "session.loaded"(m) { setWorkspace(m.workspace); if (m.mode) updateMode(m.mode); state.autoWorkspace = !!m.auto_workspace; loadSession(m.session); if (state.jumpTo) setTimeout(jumpToMatch, 60); else refreshSessions(); },
+  "session.title"(m) { applySessionTitle(m); },
   "workspace.updated"(m) { setWorkspace(m.workspace); toast(T("ev.wsUpdated")); },
   "workspace.error"(m) { toast(m.message, "error"); },
   "mode.updated"(m) { updateMode(m.mode); },
@@ -810,6 +811,10 @@ function loadSession(session) {
   state.currentHasContent = tl.length > 0;
   if (tl.length) { try { LS.set("last_session_id", session.id); } catch {} }
   if (!tl.length) { showWelcome(); return; }
+  // An old chat is never a welcome screen: drop the sky at once (the fade is only for the
+  // first message of a new chat).
+  window.Cosmos?.unmount();
+  els.app?.classList.remove("welcome-active", "welcome-leaving");
   let group = null;
   const closeGroup = () => { if (group) { finalizeHistoryRound(group); group = null; } };
   for (const e of tl) {
@@ -857,15 +862,100 @@ function showWelcome() {
 
 // ------------------------------------------------------------------ рельс сессий
 let _sessTimer = null;
-function refreshSessions() { clearTimeout(_sessTimer); _sessTimer = setTimeout(async () => { try { renderSessions((await (await fetch("/api/sessions")).json()).sessions || []); } catch {} }, 250); }
+function refreshSessions() {
+  clearTimeout(_sessTimer);
+  _sessTimer = setTimeout(async () => {
+    const q = ($("#session-search")?.value || "").trim();
+    if (q) { renderSearch(q); return; }
+    try { state.sessionList = (await (await fetch("/api/sessions")).json()).sessions || []; renderSessions(state.sessionList); } catch {}
+  }, 250);
+}
+function sessionRow(s) {
+  const title = dispTitle(s.title) || T("side.untitled");
+  const item = el(`<div class="session-item ${s.id === state.sessionId ? "active" : ""}" role="button" tabindex="0" data-id="${escAttr(s.id)}">${iconSvg("message", "icon icon-sm")}<span class="s-title truncate">${esc(title)}</span><span class="s-ren btn-icon small" data-tip="${escAttr(T("side.rename"))}">${iconSvg("doc", "icon icon-sm")}</span><span class="s-del btn-icon small" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</span></div>`);
+  item.addEventListener("click", (e) => {
+    if (e.target.closest(".s-del")) { deleteSession(s.id); e.stopPropagation(); return; }
+    if (e.target.closest(".s-ren")) { e.stopPropagation(); startRename(item, s.id, s.title); return; }
+    if (e.target.closest(".s-edit")) return;
+    if (s.id !== state.sessionId) send({ type: "load_session", session_id: s.id });
+  });
+  item.addEventListener("dblclick", (e) => { if (!e.target.closest(".s-del,.s-edit")) startRename(item, s.id, s.title); });
+  return item;
+}
 function renderSessions(list) {
-  const q = ($("#session-search")?.value || "").toLowerCase();
-  const f = q ? list.filter((s) => (s.title || "").toLowerCase().includes(q)) : list;
-  els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.chats"))}</div>` + (f.length ? "" : `<div class="dim" style="padding:8px 12px">${esc(T("side.empty"))}</div>`);
-  for (const s of f) {
-    const item = el(`<button class="session-item ${s.id === state.sessionId ? "active" : ""}">${iconSvg("message", "icon icon-sm")}<span class="s-title truncate">${esc(dispTitle(s.title) || T("side.untitled"))}</span><span class="s-del btn-icon small" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</span></button>`);
-    item.addEventListener("click", (e) => { if (e.target.closest(".s-del")) { deleteSession(s.id); e.stopPropagation(); return; } send({ type: "load_session", session_id: s.id }); });
+  list = list || state.sessionList || [];
+  // The new chat shows up right after the user's first message, before the server has it.
+  const pending = state.pendingChat && !list.some((x) => x.id === state.pendingChat.id) ? [state.pendingChat] : [];
+  const all = [...pending, ...list];
+  els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.chats"))}</div>` + (all.length ? "" : `<div class="dim" style="padding:8px 12px">${esc(T("side.empty"))}</div>`);
+  for (const s of all) els.sessions.appendChild(sessionRow(s));
+}
+// Inline rename in the rail (also from the chat title in the header).
+function startRename(row, id, current) {
+  const span = row ? $(".s-title", row) : null;
+  const input = el(`<input class="s-edit field" value="${escAttr(dispTitle(current) || "")}" maxlength="120" />`);
+  if (span) { span.replaceWith(input); } else return;
+  input.focus(); input.select();
+  let done = false;
+  const finish = (save) => {
+    if (done) return; done = true;
+    const title = input.value.trim();
+    if (save && title && title !== dispTitle(current)) send({ type: "rename_session", session_id: id, title });
+    const back = el(`<span class="s-title truncate">${esc(save && title ? title : dispTitle(current) || T("side.untitled"))}</span>`);
+    input.replaceWith(back);
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); finish(true); } else if (e.key === "Escape") finish(false); e.stopPropagation(); });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("click", (e) => e.stopPropagation());
+}
+// A title arrived (from the model, typed out) or the user renamed a chat.
+function applySessionTitle(m) {
+  const list = state.sessionList || [];
+  const known = list.find((x) => x.id === m.session_id);
+  if (known) known.title = m.title;
+  if (state.pendingChat && state.pendingChat.id === m.session_id) state.pendingChat.title = m.title;
+  const row = els.sessions.querySelector(`.session-item[data-id="${CSS.escape(m.session_id)}"] .s-title`);
+  if (row) { if (m.renamed) row.textContent = m.title; else typeText(row, m.title); }
+  if (m.session_id === state.sessionId) { if (m.renamed) els.chatTitle.textContent = m.title; else typeText(els.chatTitle, m.title); }
+}
+// Search in chat contents: one row per chat with the matching fragment; a click opens the
+// chat right at that spot, highlighted.
+async function renderSearch(q) {
+  let d; try { d = await (await fetch(`/api/sessions/search?q=${encodeURIComponent(q)}`)).json(); } catch { return; }
+  if ((($("#session-search")?.value) || "").trim() !== q) return;  // typed on meanwhile
+  const res = d.results || [];
+  els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.found", { n: res.length }))}</div>` + (res.length ? "" : `<div class="dim" style="padding:8px 12px">${esc(T("side.notFound"))}</div>`);
+  const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+  const mark = (text) => { let h = esc(text); words.forEach((w) => { h = h.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (x) => `<mark>${x}</mark>`); }); return h; };
+  for (const r of res) {
+    const item = el(`<button class="session-item search-hit ${r.id === state.sessionId ? "active" : ""}">${iconSvg("message", "icon icon-sm")}<span class="s-col"><span class="s-title truncate">${mark(dispTitle(r.title) || T("side.untitled"))}</span>${r.snippet ? `<span class="s-snippet">${mark(r.snippet)}</span>` : ""}</span></button>`);
+    item.addEventListener("click", () => {
+      state.jumpTo = q;
+      if (r.id === state.sessionId) jumpToMatch(); else send({ type: "load_session", session_id: r.id });
+    });
     els.sessions.appendChild(item);
+  }
+}
+function jumpToMatch() {
+  const q = (state.jumpTo || "").trim(); state.jumpTo = "";
+  if (!q) return;
+  $$("mark.find-hit", els.feedInner).forEach((m) => m.replaceWith(document.createTextNode(m.textContent)));
+  const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+  const needles = [q.toLowerCase(), ...words];
+  const walker = document.createTreeWalker(els.feedInner, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement && n.parentElement.closest(".answer-body, .msg-user, .user-text, .md") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) });
+  for (const needle of needles) {
+    walker.currentNode = els.feedInner;
+    let node;
+    while ((node = walker.nextNode())) {
+      const at = node.nodeValue.toLowerCase().indexOf(needle);
+      if (at === -1) continue;
+      const range = document.createRange();
+      range.setStart(node, at); range.setEnd(node, at + needle.length);
+      const hit = document.createElement("mark"); hit.className = "find-hit";
+      range.surroundContents(hit);
+      hit.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
   }
 }
 async function deleteSession(id) { await fetch(`/api/sessions/${id}`, { method: "DELETE" }); if (id === state.sessionId) send({ type: "new_session" }); refreshSessions(); }
@@ -1253,6 +1343,11 @@ function submitComposer() {
   if (!text) return;
   clearWelcome(); if (!state.running) endTurn();
   els.feedInner.appendChild(userBlock(text, state.attachments.map((a) => ({ name: a.name, kind: a.kind, path: a.path, src: a.src })), state.userTurn++)); scrollFeed(true); updateWorkspaceLock();
+  // A new chat shows up in the rail at once, as "New chat" until the model names it.
+  if (!state.currentHasContent && !(state.sessionList || []).some((x) => x.id === state.sessionId)) {
+    state.pendingChat = { id: state.sessionId, title: "Новый диалог" };
+    if (!(($("#session-search")?.value) || "").trim()) renderSessions();
+  }
   // Чат получил содержимое — запоминаем его как последний открытый (переживёт перезапуск).
   state.currentHasContent = true; try { LS.set("last_session_id", state.sessionId); } catch {}
   send({ type: "run", task: text, model: state.model || undefined, workspace: state.workspace, options: runOptions() });
@@ -1716,7 +1811,21 @@ function fmtTokens(n) {
   return n ? String(n) : "";
 }
 function getProviders() { try { const l = JSON.parse(LS.get("providers", "")) || []; l.forEach((p) => { p.models = (p.models || []).map(normModel); }); return l; } catch { return []; } }
-function setProviders(list) { LS.set("providers", JSON.stringify(list)); }
+// The list is mirrored to the backend (core/providers.py): keys are resolved there per model,
+// and the list survives another window origin (port, dev vs release build).
+let _provSync = null;
+function pushProviders(list) {
+  clearTimeout(_provSync);
+  _provSync = setTimeout(() => { fetch("/api/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providers: list }) }).catch(() => {}); }, 400);
+}
+function setProviders(list) { LS.set("providers", JSON.stringify(list)); pushProviders(list); }
+async function syncProviders() {
+  let server = [];
+  try { server = (await (await fetch("/api/providers")).json()).providers || []; } catch { return; }
+  const local = getProviders();
+  if (!local.length && server.length) { LS.set("providers", JSON.stringify(server)); if (typeof renderModelPicker === "function") renderModelPicker(); }
+  else if (local.length) pushProviders(local);
+}
 function findModel(id) { for (const p of getProviders()) { const m = (p.models || []).find((x) => x.id === id); if (m) return m; } return null; }
 // Централизованный список моделей из вкладки «Модели и провайдеры» — для всех
 // мест выбора модели (композер, маршрутизация). Каждый пункт несёт свой провайдер.
@@ -2010,6 +2119,7 @@ function renderSettingsSection(sec, main, s) {
       ${tg("tg-toolsearch", T("ag.toolSearch"), T("ag.toolSearchDesc"), s.tool_search)}
       ${tg("tg-verify", T("ag.verify"), T("ag.verifyDesc"), s.verification_gate)}
       ${tg("tg-sub", T("ag.sub"), T("ag.subDesc"), s.allow_subagents)}
+      ${tg("tg-titles", T("ag.titles"), T("ag.titlesDesc"), s.chat_titles !== false)}
       <h3 class="sr-subhead">${esc(T("ag.tiersHead"))}</h3>
       <p class="sr-desc" style="margin:-4px 0 12px">${esc(T("ag.tiersDesc"))}</p>
       ${tg("tg-routing", T("ag.routing"), T("ag.routingDesc"), s.model_routing)}
@@ -2019,9 +2129,9 @@ function renderSettingsSection(sec, main, s) {
       <div class="tier-fb" data-tier="strong"><div class="fb-list"></div><button type="button" class="btn btn-ghost btn-sm" data-add-fb="strong">${iconSvg("plus", "icon icon-sm")} ${esc(T("ag.addBackup"))}</button></div>
       ${modelSelectHtml("model_router", T("ag.router"), tierSelectedValue(s, "router", "model_router"), T("ag.routerHint"))}
       <button class="btn btn-primary" id="save-agent" style="margin-top:12px">${esc(T("common.save"))}</button></div>`;
-    const flags = { context_compaction: !!s.context_compaction, tool_result_clearing: !!s.tool_result_clearing, tool_search: !!s.tool_search, verification_gate: !!s.verification_gate, allow_subagents: !!s.allow_subagents, model_routing: !!s.model_routing };
+    const flags = { context_compaction: !!s.context_compaction, tool_result_clearing: !!s.tool_result_clearing, tool_search: !!s.tool_search, verification_gate: !!s.verification_gate, allow_subagents: !!s.allow_subagents, model_routing: !!s.model_routing, chat_titles: s.chat_titles !== false };
     const bind = (id, key) => $(id, main).addEventListener("click", (e) => { flags[key] = !flags[key]; e.currentTarget.classList.toggle("on", flags[key]); });
-    bind("#tg-compact", "context_compaction"); bind("#tg-clear", "tool_result_clearing"); bind("#tg-toolsearch", "tool_search"); bind("#tg-verify", "verification_gate"); bind("#tg-sub", "allow_subagents"); bind("#tg-routing", "model_routing");
+    bind("#tg-compact", "context_compaction"); bind("#tg-clear", "tool_result_clearing"); bind("#tg-toolsearch", "tool_search"); bind("#tg-verify", "verification_gate"); bind("#tg-sub", "allow_subagents"); bind("#tg-routing", "model_routing"); bind("#tg-titles", "chat_titles");
     const optFor = (val) => providerModelOptions().find((x) => x.value === val);
     const collectTier = (id) => { const sel = $("#set-" + id, main); if (!sel || !sel.value) return null; const o = optFor(sel.value); return o ? { model: o.model, base_url: o.base_url, api_key: o.api_key } : null; };
     // Запасные модели тира: ряды select. valueFromOpt подбирает value по model.
@@ -2436,6 +2546,11 @@ function init() {
     renderFlags();
   }).catch(() => {});
   $("#session-search").addEventListener("input", refreshSessions);
+  els.chatTitle.addEventListener("dblclick", () => {
+    if (!state.currentHasContent) return;
+    const row = els.sessions.querySelector(`.session-item[data-id="${CSS.escape(state.sessionId)}"]`);
+    if (row) startRename(row, state.sessionId, els.chatTitle.textContent);
+  });
   $("#rail-collapse").addEventListener("click", toggleRail);
   $("#rail-open").addEventListener("click", toggleRail);
 

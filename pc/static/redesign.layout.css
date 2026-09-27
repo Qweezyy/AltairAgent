@@ -1197,3 +1197,16 @@ body.solo .pane { flex: 1 1 100%; }
 .br-net:hover { border-color: var(--accent); color: var(--text-1); }
 .br-net[data-mode="direct"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .br-net[data-mode="vpn"] { color: #6aa8ff; border-color: color-mix(in srgb, #6aa8ff 45%, var(--border)); }
+
+/* Chat rail: rename, content search results, the highlighted match in the feed */
+.session-item .s-ren { opacity: 0; }
+.session-item:hover .s-ren, .session-item:focus-within .s-ren { opacity: 1; }
+.session-item .s-edit { flex: 1; min-width: 0; height: 24px; padding: 0 6px; font-size: var(--fs-sm); }
+.session-item.search-hit { align-items: flex-start; height: auto; padding-top: 7px; padding-bottom: 7px; }
+.session-item .s-col { display: flex; flex-direction: column; min-width: 0; flex: 1; text-align: left; gap: 2px; }
+.session-item .s-snippet { font-size: var(--fs-xs); color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; }
+.session-item mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; animation: find-hit-in 1.6s ease-out; }
+@keyframes find-hit-in { 0% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.chat-title { cursor: text; }
+.session-item { cursor: pointer; }

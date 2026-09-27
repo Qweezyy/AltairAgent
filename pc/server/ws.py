@@ -34,6 +34,7 @@ from core.events import (
     PlanUpdate,
     RunFailed,
     RunFinished,
+    RunStarted,
     ShowFile,
     ShowHtml,
     ShowImage,
@@ -51,6 +52,9 @@ from core.tools.base import ApprovalRequest
 from core.tools.registry import ToolRegistry
 from core.version import __version__
 from server.browser_ws import BrowserChannel
+
+#: Session's default title (core/agent/session.py); the UI shows it localised as "New chat".
+DEFAULT_TITLE = "Новый диалог"
 
 logger = get_logger("server.ws")
 
@@ -135,6 +139,9 @@ class Connection:
         self._turn_had_inline: bool = False
         #: Память инструментов сессии: сюда ask кладёт ожидание ответа.
         self._scratch: dict[str, Any] = {}
+        #: The new chat's title, asked from the model in parallel with its first answer.
+        self._title_task: asyncio.Task[None] | None = None
+        self._pending_title: str | None = None
         self._writer: asyncio.Task | None = None
         #: Мост к телефону. Ожидания обратных запросов (need_file/need_capability)
         #: по req_id — резолвятся, когда телефон пришлёт ответ.
@@ -224,6 +231,8 @@ class Connection:
             logger.warning("Очередь отправки переполнена — событие отброшено.")
 
     async def emit(self, event: Event) -> None:
+        if isinstance(event, RunStarted):
+            await self._on_run_started()
         if isinstance(event, PlanUpdate):
             self.session.set_plan([s.model_dump() for s in event.steps])
             await self._save_session()
@@ -364,6 +373,8 @@ class Connection:
             await self.send({"type": "log", "level": "info", "text": tr("ws.history_cleared")})
         elif kind == "load_session":
             await self._load_session(str(message.get("session_id") or ""))
+        elif kind == "rename_session":
+            await self._rename_session(str(message.get("session_id") or ""), str(message.get("title") or ""))
         elif kind == "new_session":
             await self._new_session(message)
         elif kind == "fork_session":
@@ -730,6 +741,8 @@ class Connection:
         allow_route: bool = False,
     ) -> None:
         await self._state("running")
+        if self.session_settings.chat_titles and self.session.title == DEFAULT_TITLE and not self.session.messages:
+            self._start_title(task_text, model)
         # Маршрутизация по сложности. Оценщик разбивает запрос на подзадачи с
         # тиром модели у каждой. Если тиры РАЗНЫЕ — раздаём подзадачи обеим
         # моделям по очереди (дешёвая — простое, сильная — сложное). Иначе —
@@ -815,6 +828,68 @@ class Connection:
             await llm.aclose()
             await self._state("idle")
             await self._send_context_usage()
+
+    # ------------------------------------------------------------------ chat title
+
+    async def _rename_session(self, session_id: str, title: str) -> None:
+        """The user's own title wins over the model's: a pending title request is dropped."""
+        title = " ".join(title.split())[:120]
+        if not session_id or not title:
+            return
+        if session_id == self.session.id:
+            if self._title_task is not None and not self._title_task.done():
+                self._title_task.cancel()
+            self._title_task, self._pending_title = None, None
+            self.session.title = title
+            await self._save_session()
+        else:
+            stored = await self.store.async_load(session_id)
+            if stored is None:
+                return
+            stored.title = title
+            await self.store.async_save(stored)
+        await self.send({"type": "session.title", "session_id": session_id, "title": title, "renamed": True})
+
+    def _start_title(self, task_text: str, model: str | None) -> None:
+        """Ask for the chat's title alongside the first answer (the router's cheap model when
+        routing is set up, otherwise the chat's model)."""
+        from core.agent.router import _build_kwargs, resolve_tiers
+
+        tiers = resolve_tiers(self.session_settings) if self.session_settings.model_routing else None
+        kwargs = _build_kwargs(tiers["router"]) if tiers else {"model": model or self.session_settings.default_model}
+        self._pending_title = None
+        self._title_task = asyncio.create_task(
+            self._make_title(task_text, kwargs, self.session.id), name="chat-title"
+        )
+
+    async def _make_title(self, task_text: str, kwargs: dict[str, Any], session_id: str) -> None:
+        from core.agent.titler import fallback_title, generate_title
+
+        title = await generate_title(task_text, build_llm_client, kwargs) or fallback_title(task_text)
+        if self.session.id != session_id:
+            # The user moved to another chat meanwhile: title the stored one, not this.
+            stored = await self.store.async_load(session_id)
+            if stored is not None and stored.title in (DEFAULT_TITLE, fallback_title(task_text)):
+                stored.title = title
+                await self.store.async_save(stored)
+            await self.send({"type": "session.title", "session_id": session_id, "title": title})
+            return
+        self._pending_title = title
+        if self.session.messages:  # the run has started: apply and store it now
+            self.session.title = title
+            await self._save_session()
+        await self.send({"type": "session.title", "session_id": session_id, "title": title})
+
+    async def _on_run_started(self) -> None:
+        """The user's message is in the session now: store the chat at once, so it is in the
+        list even if the app closes mid-answer. Until the model's title arrives the chat is
+        called "New chat" (Session.add_user put the first line there)."""
+        if self._title_task is not None:
+            if self._pending_title:
+                self.session.title = self._pending_title
+            elif not self._title_task.done():
+                self.session.title = DEFAULT_TITLE
+        await self._save_session()
 
     async def _run_distributed(
         self, plan: list[dict[str, str]], tiers: dict[str, dict[str, str]], options: RunOptions | None,

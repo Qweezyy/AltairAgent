@@ -389,6 +389,14 @@ def build_llm_client(
     переопределить на один вызов (модель у другого провайдера при маршрутизации).
     """
     settings = settings or get_settings()
+    # The model's own key / its provider (Settings -> Models), for every caller: runs, routing
+    # tiers and their fallbacks, chat titles, subagents. The list's current key beats a copy a
+    # routing tier stored when it was configured (it goes stale when the key is changed).
+    from core.providers import credentials_for
+
+    creds = credentials_for(model or settings.default_model, base_url, settings)
+    api_key = creds.get("api_key") or api_key or None
+    base_url = base_url or creds.get("base_url") or None
     effective_base = base_url or settings.llm_base_url
     from core.llm.anthropic_client import AnthropicClient, is_anthropic_endpoint
 

@@ -41,6 +41,7 @@ def settings(tmp_path: Path) -> Settings:
         approval_mode="auto",
         max_steps=5,
         tool_output_limit=5000,
+        chat_titles=False,  # a title request would take a turn from the scripted models
         _env_file=None,  # не читаем .env пользователя
     )
 
