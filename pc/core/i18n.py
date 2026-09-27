@@ -130,6 +130,8 @@ CATALOG: dict[str, dict[str, str]] = {
                          "ru": "Код менялся, но проверок не было — прошу проверить перед завершением."},
     "log.background": {"en": "Background notice: {text}", "ru": "Фоновое уведомление: {text}"},
     "log.steering": {"en": "Your note was taken into the work: {text}", "ru": "Уточнение принято в работу: {text}"},
+    "log.superseded": {"en": "Stale page snapshots and screenshots dropped: {n}",
+                       "ru": "Устаревшие снимки страниц и скриншоты убраны: {n}"},
     "log.cleared": {"en": "Old tool outputs cleared: {n}, −{chars} characters",
                     "ru": "Очищены старые выводы инструментов: {n} шт., −{chars} симв."},
     "log.compacted": {"en": "Context compacted: {n} messages summarised.", "ru": "Контекст свёрнут: {n} сообщений сжаты в резюме."},
@@ -153,6 +155,10 @@ CATALOG: dict[str, dict[str, str]] = {
                         "ru": "Уточнение передано агенту — учту по ходу."},
     "ws.no_retry": {"en": "Nothing to repeat.", "ru": "Не нашёл запрос для повтора."},
     "ws.folder_unavailable": {"en": "The project folder is not available.", "ru": "Рабочая папка недоступна."},
+    "page.lost_title": {"en": "Nothing here", "ru": "Здесь ничего нет"},
+    "page.lost_body": {"en": "The link led outside the app. Your chats and files are fine.",
+                       "ru": "Ссылка увела за пределы приложения. Чаты и файлы в порядке."},
+    "page.lost_back": {"en": "Back to Altair", "ru": "Вернуться в Altair"},
     "ws.routing": {"en": "Routing: {note}", "ru": "Маршрутизация: {note}"},
     "llm.forbidden": {
         "en": "The API key is not allowed to use the model '{model}' (403): {detail}. "

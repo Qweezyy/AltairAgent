@@ -248,6 +248,9 @@ class AnthropicClient(LLMClient):
                 if et == "message_start":
                     u = (data.get("message") or {}).get("usage") or {}
                     usage["prompt_tokens"] = u.get("input_tokens", 0) or 0
+                    # input_tokens leaves out the cached prefix; the context is all of it.
+                    usage["context_tokens"] = (usage["prompt_tokens"] + (u.get("cache_read_input_tokens") or 0)
+                                               + (u.get("cache_creation_input_tokens") or 0))
                 elif et == "content_block_start":
                     idx = data.get("index", 0)
                     cb = data.get("content_block") or {}

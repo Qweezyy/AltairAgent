@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -55,6 +56,28 @@ def _env_files() -> list[str]:
     return [str(path) for path in candidates]
 
 ApprovalMode = Literal["manual", "accept_edits", "plan", "allowlist", "bypass"]
+
+
+_TOKEN_SUFFIX = {"k": 1e3, "к": 1e3, "тыс": 1e3, "m": 1e6, "м": 1e6, "млн": 1e6, "b": 1e9}
+_TOKEN_RE = re.compile(r"^([\d.,]+)(k|к|тыс|m|м|млн|b)?")
+
+
+def parse_token_count(value: str) -> int | str:
+    """"1M" -> 1000000, "200K"/"200к" -> 200000, "1.5M"/"1,5M" -> 1500000, "1 000 000" and
+    "1,000,000" -> 1000000. Anything else is returned as is for the normal validation error."""
+    text = re.sub(r"[\s\u00a0\u202f_']", "", value.strip().lower())
+    match = _TOKEN_RE.match(text)
+    if not match:
+        return value
+    digits, suffix = match.group(1), match.group(2) or ""
+    if re.fullmatch(r"\d{1,3}([.,]\d{3})+", digits) and not (suffix and re.fullmatch(r"\d+[.,]\d{3}", digits)):
+        digits = digits.replace(",", "").replace(".", "")
+    else:
+        digits = digits.replace(",", ".", 1)
+    try:
+        return round(float(digits) * _TOKEN_SUFFIX.get(suffix, 1))
+    except ValueError:
+        return value
 
 
 class Settings(BaseSettings):
@@ -260,6 +283,13 @@ class Settings(BaseSettings):
                 return PROJECT_ROOT
             return Path(os.path.expandvars(v)).expanduser()
         return v
+
+    @field_validator("context_token_budget", "max_run_tokens", mode="before")
+    @classmethod
+    def _token_count(cls, v: object) -> object:
+        # People write "1M", "200K", "1 000 000" in .env by hand; a plain int() would refuse
+        # to start the app over it.
+        return parse_token_count(v) if isinstance(v, str) else v
 
     @field_validator("approval_mode", mode="before")
     @classmethod

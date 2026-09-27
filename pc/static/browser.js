@@ -121,7 +121,7 @@
     let ok = true, error = "";
     try {
       if (m.op === "open") {
-        if (!paneVisible("browser")) openPane("browser");
+        window.autoOpenBrowser?.();
         await openTab(m.url, { activate: m.activate !== false, id: m.tab });
       } else if (m.op === "select") selectTab(m.tab);
       else if (m.op === "close") await closeTab(m.tab);
@@ -327,7 +327,7 @@
       case "browser_host_cmd": onHostCmd(m); break;
       case "browser_dialog": onDialog(m); break;
       case "browser_downloads": onDownloads(m.items); break;
-      case "browser_agent_active": if (!paneVisible("browser")) openPane("browser"); break;
+      case "browser_agent_active": window.autoOpenBrowser?.(); break;
       case "browser_frame": if (!B.embedded) renderFrame(m); break;
       case "browser_state": renderState(m); break;
     }

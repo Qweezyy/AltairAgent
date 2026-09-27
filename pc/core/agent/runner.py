@@ -23,7 +23,7 @@ from typing import Any
 from core.agent.prompt import build_system_prompt
 from core.agent.run_options import RunOptions
 from core.agent.run_state import RunStateStore
-from core.agent.session import Session
+from core.agent.session import TOOL_MEDIA_MARK, Session
 from core.checkpoints import CheckpointStore
 from core.cost import estimate_cost, load_pricing
 from core.errors import AgentError, LLMError
@@ -55,6 +55,10 @@ from core.skills.manager import SkillManager
 from core.tools.base import ToolContext, ToolResult
 from core.tools.deferred import active_tool_names
 from core.tools.registry import ToolRegistry
+
+#: Old tool outputs are masked past half the context budget, but never later than this:
+#: models use a huge window poorly, and every request resends the whole history.
+CLEARING_CEILING_TOKENS = 100_000
 
 logger = get_logger("agent")
 
@@ -243,6 +247,7 @@ class AgentRunner:
                     "debug",
                 )
                 usage_total.update(turn.usage)
+                self._note_context(turn)
                 self.session.add_assistant_turn(turn)
                 await self._report_usage(usage_total, pricing)
 
@@ -294,6 +299,7 @@ class AgentRunner:
                             self.session.add_note(note)
                             final = await self._ask_model(with_tools=False)
                             usage_total.update(final.usage)
+                            self._note_context(final)
                             self.session.add_assistant_turn(final)
                             return await self._finish(
                                 run_id, final.content, step, started, usage_total, pricing)
@@ -431,7 +437,9 @@ class AgentRunner:
             if item.get("text"):
                 texts.append(str(item["text"]))
         if parts:
-            self.session.add_user("\n\n".join(texts) or "Скриншот для проверки.", parts=parts)
+            # Marked, so the history can drop it once a newer screenshot supersedes it.
+            text = "\n\n".join(texts) or "Screenshot to check."
+            self.session.add_user(f"{TOOL_MEDIA_MARK} {text}", parts=parts)
 
     # ------------------------------------------------------------------
 
@@ -534,11 +542,20 @@ class AgentRunner:
         """Держит историю в рамках бюджета. Если можно — сворачивает старое в
         резюме, а не выбрасывает: так агент не забывает договорённости."""
         budget = self.settings.context_token_budget
-        # Cheap stage first: past half the budget, old tool outputs become short notes
-        # (observation masking). One batch that frees a lot, so the cache breaks rarely.
-        if self.settings.tool_result_clearing and self.session.token_estimate() > budget // 2:
+        # Stale page snapshots and screenshots go first, whatever the budget: they describe
+        # pages that are gone, and a browsing task would otherwise resend them on every step.
+        if self.settings.tool_result_clearing:
+            dropped, _ = self.session.supersede_page_states()
+            if dropped:
+                await self._log(tr("log.superseded", n=dropped), "debug")
+        # Then, past half the budget, old tool outputs become short notes (observation
+        # masking). A 1M window must not mean 500K of old outputs resent on every request:
+        # the ceiling keeps it to what a model actually uses well. One batch that frees a
+        # lot, so the cache breaks rarely.
+        threshold = min(budget // 2, CLEARING_CEILING_TOKENS)
+        if self.settings.tool_result_clearing and self.session.token_estimate() > threshold:
             cleared, freed = self.session.clear_old_tool_results(
-                keep_recent=self.settings.tool_result_keep_recent, min_free_chars=budget // 5
+                keep_recent=self.settings.tool_result_keep_recent, min_free_chars=min(budget // 5, 60_000)
             )
             if cleared:
                 await self._log(tr("log.cleared", n=cleared, chars=freed), "debug")
@@ -590,6 +607,13 @@ class AgentRunner:
             logger.debug("Не удалось сжать контекст: %s", exc)
             return ""
         return (turn.content or "").strip()
+
+    def _note_context(self, turn: AssistantTurn) -> None:
+        """Remember how big the context really was on this request, as the provider counted
+        it: the ring shows that instead of an estimate from characters."""
+        seen = int(turn.usage.get("context_tokens") or turn.usage.get("prompt_tokens") or 0)
+        if seen:
+            self.session.context_tokens = seen + int(turn.usage.get("completion_tokens") or 0)
 
     async def _report_usage(self, usage: Counter[str], pricing: dict) -> None:
         """Живой счётчик расхода: обновляется после каждого ответа модели."""
@@ -648,6 +672,7 @@ class AgentRunner:
         self.session.add_note(note)
         final = await self._ask_model(with_tools=False)
         usage_total.update(final.usage)
+        self._note_context(final)
         self.session.add_assistant_turn(final)
         return await self._finish(run_id, final.content, step, started, usage_total, pricing)
 

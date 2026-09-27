@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
+import html
 import json
 import os
 import string
@@ -20,8 +21,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core import export as export_mod
 from core.agent.storage import SessionStore
@@ -204,6 +207,14 @@ def _bridge_authorized(websocket: WebSocket) -> bool:
     return bool(supplied) and hmac.compare_digest(supplied, token)
 
 
+_LOST_PAGE = """<!doctype html><meta charset="utf-8"><title>{title}</title>
+<style>body{{margin:0;height:100vh;display:grid;place-items:center;background:#0b0d12;color:#e8e6e3;
+font:15px system-ui,sans-serif}}main{{text-align:center;max-width:420px;padding:24px}}
+a{{display:inline-block;margin-top:18px;padding:10px 18px;border-radius:10px;background:#e8b64c;color:#15120a;
+text-decoration:none;font-weight:600}}</style>
+<main><h1 style="font-size:20px">{title}</h1><p>{body}</p><a href="/">{back}</a></main>"""
+
+
 class _RevalidatedStatic(StaticFiles):
     """The UI is served by this local server and changes with every update: the window must
     revalidate it (a cheap 304 by ETag) instead of running a heuristically cached old copy."""
@@ -218,6 +229,18 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Altair", version=__version__, lifespan=lifespan)
     # Every route, not only /ws: in LAN mode the whole server is on the network.
     app.add_middleware(RemoteAuthMiddleware)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _not_found_page(request: Request, exc: StarletteHTTPException) -> Response:
+        # The app window itself landing on an unknown address (a link the UI did not catch)
+        # would show the bare JSON error with no way back; a page opened by a person gets a
+        # way home. API callers keep the JSON.
+        wants_page = "text/html" in request.headers.get("accept", "")
+        if exc.status_code == 404 and wants_page and not request.url.path.startswith("/api/"):
+            return HTMLResponse(_LOST_PAGE.format(title=html.escape(tr("page.lost_title")),
+                                                  body=html.escape(tr("page.lost_body")),
+                                                  back=html.escape(tr("page.lost_back"))), status_code=404)
+        return await http_exception_handler(request, exc)
 
     if STATIC_DIR.exists():
         app.mount("/static", _RevalidatedStatic(directory=str(STATIC_DIR)), name="static")

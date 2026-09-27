@@ -31,6 +31,12 @@ TOKENS_PER_MEDIA_PART = 1500
 CLEARED_MARK = "[Earlier"
 #: Tools whose outputs are never cleared: user answers and skill recipes are not
 #: reproducible by re-running a tool.
+#: The text that opens a message carrying images from tools (browser/vision screenshots),
+#: so they can be told apart from the user's own attachments and dropped once stale.
+TOOL_MEDIA_MARK = "[Tool screenshot]"
+#: Keep this many of the newest page snapshots / tool screenshots in full.
+KEEP_PAGE_STATES = 2
+
 CLEARING_PROTECTED_TOOLS = frozenset({"ask", "read_skill", "phone_ask_user", "request_secret", "tool_search"})
 
 
@@ -52,6 +58,13 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return total // CHARS_PER_TOKEN
 
 
+def _first_text(content: list[Any]) -> str:
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "text":
+            return str(part.get("text") or "")
+    return ""
+
+
 @dataclass
 class Session:
     """Диалог с моделью. Один объект = одна вкладка/подключение пользователя."""
@@ -70,6 +83,9 @@ class Session:
     #: Хранится отдельно от messages, потому что messages — формат модели,
     #: и по нему нельзя восстановить, что именно агент делал.
     timeline: list[dict[str, Any]] = field(default_factory=list)
+    #: What the provider reported the context to be on the latest request (input incl. cached
+    #: tokens, plus the answer). 0 = not known yet; the ring falls back to an estimate.
+    context_tokens: int = 0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -212,6 +228,7 @@ class Session:
         self.updated_at = time.time()
 
     def reset(self) -> None:
+        self.context_tokens = 0
         self.messages = []
         self.plan_steps = []
         self.artifacts = []
@@ -313,6 +330,45 @@ class Session:
         self.updated_at = time.time()
         return len(candidates), freed
 
+    def supersede_page_states(self, keep: int = KEEP_PAGE_STATES, min_free_chars: int = 30_000) -> tuple[int, int]:
+        """Drops page snapshots and tool screenshots that later ones made stale.
+
+        Every browser action returns the whole page, and after the next action the old
+        snapshot describes a page that is gone. Left in the history, a long browsing task
+        piles up hundreds of thousands of tokens that are resent on every request. The
+        newest `keep` snapshots and screenshots stay; older ones become a one-line note (the
+        call and its arguments remain). Batched by `min_free_chars`, because each change
+        invalidates the prompt cache from that point. Returns (items dropped, chars freed).
+        """
+        snapshots = [i for i, m in enumerate(self.messages)
+                     if m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_")
+                     and isinstance(m.get("content"), str) and len(m["content"]) >= 1_500
+                     and not m["content"].startswith(CLEARED_MARK)]
+        shots = [i for i, m in enumerate(self.messages)
+                 if m.get("role") == "user" and isinstance(m.get("content"), list)
+                 and _first_text(m["content"]).startswith(TOOL_MEDIA_MARK)
+                 and any(isinstance(p, dict) and p.get("type") != "text" for p in m["content"])]
+        stale_snapshots = snapshots[: max(0, len(snapshots) - keep)]
+        stale_shots = shots[: max(0, len(shots) - keep)]
+        media_chars = TOKENS_PER_MEDIA_PART * CHARS_PER_TOKEN
+        freed = sum(len(self.messages[i]["content"]) for i in stale_snapshots)
+        freed += sum(media_chars * sum(1 for p in self.messages[i]["content"]
+                                       if isinstance(p, dict) and p.get("type") != "text") for i in stale_shots)
+        if not (stale_snapshots or stale_shots) or freed < min_free_chars:
+            return 0, 0
+        for index in stale_snapshots:
+            message = self.messages[index]
+            first_line = message["content"].strip().splitlines()[0][:160]
+            message["content"] = (
+                f"{CLEARED_MARK} page state from {message.get('name')}: {first_line} ... "
+                f"({len(message['content'])} chars) is superseded by a later snapshot.]"
+            )
+        for index in stale_shots:
+            text = _first_text(self.messages[index]["content"])
+            self.messages[index]["content"] = f"{text}\n{CLEARED_MARK} screenshot removed: a newer one supersedes it.]"
+        self.updated_at = time.time()
+        return len(stale_snapshots) + len(stale_shots), freed
+
     def trim(self, budget_tokens: int, keep_recent: int = 6) -> int:
         """Убирает самые старые сообщения, пока история не влезет в бюджет.
 
@@ -344,6 +400,7 @@ class Session:
             "artifacts": self.artifacts,
             "approval_mode": self.approval_mode,
             "timeline": self.timeline,
+            "context_tokens": self.context_tokens,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -361,6 +418,7 @@ class Session:
             artifacts=data.get("artifacts") or [],
             approval_mode=data.get("approval_mode") or "",
             timeline=data.get("timeline") or [],
+            context_tokens=int(data.get("context_tokens") or 0),
             created_at=data.get("created_at") or time.time(),
             updated_at=data.get("updated_at") or time.time(),
         )

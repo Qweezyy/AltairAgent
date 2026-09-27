@@ -110,16 +110,50 @@ function mdParse(src) {
   return `<p>${esc(src).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")}</p>`;
 }
 function streamHtml(text) { return mdParse(preInlineImg(String(text ?? ""))); }
-function renderFinal(container, text) {
+function renderFinal(container, text, baseDir = "") {
   const store = [];
   let src = preInlineImg(String(text ?? ""));
   if (window.maskMath) src = maskMath(src, store);
   let html = mdParse(src);
   if (window.unmaskMath) html = unmaskMath(html, store);
   container.innerHTML = html;
-  postProcess(container);
+  postProcess(container, baseDir);
 }
-function postProcess(container) {
+// Where a link in an answer or a previewed document points, as a file path: models write
+// "dir/file.md", "D:\\x\\y.md", "file:dir/x.py" or "/files/..." alike. Relative paths are
+// relative to `baseDir` (the previewed document's folder) or else the workspace. Returns null
+// for a link that is not a file (web, mail, #anchor) and "" for one that cannot be opened here
+// (sandbox:, javascript: and other schemes).
+function fileLinkTarget(href, baseDir = "") {
+  let h = String(href || "").trim();
+  if (!h || h.startsWith("#") || /^(https?|mailto|tel):/i.test(h)) return null;
+  let m;
+  if ((m = h.match(/^file:\/*(.+)$/i))) { h = m[1]; baseDir = ""; }
+  else if ((m = h.match(/^\/files\/(.+)$/))) h = m[1];
+  else if (/^[a-z][a-z0-9+.-]*:/i.test(h) && !/^[a-zA-Z]:[\\/]/.test(h)) return "";
+  h = h.split("#")[0].split("?")[0];
+  try { h = decodeURIComponent(h); } catch {}
+  h = h.replace(/\\/g, "/");
+  if (!h) return "";
+  if (/^[a-zA-Z]:\//.test(h) || h.startsWith("/")) return h;
+  const out = [];
+  for (const seg of `${baseDir ? baseDir + "/" : ""}${h}`.split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") out.pop(); else out.push(seg);
+  }
+  return out.join("/");
+}
+function openFileTarget(path) {
+  if (!path) { toast(T("link.unavailable"), "error"); return; }
+  if (/^[a-zA-Z]:\/|^\//.test(path)) {
+    const ws = String(state.workspace || "").replace(/\\/g, "/").replace(/\/+$/, "");
+    if (ws && path.toLowerCase().startsWith(ws.toLowerCase() + "/")) { selectFileInTree(path.slice(ws.length + 1)); return; }
+    openPreviewFile(path);   // outside the workspace: show it without the tree
+    return;
+  }
+  selectFileInTree(path);
+}
+function postProcess(container, baseDir = "") {
   // код-блоки: подсветка + заголовок с языком и копированием
   $$("pre > code", container).forEach((code) => {
     const pre = code.parentElement;
@@ -136,14 +170,15 @@ function postProcess(container) {
   $$("a[href]", container).forEach((a) => {
     const href = a.getAttribute("href") || "";
     if (/^https?:/.test(href)) { a.target = "_blank"; a.rel = "noopener"; return; }
-    // Ссылка агента на файл рабочей папки: открывает вкладку «Файлы» с выделением.
-    const m = href.match(/^file:\/*(.+)$/i);
-    if (m) {
-      const rel = decodeURIComponent(m[1]);
-      a.classList.add("file-link");
-      a.setAttribute("href", "#");
-      a.addEventListener("click", (e) => { e.preventDefault(); selectFileInTree(rel); });
-    }
+    // A link to a file opens the Files tab with it selected. Left as a plain link it would
+    // take the whole app window to the server's 404 page, with no way back.
+    const target = fileLinkTarget(href, baseDir);
+    if (target === null) return;
+    a.classList.add(target ? "file-link" : "dead-link");
+    a.setAttribute("href", "#");
+    a.dataset.fileTarget = target;
+    if (!target) a.dataset.tip = T("link.unavailable");
+    a.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openFileTarget(target); });
   });
   $$(".md-inline-img", container).forEach(async (img) => {
     if (img.dataset.loaded) return; img.dataset.loaded = "1";
@@ -578,7 +613,7 @@ const HANDLERS = {
     send({ type: "ui_lang", lang: window.I18N?.lang?.() || "en" });
     window.BrowserPanel?.onReady();
   },
-  "context.usage": (m) => updateRing(m.tokens),
+  "context.usage": (m) => { state.contextExact = !!m.exact; updateRing(m.tokens); },
   browser_state: (m) => window.BrowserPanel?.handle(m),
   browser_frame: (m) => window.BrowserPanel?.handle(m),
   browser_host_cmd: (m) => window.BrowserPanel?.handle(m),
@@ -592,7 +627,7 @@ const HANDLERS = {
   "workspace.updated"(m) { setWorkspace(m.workspace); toast(T("ev.wsUpdated")); },
   "workspace.error"(m) { toast(m.message, "error"); },
   "mode.updated"(m) { updateMode(m.mode); },
-  "run.started"() { clearWelcome(); endTurn(); setRunning(true); statusStart(); },
+  "run.started"() { clearWelcome(); endTurn(); setRunning(true); statusStart(); state.browserAutoOpened = false; },
   "step.started"() {},
   "tool.pending"() {},
   "reasoning.delta"(m) {
@@ -609,7 +644,7 @@ const HANDLERS = {
     state.stepArgs.set(m.call_id, m.args);
     roundAddTool(m.call_id, m.name, m.args);
     // Агент пошёл в браузер — показываем это пользователю в реальном времени (#3).
-    if (String(m.name || "").startsWith("browser_") && m.name !== "browser_downloads" && !paneVisible("browser")) openPane("browser");
+    if (String(m.name || "").startsWith("browser_") && m.name !== "browser_downloads") autoOpenBrowser();
     statusMode("wait");
   },
   "tool.finished"(m) {
@@ -1014,21 +1049,31 @@ async function filesRenderChildren(container, path, depth) {
     }
   }
 }
-async function refreshFilesTree() {
+let _treeGen = 0, _treeLatest = Promise.resolve();
+function refreshFilesTree() {
+  const run = _refreshFilesTree(++_treeGen);
+  _treeLatest = run;
+  return run;
+}
+async function _refreshFilesTree(gen) {
   ensureFilesPane();
   const tree = $("#files-tree"); if (!tree) return;
-  // Режим фильтра: плоский список совпадений по имени/пути (как @-поиск).
+  // Built aside and swapped in by the latest call only: two refreshes at once (a workspace
+  // switch and a file link) used to both append into the cleared tree and list it twice.
+  const next = document.createElement("div");
+  // Filter mode: a flat list of matches by name/path (like the @ search).
   if (state.filesFilter) {
     let files = [];
     try { files = (await (await fetch(`/api/files/list?workspace=${encodeURIComponent(state.workspace)}&q=${encodeURIComponent(state.filesFilter)}&limit=200`)).json()).files || []; } catch {}
-    tree.innerHTML = "";
-    if (!files.length) { tree.innerHTML = `<div class="empty small">${esc(T("files.none"))}</div>`; return; }
-    for (const p of files) tree.appendChild(fileRow({ name: p.split("/").pop(), path: p, dir: false, size: 0 }, 0));
-    return;
+    if (!files.length) next.innerHTML = `<div class="empty small">${esc(T("files.none"))}</div>`;
+    for (const p of files) next.appendChild(fileRow({ name: p.split("/").pop(), path: p, dir: false, size: 0 }, 0));
+  } else {
+    await filesRenderChildren(next, "", 0);
+    if (!next.firstChild) next.innerHTML = `<div class="empty small">${esc(T("files.empty"))}</div>`;
   }
-  tree.innerHTML = "";
-  await filesRenderChildren(tree, "", 0);
-  if (!tree.firstChild) tree.innerHTML = `<div class="empty small">${esc(T("files.empty"))}</div>`;
+  // A newer refresh started meanwhile: its tree wins; callers still get a finished tree.
+  if (gen !== _treeGen) { await _treeLatest; return; }
+  tree.replaceChildren(...next.childNodes);
 }
 // Делегированные клики по дереву: раскрытие папок и открытие файлов.
 function initFilesTree() {
@@ -1183,7 +1228,20 @@ function closePane(id) {
   updateDock();
   window.BrowserPanel?.relayout();
 }
-function togglePane(id) { paneVisible(id) ? closePane(id) : openPane(id); }
+function togglePane(id) { paneVisible(id) ? userClosePane(id) : userOpenPane(id); }
+// The agent working in the browser shows the panel once per task. Closed by the user, it stays
+// closed (the agent keeps browsing in the background) until the user opens it again.
+function userOpenPane(id) { if (id === "browser") setBrowserDismissed(false); openPane(id); }
+function userClosePane(id) { if (id === "browser") setBrowserDismissed(true); closePane(id); }
+function setBrowserDismissed(on) { state.browserDismissed = on; try { LS.set("browser_dismissed", on ? "1" : ""); } catch {} }
+function autoOpenBrowser() {
+  if (paneVisible("browser") || state.browserAutoOpened) return;
+  if (state.browserDismissed === undefined) { try { state.browserDismissed = LS.get("browser_dismissed", "") === "1"; } catch { state.browserDismissed = false; } }
+  if (state.browserDismissed) return;
+  state.browserAutoOpened = true;
+  openPane("browser");
+}
+window.autoOpenBrowser = autoOpenBrowser;
 
 // Разворот панели на всё окно приложения (чат скрыт, рейл остаётся).
 function maximizePane(id) {
@@ -1222,14 +1280,16 @@ async function openPreviewFile(path) {
     const r = await fetch(`/api/file?path=${encodeURIComponent(absPath(path))}`);
     if (!r.ok) { v.innerHTML = `<div class="empty">${esc(T("prev.openFail"))}</div>`; return; }
     const info = await r.json(); const raw = `/files/${absPath(path)}`;
-    const tools = `<div class="preview-tools">${info.kind === "html" ? `<div class="segmented" id="pv-mode"><button data-m="page" class="${state.previewMode === "page" ? "on" : ""}">${esc(T("prev.page"))}</button><button data-m="code" class="${state.previewMode === "code" ? "on" : ""}">${esc(T("prev.code"))}</button></div>` : ""}<span class="grow"></span><a class="btn btn-outline" href="${esc(raw)}" target="_blank" rel="noopener">${iconSvg("external", "icon icon-sm")} ${esc(T("a.inBrowser"))}</a>${info.content != null ? `<button class="btn btn-outline" id="pv-copy">${iconSvg("copy", "icon icon-sm")} ${esc(T("a.copy"))}</button>` : ""}</div>`;
+    // The server reports a .md file as text in the markdown language: show it as a document.
+    const isMd = info.kind === "markdown" || info.language === "markdown";
+    const tools = `<div class="preview-tools">${info.kind === "html" || isMd ? `<div class="segmented" id="pv-mode"><button data-m="page" class="${state.previewMode === "page" ? "on" : ""}">${esc(T("prev.page"))}</button><button data-m="code" class="${state.previewMode === "code" ? "on" : ""}">${esc(T("prev.code"))}</button></div>` : ""}<span class="grow"></span><a class="btn btn-outline" href="${esc(raw)}" target="_blank" rel="noopener">${iconSvg("external", "icon icon-sm")} ${esc(T("a.inBrowser"))}</a>${info.content != null ? `<button class="btn btn-outline" id="pv-copy">${iconSvg("copy", "icon icon-sm")} ${esc(T("a.copy"))}</button>` : ""}</div>`;
     let bodyHtml = "";
     if (info.kind === "image") bodyHtml = `<img class="preview-img" src="${esc(raw)}" alt="" />`;
     else if (info.kind === "html" && state.previewMode === "page") bodyHtml = `<iframe class="preview-frame" src="${esc(raw)}" sandbox="allow-scripts allow-forms" style="height:70dvh"></iframe>`;
-    else if (info.kind === "markdown") bodyHtml = `<div class="md" id="pv-md"></div>`;
+    else if (isMd && state.previewMode === "page") bodyHtml = `<div class="md" id="pv-md"></div>`;
     else bodyHtml = `<pre class="md"><code>${esc(info.content || "")}</code></pre>`;
     v.innerHTML = tools + bodyHtml;
-    if (info.kind === "markdown") renderFinal($("#pv-md", v), info.content || "");
+    if (isMd && state.previewMode === "page") renderFinal($("#pv-md", v), info.content || "", String(path).replace(/\\/g, "/").split("/").slice(0, -1).join("/"));
     else postProcess(v);
     $("#pv-copy", v)?.addEventListener("click", () => { navigator.clipboard?.writeText(info.content || ""); toast(T("t.copied")); });
     $$("#pv-mode button", v).forEach((b) => b.addEventListener("click", () => { state.previewMode = b.dataset.m; openPreviewFile(path); }));
@@ -1329,7 +1389,10 @@ function updateRing(tokens) {
   fill.style.strokeDashoffset = c * (1 - pct / 100);
   fill.style.stroke = pct > 90 ? "var(--danger)" : "var(--accent)";
   const t = els.ctxRing.querySelector("#ctx-pct"); if (t) t.textContent = pct;
-  els.ctxRing.setAttribute("data-tip", T("comp.contextTip", { pct }));
+  // Numbers, not just a percentage: "412K of 1M" shows at once whether the window size is
+  // what the user set, and whether the count came from the provider or is an estimate.
+  const used = fmtTokensShort(state.contextTokens), total = fmtTokensShort(budget);
+  els.ctxRing.setAttribute("data-tip", T(state.contextExact ? "comp.contextTipExact" : "comp.contextTipEst", { pct, used, total }));
 }
 function setStatus(s) { const d = $("#status-dot"); if (!d) return; d.className = "status-dot" + (s === "running" || s === "waiting_approval" ? " running" : ""); }
 
@@ -1791,17 +1854,30 @@ function normModel(m) {
   if (typeof m === "string") return { id: m, name: "", context: 0, api_key: "", photo: true, video: false, audio: false, files: true };
   return { id: m.id || "", name: m.name || "", context: +m.context || 0, api_key: m.api_key || "", photo: m.photo !== false, video: !!m.video, audio: !!m.audio, files: m.files !== false };
 }
-// Разбор размера токенов с суффиксами: "1M"/"1М"→1000000, "200K"/"200к"→200000,
-// "1.5m"→1500000, "128000"→128000. Пусто/мусор → 0.
+// Token counts as people write them: "1M"/"1М"/"1 млн" -> 1000000, "200K"/"200к"/"200 тыс" ->
+// 200000, "1.5m"/"1,5M" -> 1500000, "128000"/"128 000"/"1,000,000"/"1.000.000" -> as is.
+// Empty or junk -> 0.
 function parseTokens(v) {
-  const s = String(v == null ? "" : v).trim().replace(/\s+/g, "").replace(",", ".");
+  let s = String(v == null ? "" : v).trim().toLowerCase().replace(/[\s\u00a0\u202f_']/g, "");
   if (!s) return 0;
-  const m = s.match(/^([\d.]+)\s*([kKкКmMмМ]?)/);
+  const m = s.match(/^([\d.,]+)(k|к|тыс|thousand|m|м|млн|mln|million|b|g)?/);
   if (!m) return 0;
-  const num = parseFloat(m[1]); if (!isFinite(num)) return 0;
-  const suf = m[2].toLowerCase();
-  const mult = (suf === "k" || suf === "к") ? 1e3 : (suf === "m" || suf === "м") ? 1e6 : 1;
+  let digits = m[1];
+  // Groups of three after a separator are thousands ("1,000,000", "1.000.000"); a single
+  // separator otherwise is the decimal point ("1.5", "1,5").
+  if (/^\d{1,3}([.,]\d{3})+$/.test(digits) && !(/^\d+[.,]\d{3}$/.test(digits) && m[2])) digits = digits.replace(/[.,]/g, "");
+  else digits = digits.replace(",", ".");
+  const num = parseFloat(digits); if (!isFinite(num)) return 0;
+  const suf = m[2] || "";
+  const mult = ["k", "к", "тыс", "thousand"].includes(suf) ? 1e3 : ["m", "м", "млн", "mln", "million"].includes(suf) ? 1e6 : ["b", "g"].includes(suf) ? 1e9 : 1;
   return Math.round(num * mult);
+}
+// Rounded for display: 412345 -> "412K", 1500000 -> "1.5M".
+function fmtTokensShort(n) {
+  n = +n || 0;
+  if (n >= 1e6) return (Math.round(n / 1e5) / 10) + "M";
+  if (n >= 1e3) return Math.round(n / 1e3) + "K";
+  return String(n);
 }
 // Человекочитаемо: 1000000→"1M", 200000→"200K", иначе число.
 function fmtTokens(n) {
@@ -2422,7 +2498,7 @@ function initPanelResize() {
   els.dock.addEventListener("click", (e) => {
     const btn = e.target.closest(".pane-act"); if (!btn) return;
     const id = btn.closest(".pane").dataset.pane;
-    if (btn.dataset.act === "close") closePane(id);
+    if (btn.dataset.act === "close") userClosePane(id);
     else if (btn.dataset.act === "max") maximizePane(id);
     else if (btn.dataset.act === "pop") popoutPane(id);
   });
@@ -2546,6 +2622,18 @@ function init() {
     renderFlags();
   }).catch(() => {});
   $("#session-search").addEventListener("input", refreshSessions);
+  // The app window must never leave the app: any link that would navigate it (to this server
+  // or to another scheme) is opened as a file, or the web page in a browser, instead.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest?.("a[href]");
+    if (!a || e.defaultPrevented || a.target === "_blank" || a.hasAttribute("download")) return;
+    const href = a.getAttribute("href") || "";
+    if (href.startsWith("#") || href.startsWith("javascript:void")) return;
+    let url; try { url = new URL(a.href, location.href); } catch { return; }
+    e.preventDefault();
+    if (/^https?:$/.test(url.protocol) && url.origin !== location.origin) { window.open(url.href, "_blank", "noopener"); return; }
+    openFileTarget(fileLinkTarget(href) || "");
+  }, true);
   els.chatTitle.addEventListener("dblclick", () => {
     if (!state.currentHasContent) return;
     const row = els.sessions.querySelector(`.session-item[data-id="${CSS.escape(state.sessionId)}"]`);
