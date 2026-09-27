@@ -14,13 +14,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
-### Fixed
-- State files (chats, memory, presets, permissions, providers, settings and others) no longer lose a
-  write when two threads save the same file at once — the same class of race as the rollback fix in
-  0.1.1. All of them now save through one shared atomic-write helper with a lock per file.
-- `version_sync.py` also stamps `Cargo.lock` and `package-lock.json`, so a version bump never leaves
-  the lock files behind.
-
 ### Planned for 0.2.0+
 - **Linux support** for the PC agent (replace Windows-only pieces: bundled `.exe` grep with
   system `ripgrep`, ConPTY terminal with a `pty`-based one, packaging as AppImage/deb).
@@ -28,6 +21,42 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 - **iOS** for the phone agent — explored via Kotlin Multiplatform (the Android core/tools/LLM
   layers are already Android-independent Kotlin); the open questions are background autonomy
   (iOS limits background work heavily) and distribution (TestFlight / sideloading).
+
+## [0.1.2] — 2026-09-27
+
+A lighter, more honest context window and a browser that costs far fewer tokens.
+
+### Changed
+- **Browser actions return only what changed.** After a click, typing or a key press on the same
+  page the model gets the changed lines instead of the whole page again; the full page still comes
+  on navigation, a new tab or a large change (`BROWSER_SNAPSHOT_DIFF=false` turns it off). Page
+  snapshots are also leaner. On a real 98-step browsing chat, page states went from 355K to 151K
+  tokens (−58%).
+- **Context ring shows the provider's own count** of the latest request (system prompt and tool
+  schemas included), e.g. "412K of 1M", instead of a character estimate.
+- Superseded page snapshots and tool screenshots are dropped from the history (the newest two
+  stay), and old tool outputs are trimmed past 100K tokens instead of past half the window.
+- The built-in browser opens once per task; if you close it, the agent keeps browsing in the
+  background until you open it again.
+
+### Added
+- `browser_upload` fills file fields directly, without the OS file dialog (uploads on sites like
+  habr.com used to time out and fall back to the user).
+
+### Fixed
+- `CONTEXT_TOKEN_BUDGET=1M` in `.env` stopped the app from starting, and "1,000,000" was read as 1
+  in Settings. Values like `1M`, `200K`, `1 000 000`, `1 млн` now work on both sides.
+- Plain-path links in answers (`dir/file.md`, `D:\x.md`) navigated the whole window to a blank JSON
+  404 page. They now open in the Files tab, and the window never navigates away.
+- Markdown files in the Files tab render as documents (with a page/code switch) instead of source.
+- Two tree refreshes at once listed every file twice in the Files tab.
+- State files (chats, memory, presets, permissions, providers, settings and others) no longer lose a
+  write when two threads save the same file at once — the same class of race as the rollback fix in
+  0.1.1. All of them now save through one shared atomic-write helper with a lock per file. (chats, memory, presets, permissions, providers, settings and others) no longer lose a
+  write when two threads save the same file at once — the same class of race as the rollback fix in
+  0.1.1. All of them now save through one shared atomic-write helper with a lock per file.
+- `version_sync.py` also stamps `Cargo.lock` and `package-lock.json`, so a version bump never leaves
+  the lock files behind.
 
 ## [0.1.1] — 2026-09-27
 
@@ -110,6 +139,7 @@ The first public, **early-stage** release. Expect rough edges — see the discla
 - Auto-update is off until an update feed is published.
 - Python on PATH is needed for the agent's own code checks (tests/linters) in your projects.
 
-[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Qweezyy/AltairAgent/releases/tag/v0.1.0
