@@ -744,8 +744,10 @@ class Connection:
             if self.session_settings.chat_titles:
                 self._start_title(task_text, model)
             # A new chat goes into the list at once: routing may take a while before the run
-            # itself starts (and stores the chat again).
-            await self._save_session()
+            # itself starts (and stores the chat again). _save_session skips a chat without
+            # messages, and the user's message reaches them only when the run starts.
+            self.session.workspace = str(self.session_settings.workspace)
+            await self.store.async_save(self.session)
         await self._state("running")
         # Маршрутизация по сложности. Оценщик разбивает запрос на подзадачи с
         # тиром модели у каждой. Если тиры РАЗНЫЕ — раздаём подзадачи обеим
@@ -874,6 +876,15 @@ class Connection:
         )
 
     async def _make_title(self, task_text: str, kwargs: list[dict[str, Any]], session_id: str) -> None:
+        # A background task: an error here would vanish with it, so it is logged.
+        try:
+            await self._apply_title(task_text, kwargs, session_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("chat title failed", exc_info=True)
+
+    async def _apply_title(self, task_text: str, kwargs: list[dict[str, Any]], session_id: str) -> None:
         from core.agent.titler import fallback_title, generate_title
 
         title = await generate_title(task_text, build_llm_client, kwargs) or fallback_title(task_text)

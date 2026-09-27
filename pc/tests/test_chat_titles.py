@@ -73,13 +73,15 @@ async def test_generate_title_returns_none_on_failure_and_timeout():
 class _ChatLLM(ScriptedLLM):
     """Answers title requests itself (slowly) and the chat from the script."""
 
-    def __init__(self, turns, title: str | None, title_delay: float) -> None:
+    def __init__(self, turns, title: str | None, title_delay: float, gate=None) -> None:
         super().__init__(turns)
-        self.title, self.title_delay = title, title_delay
+        self.title, self.title_delay, self.gate = title, title_delay, gate
 
     async def complete(self, messages, **kw):
         if str(messages[-1].get("content", "")).startswith("Write a short title"):
             await asyncio.sleep(self.title_delay)
+            if self.gate is not None:  # held until the test lets go (a thread event: another loop)
+                await asyncio.to_thread(self.gate.wait, 10)
             if self.title is None:
                 raise RuntimeError("title model down")
             return AssistantTurn(content=self.title)
@@ -109,6 +111,8 @@ def _collect(ws, until: set[str], limit: int = 150) -> list[dict]:
         out.append(m)
         if m["type"] in until:
             return out
+        if m["type"] == "run.failed" and "run.failed" not in until:
+            raise AssertionError(f"the run failed: {m}")
     raise AssertionError([m["type"] for m in out])
 
 
@@ -150,14 +154,18 @@ def test_model_title_arrives_is_stored_and_stays_out_of_the_answer(monkeypatch, 
 def test_chat_is_stored_as_new_chat_before_the_title_is_ready(monkeypatch, settings):
     """The chat is saved as soon as the user's message is in: it is in the list with the
     placeholder title while the model is still thinking of one."""
-    llm = _ChatLLM([AssistantTurn(content="готово")], title="Длинное раздумье", title_delay=1.5)
+    import threading
+
+    gate = threading.Event()
+    llm = _ChatLLM([AssistantTurn(content="готово")], title="Длинное раздумье", title_delay=0, gate=gate)
     app, s = _app(monkeypatch, settings, llm)
     with TestClient(app) as tc, tc.websocket_connect("/ws") as ws:
         ws.receive_json()
         ws.send_json({"type": "run", "task": "сделай что-нибудь"})
         _collect(ws, {"run.finished"})
         listed = tc.get("/api/sessions").json()["sessions"]
-        assert listed  # in the rail before the answer, not only after it
+        assert listed and listed[0]["title"] == "Новый диалог"
+        gate.set()
         title = next(e for e in _collect(ws, {"session.title"}) if e["type"] == "session.title")
         assert title["title"] == "Длинное раздумье"
     assert _stored(s, title["session_id"]).title == "Длинное раздумье"
@@ -370,3 +378,29 @@ def test_ui_is_revalidated_not_cached(monkeypatch, settings):
     with TestClient(app) as tc:
         assert tc.get("/").headers.get("cache-control") == "no-cache"
         assert tc.get("/static/redesign.js").headers.get("cache-control") == "no-cache"
+
+
+def test_new_chat_is_stored_before_routing_decides(monkeypatch, settings):
+    """Routing asks a model first (seconds, sometimes more): the chat is in the list meanwhile."""
+    import core.agent.router as router
+
+    async def slow_plan(*a, **kw):
+        await asyncio.sleep(1.0)
+        return []
+
+    async def choose(*a, **kw):
+        return None, ""
+
+    monkeypatch.setattr(router, "plan_subtasks", slow_plan)
+    monkeypatch.setattr(router, "choose_model", choose)
+    app, s = _app(monkeypatch, settings, ScriptedLLM([AssistantTurn(content="ок")]))
+    s.chat_titles = False
+    s.model_routing, s.model_fast, s.model_strong = True, "cheap", "big"
+    with TestClient(app) as tc, tc.websocket_connect("/ws") as ws:
+        ready = ws.receive_json()
+        ws.send_json({"type": "run", "task": "задача с маршрутизацией"})
+        _collect(ws, {"state"})
+        ids = [x["id"] for x in tc.get("/api/sessions").json()["sessions"]]
+        assert ready["session_id"] in ids  # still routing, not answering yet
+        events = _collect(ws, {"run.finished", "run.failed"})
+    assert events[-1]["type"] == "run.finished"

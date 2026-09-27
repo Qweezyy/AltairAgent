@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 
 logger = get_logger("agent.run_state")
@@ -110,8 +110,6 @@ class RunStateStore:
     def _write(self, session_id: str, rec: dict[str, Any]) -> None:
         path = self._path(session_id)
         try:
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
-            safe_replace(tmp, path)
+            atomic_write_text(path, json.dumps(rec, ensure_ascii=False))
         except OSError as exc:  # pragma: no cover - редкий сбой ФС
             logger.warning("Не удалось записать маркер прогона %s: %s", session_id, exc)

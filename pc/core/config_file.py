@@ -15,7 +15,7 @@ import os
 import re
 from pathlib import Path
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text, path_lock
 from core.logging_setup import get_logger
 from core.settings import Settings, get_settings, reload_settings
 
@@ -151,32 +151,26 @@ def write_values(values: dict[str, str], settings: Settings | None = None) -> Pa
     """Записывает значения в .env, сохраняя остальное содержимое файла."""
     settings = settings or get_settings()
     path = config_path(settings)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Read-modify-write under the file's lock: two saves at once must not drop each other's keys.
+    with path_lock(path):
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        remaining = dict(values)
 
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    remaining = dict(values)
+        for index, line in enumerate(lines):
+            match = _LINE_RE.match(line)
+            if not match:
+                continue
+            key = match.group(1)
+            if key in remaining:
+                lines[index] = f"{key}={remaining.pop(key)}"
 
-    for index, line in enumerate(lines):
-        match = _LINE_RE.match(line)
-        if not match:
-            continue
-        key = match.group(1)
-        if key in remaining:
-            lines[index] = f"{key}={remaining.pop(key)}"
+        if remaining:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.append("# Changed from the app")
+            lines.extend(f"{key}={value}" for key, value in remaining.items())
 
-    if remaining:
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.append("# Изменено из приложения")
-        lines.extend(f"{key}={value}" for key, value in remaining.items())
-
-    # Пишем через временный файл в той же папке и подменяем через safe_replace:
-    # атомарно, а если ОС не даёт (AppData бывает junction на другой том →
-    # WinError 17), — прямой перезаписью. Имя temp — именно "<файл>.tmp"
-    # (у dot-файла .env with_suffix давал битое ".env.env.tmp").
-    temp = path.with_name(path.name + ".tmp")
-    temp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    safe_replace(temp, path)
+        atomic_write_text(path, "\n".join(lines) + "\n")
 
     _restrict_access(path)
     logger.info("Настройки сохранены: %s", ", ".join(sorted(values)))

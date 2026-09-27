@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 from core.settings import Settings, get_settings
 
@@ -146,9 +146,7 @@ class PermissionStore:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            temp = path.with_suffix(".tmp")
-            temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            safe_replace(temp, path)
+            atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
         except OSError as exc:  # pragma: no cover
             logger.warning("Не удалось сохранить разрешения: %s", exc)
 

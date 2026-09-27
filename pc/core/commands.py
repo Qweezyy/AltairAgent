@@ -16,7 +16,7 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 
 logger = get_logger("commands")
@@ -163,12 +163,8 @@ class CommandStore:
 
     def _persist(self) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temp = self.path.with_suffix(".json.tmp")
-            temp.write_text(
-                json.dumps({"commands": [asdict(c) for c in self._commands]}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+            atomic_write_text(
+                self.path, json.dumps({"commands": [asdict(c) for c in self._commands]}, ensure_ascii=False, indent=2)
             )
-            safe_replace(temp, self.path)
         except OSError:  # pragma: no cover
             logger.debug("Не удалось сохранить команды", exc_info=True)

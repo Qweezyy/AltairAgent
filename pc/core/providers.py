@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 from core.settings import Settings, get_settings
 
@@ -48,12 +48,7 @@ def save(providers: list[dict[str, Any]], settings: Settings | None = None) -> N
             continue
         models = [m for m in (p.get("models") or []) if isinstance(m, dict) and str(m.get("id") or "").strip()]
         clean.append({**p, "models": models})
-    path = _path(settings)
-    with _LOCK:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
-        safe_replace(tmp, path)
+    atomic_write_text(_path(settings), json.dumps(clean, ensure_ascii=False, indent=2))
 
 
 def _norm_url(url: str) -> str:

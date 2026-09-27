@@ -32,7 +32,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 from core.mcp.client import MCPClient
 from core.mcp.http_client import HttpMCPClient
@@ -122,10 +122,7 @@ class MCPManager:
             except (OSError, json.JSONDecodeError):
                 data = {}
         data["mcpServers"] = servers
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.config_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        safe_replace(tmp, self.config_path)
+        atomic_write_text(self.config_path, json.dumps(data, ensure_ascii=False, indent=2))
 
     def shareable_servers(self) -> list[dict[str, Any]]:
         """HTTP/SSE MCP-серверы из конфига — для синка с телефоном.

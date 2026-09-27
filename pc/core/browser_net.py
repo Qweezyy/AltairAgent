@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 from core.utils.proc import powershell_argv, run_process
 
@@ -258,11 +258,8 @@ class NetRules:
                         if isinstance(v, (int, float)) and v > horizon}
 
     def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
         data = {"sites": self.sites, "learned": self.learned}
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        safe_replace(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(data, ensure_ascii=False, indent=2))
 
     @staticmethod
     def normalize(host: str) -> str:

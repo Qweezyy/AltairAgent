@@ -11,7 +11,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 from core.security.permissions import MODES
 
@@ -119,12 +119,8 @@ class PresetStore:
 
     def _persist(self) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temp = self.path.with_suffix(".json.tmp")
-            temp.write_text(
-                json.dumps({"presets": [asdict(p) for p in self._presets]}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+            atomic_write_text(
+                self.path, json.dumps({"presets": [asdict(p) for p in self._presets]}, ensure_ascii=False, indent=2)
             )
-            safe_replace(temp, self.path)
         except OSError:  # pragma: no cover
             logger.debug("Не удалось сохранить пресеты", exc_info=True)

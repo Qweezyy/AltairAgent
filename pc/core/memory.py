@@ -18,7 +18,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text
 from core.logging_setup import get_logger
 
 logger = get_logger("memory")
@@ -171,12 +171,8 @@ class MemoryStore:
 
     def _save(self) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temp = self.path.with_suffix(".json.tmp")
-            temp.write_text(
-                json.dumps({"facts": [asdict(f) for f in self._facts]}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+            atomic_write_text(
+                self.path, json.dumps({"facts": [asdict(f) for f in self._facts]}, ensure_ascii=False, indent=2)
             )
-            safe_replace(temp, self.path)
         except OSError:  # pragma: no cover
             logger.debug("Не удалось сохранить память", exc_info=True)

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.agent.session import Session
-from core.fs_atomic import safe_replace
+from core.fs_atomic import atomic_write_text, next_seq, safe_replace
 from core.logging_setup import get_logger
 from core.settings import Settings, get_settings
 
@@ -31,19 +31,29 @@ class SessionStore:
         return self.storage_dir / f"{safe_id}.json"
 
     def save(self, session: Session) -> None:
-        """Синхронное сохранение сессии в файл."""
-        path = self._file_path(session.id)
-        try:
-            temp_path = path.with_suffix(".tmp")
-            content = json.dumps(session.to_dict(), ensure_ascii=False, indent=2)
-            temp_path.write_text(content, encoding="utf-8")
-            safe_replace(temp_path, path)
-        except OSError as exc:
-            logger.warning("Не удалось сохранить сессию %s: %s", session.id, exc)
+        """Save the session synchronously."""
+        self._write(session.id, *self._snapshot(session))
 
     async def async_save(self, session: Session) -> None:
-        """Асинхронная обёртка для безопасного сохранения без блокировки event loop."""
-        await asyncio.to_thread(self.save, session)
+        """Save without blocking the event loop.
+
+        The snapshot is taken here, on the caller's thread: the run keeps appending to the
+        session while the file is written, and serialising it in the worker thread could
+        catch it half-changed. The chat title is saved concurrently with the run, so the
+        sequence number keeps an older snapshot from overwriting a newer one.
+        """
+        content, seq = self._snapshot(session)
+        await asyncio.to_thread(self._write, session.id, content, seq)
+
+    @staticmethod
+    def _snapshot(session: Session) -> tuple[str, int]:
+        return json.dumps(session.to_dict(), ensure_ascii=False, indent=2), next_seq()
+
+    def _write(self, session_id: str, content: str, seq: int) -> None:
+        try:
+            atomic_write_text(self._file_path(session_id), content, seq=seq)
+        except OSError as exc:
+            logger.warning("Session %s was not saved: %s", session_id, exc)
 
     def load(self, session_id: str) -> Session | None:
         """Загрузка сессии по её ID."""
