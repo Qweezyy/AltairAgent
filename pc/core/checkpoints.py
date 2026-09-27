@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -54,25 +55,30 @@ class Checkpoint:
 
 
 class CheckpointStore:
-    """Стопка снимков файлов на одну сессию."""
+    """A per-session stack of file snapshots."""
 
     def __init__(self, base_dir: Path, session_id: str, workspace: Path) -> None:
         safe_id = "".join(c for c in session_id if c.isalnum() or c in ("-", "_")) or "local"
         self.dir = base_dir / "checkpoints" / safe_id
         self.workspace = workspace.resolve()
         self._manifest = self.dir / "manifest.json"
+        # Tools run in parallel worker threads, so two edits can snapshot at the same time.
+        # Every read-modify-write of the records and the manifest goes through this lock;
+        # without it a concurrent save could drop a snapshot, and "roll back the run"
+        # would silently skip that file. Re-entrant: restores call _save() while holding it.
+        self._lock = threading.RLock()
         self._records: list[Checkpoint] = self._load()
-        #: Текущий прогон — им помечаются новые снимки (для отката всего прогона).
+        #: The active run: new snapshots are tagged with it (for whole-run rollback).
         self._run_id = ""
 
     # ------------------------------------------------------------------
 
     def set_run(self, run_id: str) -> None:
-        """Отметить активный прогон: его id проставляется новым снимкам."""
+        """Mark the active run: its id is stamped on new snapshots."""
         self._run_id = str(run_id or "")
 
     def snapshot(self, abs_path: Path, rel_path: str, op: str) -> Checkpoint:
-        """Снимает текущее состояние файла перед изменением."""
+        """Snapshot the file's current state before it is changed."""
         abs_path = abs_path.resolve()
         existed = abs_path.is_file()
         recoverable = True
@@ -85,7 +91,7 @@ class CheckpointStore:
             except OSError:
                 size = 0
             if size > MAX_BLOB_BYTES:
-                # Файл слишком большой — фиксируем факт правки, но откат не обещаем.
+                # Too large: record that it changed, but do not promise a rollback.
                 recoverable = False
             else:
                 try:
@@ -105,20 +111,19 @@ class CheckpointStore:
             ts=time.time(),
             run_id=self._run_id,
         )
-        self._records.append(checkpoint)
-        self._evict_overflow()
-        self._save()
+        self._append(checkpoint)
         return checkpoint
 
     def record_prior(
         self, rel_path: str, op: str, prior_bytes: bytes | None, existed: bool
     ) -> Checkpoint:
-        """Регистрирует снимок с ЯВНО заданным прежним содержимым.
+        """Register a snapshot whose prior content is given EXPLICITLY.
 
-        Нужен для отката команд (shell): к моменту регистрации файл уже изменён,
-        поэтому прежнее состояние приходит извне (из теневого git), а не читается
-        с диска, как в `snapshot`. `existed=False` — файл создан командой (откат =
-        удаление); `existed=True` с `prior_bytes` — изменён/удалён (откат = вернуть).
+        Used to roll back shell commands: by the time it is registered the file has
+        already changed, so the prior state comes from outside (the shadow git) instead
+        of being read from disk as in `snapshot`. `existed=False` — the command created
+        the file (rollback = delete it); `existed=True` with `prior_bytes` — it was
+        changed or deleted (rollback = put it back).
         """
         checkpoint_id = uuid.uuid4().hex[:12]
         recoverable = True
@@ -144,9 +149,7 @@ class CheckpointStore:
             ts=time.time(),
             run_id=self._run_id,
         )
-        self._records.append(checkpoint)
-        self._evict_overflow()
-        self._save()
+        self._append(checkpoint)
         return checkpoint
 
     def restore_latest(self, rel_path: str) -> str:
@@ -155,20 +158,21 @@ class CheckpointStore:
         Возвращает описание того, что сделано. Кидает LookupError, если снимков
         для файла нет, и RuntimeError, если снимок нерушим (крупный файл).
         """
-        for index in range(len(self._records) - 1, -1, -1):
-            checkpoint = self._records[index]
-            if checkpoint.path != rel_path:
-                continue
-            if not checkpoint.recoverable:
-                raise RuntimeError(
-                    f"Снимок «{rel_path}» не сохранён (файл слишком большой) — откат невозможен."
-                )
-            message = self._apply_restore(checkpoint)
-            # Снимок «израсходован»: следующий откат уйдёт глубже.
-            self._records.pop(index)
-            self._drop_blob(checkpoint.id)
-            self._save()
-            return message
+        with self._lock:
+            for index in range(len(self._records) - 1, -1, -1):
+                checkpoint = self._records[index]
+                if checkpoint.path != rel_path:
+                    continue
+                if not checkpoint.recoverable:
+                    raise RuntimeError(
+                        f"Снимок «{rel_path}» не сохранён (файл слишком большой) — откат невозможен."
+                    )
+                message = self._apply_restore(checkpoint)
+                # The snapshot is used up: the next undo goes one level deeper.
+                self._records.pop(index)
+                self._drop_blob(checkpoint.id)
+                self._save()
+                return message
 
         raise LookupError(f"Нет сохранённых изменений для «{rel_path}».")
 
@@ -179,7 +183,7 @@ class CheckpointStore:
         Пустой список files — откатывать нечего (снимков прогона нет).
         """
         by_path: dict[str, dict] = {}
-        for cp in self._records:
+        for cp in self.records():
             if cp.run_id != run_id:
                 continue
             entry = by_path.setdefault(cp.path, {"path": cp.path, "op": cp.op, "count": 0, "recoverable": True})
@@ -206,42 +210,51 @@ class CheckpointStore:
         """
         if not run_id:
             raise LookupError("Не задан прогон для отката.")
-        indices = [i for i in range(len(self._records) - 1, -1, -1)
-                   if self._records[i].run_id == run_id]
-        if not indices:
-            raise LookupError("Для этого прогона нет сохранённых изменений.")
+        with self._lock:
+            indices = [i for i in range(len(self._records) - 1, -1, -1)
+                       if self._records[i].run_id == run_id]
+            if not indices:
+                raise LookupError("Для этого прогона нет сохранённых изменений.")
 
-        restored: list[str] = []
-        messages: list[str] = []
-        skipped: list[str] = []
-        for index in indices:  # уже от поздних к ранним
-            checkpoint = self._records[index]
-            if not checkpoint.recoverable:
-                skipped.append(checkpoint.path)
-                continue
-            try:
-                messages.append(self._apply_restore(checkpoint))
-            except RuntimeError as exc:
-                skipped.append(checkpoint.path)
-                messages.append(str(exc))
-                continue
-            if checkpoint.path not in restored:
-                restored.append(checkpoint.path)
-            self._records.pop(index)
-            self._drop_blob(checkpoint.id)
-        self._save()
+            restored: list[str] = []
+            messages: list[str] = []
+            skipped: list[str] = []
+            for index in indices:  # already newest to oldest
+                checkpoint = self._records[index]
+                if not checkpoint.recoverable:
+                    skipped.append(checkpoint.path)
+                    continue
+                try:
+                    messages.append(self._apply_restore(checkpoint))
+                except RuntimeError as exc:
+                    skipped.append(checkpoint.path)
+                    messages.append(str(exc))
+                    continue
+                if checkpoint.path not in restored:
+                    restored.append(checkpoint.path)
+                self._records.pop(index)
+                self._drop_blob(checkpoint.id)
+            self._save()
         return {"restored": restored, "messages": messages, "skipped": skipped}
 
     def latest_for(self, rel_path: str) -> Checkpoint | None:
-        for checkpoint in reversed(self._records):
+        for checkpoint in reversed(self.records()):
             if checkpoint.path == rel_path:
                 return checkpoint
         return None
 
     def records(self) -> list[Checkpoint]:
-        return list(self._records)
+        with self._lock:
+            return list(self._records)
 
     # ------------------------------------------------------------------
+
+    def _append(self, checkpoint: Checkpoint) -> None:
+        """Add a snapshot and persist the manifest as one atomic step."""
+        with self._lock:
+            self._records.append(checkpoint)
+            self._evict_overflow()
+            self._save()
 
     def _apply_restore(self, checkpoint: Checkpoint) -> str:
         target = self._resolve(checkpoint.path)
@@ -292,13 +305,18 @@ class CheckpointStore:
         return records
 
     def _save(self) -> None:
-        try:
-            self.dir.mkdir(parents=True, exist_ok=True)
-            temp = self._manifest.with_suffix(".json.tmp")
-            temp.write_text(
-                json.dumps([asdict(r) for r in self._records], ensure_ascii=False),
-                encoding="utf-8",
-            )
-            safe_replace(temp, self._manifest)
-        except OSError:  # pragma: no cover - потеря манифеста не критична
-            logger.debug("Не удалось сохранить манифест снимков", exc_info=True)
+        # A unique temp name per save: even two store instances for the same session
+        # never write into the same temp file.
+        temp = self.dir / f"manifest.{uuid.uuid4().hex[:8]}.tmp"
+        with self._lock:
+            try:
+                self.dir.mkdir(parents=True, exist_ok=True)
+                temp.write_text(
+                    json.dumps([asdict(r) for r in self._records], ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                safe_replace(temp, self._manifest)
+            except OSError:  # pragma: no cover
+                # Not harmless: the manifest drives rollback, so say it loudly.
+                logger.warning("Could not save the checkpoint manifest", exc_info=True)
+                temp.unlink(missing_ok=True)
