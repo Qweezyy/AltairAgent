@@ -40,6 +40,10 @@ browser that copes with always-on VPNs.
   stay inside the sandbox.
 
 ### Fixed
+- **Whole-run rollback could skip a file.** When the agent edited several files in parallel, two
+  snapshots saved at the same moment could overwrite each other in the manifest, and "roll back the
+  run" then silently left one of the files changed. Snapshot saves are now serialized, with a
+  regression test that reproduces the race deterministically.
 - Step captions no longer claim an action happened before it was approved (a pending write read
   "Created hello.txt" while still waiting for confirmation).
 - Approval cards describe the concrete action instead of a generic "will change your system".
