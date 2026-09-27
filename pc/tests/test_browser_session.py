@@ -75,6 +75,11 @@ def site(tmp_path_factory):
     (root / "probe.html").write_text(PAGE, encoding="utf-8")
     (root / "dest.html").write_text("<!doctype html><meta charset=utf-8><title>Dest Page</title><h1>Arrived</h1>", encoding="utf-8")
     (root / "file.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    paragraphs = "".join(f"<p>Paragraph {i} of a long article about browsing agents.</p>" for i in range(300))
+    (root / "long.html").write_text(
+        "<!doctype html><meta charset=utf-8><title>Long</title><main><button onclick=\"document."
+        "getElementById('s').textContent='Saved'\">Save</button><p id=s>Draft</p>" + paragraphs + "</main>",
+        encoding="utf-8")
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Handler, directory=str(root)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -381,3 +386,101 @@ async def test_chat_private_folder_is_the_sandbox(browser, settings, tmp_path, m
     monkeypatch.setattr(bt, "get_agent_browser", lambda: browser)
     out = await bt.BrowserNavigateTool().run(bt.NavigateArgs(url="app/index.html"), ToolContext(settings=run_settings))
     assert "Chat Page" in out
+
+
+# ---------------------------------------------------------------- fewer tokens per page
+
+
+def test_compact_tree_drops_what_the_model_never_uses():
+    from core.browser_session import compact_tree
+
+    tracking = "https://yandex.ru/adfox/406261/clickURL?" + "p=x&" * 300
+    tree = "\n".join([
+        "- generic [ref=e1]:",
+        "  - generic [ref=e2] [cursor=pointer]:",          # a clickable div keeps its mark
+        "    - text: Open menu",
+        "  - link \"Ad\" [ref=e3] [cursor=pointer]:",
+        f"    - /url: {tracking}",
+        "  - link \"Docs\" [ref=e4] [cursor=pointer]:",
+        "    - /url: /ru/docs?page=2",                      # short: kept as is
+        "  - generic [ref=e5]: \"+1\"",                    # a named generic stays
+    ])
+    out = compact_tree(tree)
+    assert "- generic [ref=e1]:" not in out
+    assert "generic [ref=e2] [cursor=pointer]" in out
+    assert 'link "Ad" [ref=e3]:' in out and "[cursor=pointer]" not in out.split("e3")[1].split("\n")[0]
+    assert "/url: https://yandex.ru/adfox/406261/clickURL?…" in out and "p=x" not in out
+    assert "/url: /ru/docs?page=2" in out
+    assert 'generic [ref=e5]: "+1"' in out
+    assert all(f"ref=e{i}" in out for i in (2, 3, 4, 5))
+    assert len(out) < len(tree) / 4
+
+
+def test_page_changes_is_small_or_nothing():
+    from core.browser_session import page_changes
+
+    page = "\n".join(f"- paragraph [ref=e{i}]: line {i}" for i in range(200))
+    assert page_changes(page, page) == ""
+    changed = page.replace("line 100", "Clicked OK")
+    diff = page_changes(page, changed)
+    assert "+- paragraph [ref=e100]: Clicked OK" in diff and "-- paragraph [ref=e100]: line 100" in diff
+    assert len(diff) < len(page) / 20
+    assert page_changes(page, "\n".join(f"- other {i}" for i in range(200))) is None  # a new page
+
+
+def test_session_marks_match_the_browser():
+    from core.agent import session as s
+
+    assert (s.FULL_PAGE_MARK, s.PAGE_CHANGES_MARK) == (bs.FULL_PAGE_MARK, bs.PAGE_CHANGES_MARK)
+
+
+async def test_an_action_on_the_same_page_returns_only_what_changed(browser, site):
+    view = await browser.navigate(site + "/probe.html")
+    assert view.changes is None and bs.FULL_PAGE_MARK in view.render()  # a new page: whole
+    press = ref_of(view.tree, r'button "Press Me"')
+
+    async def click(page, target):
+        await target.click()
+
+    after = await browser.act(click, press)
+    text = after.render()
+    assert bs.PAGE_CHANGES_MARK in text and "Clicked OK" in text
+    assert "light-years" not in text and "Get CSV" not in text  # the unchanged page is not sent again
+    assert "Clicked OK" in after.tree              # the full tree is still there for callers
+    assert len(text) < len(view.render())
+
+    async def hover(page, target):
+        await target.hover()
+
+    idle = await browser.act(hover, press)         # the old ref still works
+    assert "nothing visible changed" in idle.render()
+
+    read = await browser.snapshot()                # reading the page: always whole
+    assert read.changes is None and "Hello Probe" in read.render()
+
+
+async def test_a_new_tab_or_diffs_off_give_the_whole_page(browser, site, settings):
+    view = await browser.navigate(site + "/probe.html")
+
+    async def click(page, target):
+        await target.click()
+
+    opened = await browser.act(click, ref_of(view.tree, r'link "Open dest"'))
+    assert opened.changes is None and "Arrived" in opened.render()
+
+    await browser.navigate(site + "/probe.html")
+    view = await browser.snapshot()
+    off = settings.model_copy(update={"browser_snapshot_diff": False})
+    whole = await browser.act(click, ref_of(view.tree, r'button "Press Me"'), sandbox=off)
+    assert whole.changes is None and "Hello Probe" in whole.render()
+
+
+async def test_on_a_long_page_an_action_costs_a_fraction(browser, site):
+    view = await browser.navigate(site + "/long.html")
+
+    async def click(page, target):
+        await target.click()
+
+    after = await browser.act(click, ref_of(view.tree, r'button "Save"'))
+    assert "Saved" in after.render()
+    assert len(after.render()) < len(view.render()) / 20

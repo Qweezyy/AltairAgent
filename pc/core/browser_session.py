@@ -22,7 +22,9 @@ Playwright MCP uses), and actions target those refs.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -47,6 +49,70 @@ _SEARCH_URL = "https://www.google.com/search?q={q}"
 
 #: How much of the page snapshot goes to the model in one reply.
 SNAPSHOT_LIMIT = 14_000
+#: Marks the two shapes of a page the model gets (the history tells them apart by these).
+FULL_PAGE_MARK = "Page (accessibility tree"
+PAGE_CHANGES_MARK = "Page changes since your previous look"
+#: A diff larger than this share of the page is not worth it: the whole page is sent.
+DIFF_MAX_SHARE = 0.5
+#: Link targets longer than this lose their query string (ad and tracking links run to 1000+
+#: characters; the agent clicks by ref, the address only tells it where a link goes).
+URL_KEEP = 150
+
+# Roles whose clickability is implied, so "[cursor=pointer]" on them says nothing.
+_CLICKABLE_ROLES = frozenset({"link", "button", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option",
+                              "checkbox", "radio", "switch", "textbox", "combobox", "searchbox", "slider",
+                              "treeitem", "spinbutton"})
+_UNNAMED_WRAPPER = re.compile(r"\s*- generic \[ref=[^\]]+\]:")
+_ROLE = re.compile(r"\s*- (\w+)")
+_URL_LINE = re.compile(r"^(\s*- /url: )(\S+)(.*)$")
+
+
+def _short_url(url: str) -> str:
+    base, sep, _ = url.partition("?")
+    base = base.split("#", 1)[0]
+    if len(base) > 100:
+        return base[:100] + "…"
+    return base + ("?…" if sep else "…")
+
+
+def compact_tree(tree: str) -> str:
+    """The accessibility tree without what the model never uses.
+
+    Unnamed ``generic`` wrappers (layout divs) go, their children stay; "[cursor=pointer]"
+    goes where the role already says the element is clickable (a clickable generic keeps
+    it); long tracking URLs keep their address and lose the query. Refs are untouched.
+    """
+    out: list[str] = []
+    for line in tree.splitlines():
+        if _UNNAMED_WRAPPER.fullmatch(line):
+            continue
+        if " [cursor=pointer]" in line:
+            role = _ROLE.match(line)
+            if role and role.group(1) in _CLICKABLE_ROLES:
+                line = line.replace(" [cursor=pointer]", "")
+        url = _URL_LINE.match(line)
+        if url and len(url.group(2)) > URL_KEEP:
+            line = url.group(1) + _short_url(url.group(2)) + url.group(3)
+        out.append(line)
+    return "\n".join(out)
+
+
+def page_changes(old: str, new: str) -> str | None:
+    """What changed between two snapshots of one page, as a compact diff.
+
+    "" means nothing visible changed; None means the change is too big for a diff to help
+    (the caller sends the whole page).
+    """
+    a, b = old.splitlines(), new.splitlines()
+    lines: list[str] = []
+    for line in difflib.unified_diff(a, b, lineterm="", n=1):
+        if line.startswith(("---", "+++")):
+            continue
+        lines.append("…" if line.startswith("@@") else line)
+    text = "\n".join(lines)
+    if not text:
+        return ""
+    return None if len(text) > DIFF_MAX_SHARE * max(len(new), 1) else text
 
 
 def looks_like_url(text: str) -> bool:
@@ -276,17 +342,29 @@ class PageView:
     tree: str
     truncated: bool = False
     notes: list[str] = field(default_factory=list)
+    #: After an action on the same page: only what changed (the model has the rest). None =
+    #: send the whole page; "" = nothing visible changed.
+    changes: str | None = None
 
     def render(self) -> str:
         head = [f"URL: {self.url}", f"Title: {self.title}"]
         head += [f"Note: {n}" for n in self.notes]
+        if self.changes is not None:
+            if not self.changes:
+                return "\n".join([*head, "", f"{PAGE_CHANGES_MARK}: nothing visible changed."])
+            return "\n".join([
+                *head, "",
+                f"{PAGE_CHANGES_MARK} (lines with - were removed, + added; the rest of the page and its "
+                "refs are as before; browser_read gives the whole page):",
+                self.changes,
+            ])
         body = self.tree or "(the page has no readable content yet — it may still be loading)"
         tail = (
             ["", f"[snapshot truncated at {SNAPSHOT_LIMIT} chars — use browser_find to locate "
              "elements further down, or browser_scroll]"]
             if self.truncated else []
         )
-        return "\n".join([*head, "", "Page (accessibility tree; use [ref=…] values with the browser tools):",
+        return "\n".join([*head, "", f"{FULL_PAGE_MARK}; use [ref=…] values with the browser tools):",
                           body, *tail])
 
 
@@ -314,6 +392,8 @@ class AgentBrowser:
         self._action_lock = asyncio.Lock()
         self._action_owner: asyncio.Task[Any] | None = None
         self._dialog_notes: list[str] = []
+        #: The page as the model last saw it: (tab, url, compacted tree) — the base of a diff.
+        self._seen: tuple[str, str, str] | None = None
         self._pending_dialog_choice: str = ""
         self._downloads: DownloadStore | None = None
         self._seq = 0
@@ -811,6 +891,7 @@ class AgentBrowser:
         async with self.agent_action():
             page = await self.page()
             before_url = page.url
+            before_seen = self._seen
             before_tabs = set(self._tabs)
             before_downloads = {d["id"] for d in self.downloads.list()}
             self._pending_dialog_choice = dialog
@@ -832,6 +913,11 @@ class AgentBrowser:
             await self._settle(page)
             await self._keep_in_sandbox(page, sandbox)
             view = await self.snapshot()
+            diff_on = sandbox.browser_snapshot_diff if sandbox is not None else get_settings().browser_snapshot_diff
+            if (diff_on and before_seen is not None and not new_tabs and self._seen is not None
+                    and before_seen[:2] == self._seen[:2]):
+                # Same tab, same address: the model has the page from its previous look.
+                view.changes = page_changes(before_seen[2], self._seen[2])
             if page.url != before_url:
                 view.notes.append(f"navigated from {before_url}")
             if new_tabs:
@@ -848,12 +934,13 @@ class AgentBrowser:
         except Exception:  # noqa: BLE001
             title = ""
         try:
-            tree = await page.aria_snapshot(mode="ai", timeout=15000)
+            tree = compact_tree(await page.aria_snapshot(mode="ai", timeout=15000))
         except Exception as exc:  # noqa: BLE001
             tree = f"(could not read the page: {str(exc).splitlines()[0][:200]})"
         truncated = len(tree) > limit
         notes = self._dialog_notes[:]
         self._dialog_notes.clear()
+        self._seen = (self._active, page.url, tree)
         return PageView(url=page.url, title=title or page.url, tree=tree[:limit], truncated=truncated, notes=notes)
 
     async def find(self, query: str, limit: int = 12) -> str:

@@ -138,6 +138,9 @@ class Settings(BaseSettings):
     #: проверок, перед «готово» его один раз попросят проверить результат. Не
     #: зацикливает — только один толчок. Можно выключить в .env.
     verification_gate: bool = True
+    #: After a browser action on the same page the model gets only what changed, not the whole
+    #: page again (most of a browsing task's tokens were repeated snapshots).
+    browser_snapshot_diff: bool = True
     #: The model names a new chat from its first message (one tiny extra request to the
     #: cheapest configured model). Off: the chat is named after that message's first line.
     chat_titles: bool = True

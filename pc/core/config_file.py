@@ -50,6 +50,7 @@ EDITABLE_KEYS = {
     "TOOL_SEARCH": "tool_search",
     "VERIFICATION_GATE": "verification_gate",
     "CHAT_TITLES": "chat_titles",
+    "BROWSER_SNAPSHOT_DIFF": "browser_snapshot_diff",
     "BRIDGE_TOKEN": "bridge_token",
     "BRIDGE_LAN": "bridge_lan",
     "BROWSER_NETWORK": "browser_network",
@@ -58,7 +59,7 @@ EDITABLE_KEYS = {
 #: Настройки-переключатели: в .env пишем строго "true"/"false".
 BOOL_KEYS = {
     "ALLOW_SUBAGENTS", "CONTEXT_COMPACTION", "TOOL_RESULT_CLEARING", "TOOL_SEARCH",
-    "VERIFICATION_GATE", "MODEL_ROUTING", "BRIDGE_LAN", "CHAT_TITLES",
+    "VERIFICATION_GATE", "MODEL_ROUTING", "BRIDGE_LAN", "CHAT_TITLES", "BROWSER_SNAPSHOT_DIFF",
 }
 
 #: Ключи, значения которых нельзя показывать целиком.

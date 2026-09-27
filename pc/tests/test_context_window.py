@@ -173,3 +173,35 @@ def test_ws_ring_reports_exact_count_and_404_page(monkeypatch, settings):
         assert page.status_code == 404 and 'href="/"' in page.text and "text/html" in page.headers["content-type"]
         api = tc.get("/api/nope", headers={"accept": "text/html"})
         assert api.headers["content-type"].startswith("application/json")
+
+
+def _page_history(shapes: str) -> Session:
+    """F = a whole page, d = a page diff, in the order the browser returned them."""
+    from core.agent.session import FULL_PAGE_MARK, PAGE_CHANGES_MARK
+
+    session = Session()
+    session.add_user("task")
+    for i, kind in enumerate(shapes):
+        session.messages.append({"role": "assistant", "content": None, "tool_calls": [
+            {"id": f"p{i}", "type": "function", "function": {"name": "browser_click", "arguments": "{}"}}]})
+        body = (f"URL: https://x/{i}\n\n{FULL_PAGE_MARK}; use refs):\n" + "- node\n" * 3_000 if kind == "F"
+                else f"URL: https://x/{i}\n\n{PAGE_CHANGES_MARK} (...):\n+ added {i}")
+        session.add_tool_result(f"p{i}", "browser_click", body)
+    return session
+
+
+def test_page_diffs_keep_the_page_they_were_taken_against():
+    session = _page_history("FddFdddFdddddd")
+    session.supersede_page_states(keep=2, min_free_chars=0)
+    tools = [m["content"] for m in session.messages if m["role"] == "tool"]
+    alive = "".join("x" if c.startswith(CLEARED_MARK) else ("F" if c.count("\n") > 100 else "d") for c in tools)
+    # Everything before the second-to-last whole page goes; that page and all after it stay.
+    assert alive == "xxxFdddFdddddd"
+
+
+def test_budget_clearing_never_takes_the_latest_whole_page():
+    session = _page_history("F" + "d" * 12)
+    session.messages[-1]["content"] += "y" * 2_000   # recent outputs are big enough to clear
+    session.clear_old_tool_results(keep_recent=2, min_chars=10)
+    first = next(m for m in session.messages if m["role"] == "tool")
+    assert not first["content"].startswith(CLEARED_MARK)  # the base of the diffs after it

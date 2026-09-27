@@ -34,6 +34,10 @@ CLEARED_MARK = "[Earlier"
 #: The text that opens a message carrying images from tools (browser/vision screenshots),
 #: so they can be told apart from the user's own attachments and dropped once stale.
 TOOL_MEDIA_MARK = "[Tool screenshot]"
+#: The two shapes of a browser result (core/browser_session.py writes them; kept in sync by a
+#: test so the session layer does not import the browser).
+FULL_PAGE_MARK = "Page (accessibility tree"
+PAGE_CHANGES_MARK = "Page changes since your previous look"
 #: Keep this many of the newest page snapshots / tool screenshots in full.
 KEEP_PAGE_STATES = 2
 
@@ -304,6 +308,8 @@ class Session:
         that point, so it must be worth it. Returns (outputs cleared, chars freed).
         """
         tool_indexes = [i for i, m in enumerate(self.messages) if m.get("role") == "tool"]
+        # The latest whole page stays: the page diffs after it are read against it.
+        base = self._latest_full_page()
         candidates = []
         for index in tool_indexes[: max(0, len(tool_indexes) - keep_recent)]:
             message = self.messages[index]
@@ -313,6 +319,7 @@ class Session:
                 and len(content) >= min_chars
                 and message.get("name") not in protected
                 and not content.startswith(CLEARED_MARK)
+                and index != base
             ):
                 candidates.append(index)
 
@@ -336,19 +343,27 @@ class Session:
         Every browser action returns the whole page, and after the next action the old
         snapshot describes a page that is gone. Left in the history, a long browsing task
         piles up hundreds of thousands of tokens that are resent on every request. The
-        newest `keep` snapshots and screenshots stay; older ones become a one-line note (the
-        call and its arguments remain). Batched by `min_free_chars`, because each change
+        newest `keep` whole pages stay with the page diffs that follow them, and the newest
+        `keep` screenshots; older ones become a one-line note (the call and its arguments
+        remain). Batched by `min_free_chars`, because each change
         invalidates the prompt cache from that point. Returns (items dropped, chars freed).
         """
-        snapshots = [i for i, m in enumerate(self.messages)
-                     if m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_")
-                     and isinstance(m.get("content"), str) and len(m["content"]) >= 1_500
-                     and not m["content"].startswith(CLEARED_MARK)]
+        pages = [i for i, m in enumerate(self.messages)
+                 if m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_")
+                 and isinstance(m.get("content"), str) and not m["content"].startswith(CLEARED_MARK)]
+        full = [i for i in pages if FULL_PAGE_MARK in self.messages[i]["content"]
+                or len(self.messages[i]["content"]) >= 1_500 and PAGE_CHANGES_MARK not in self.messages[i]["content"]]
+        # The newest `keep` whole pages stay, and every page diff after the oldest of them:
+        # a diff means nothing without the page it was taken against.
+        kept_from = full[-keep] if len(full) >= keep else (full[0] if full else len(self.messages))
+        full_set = set(full)
+        snapshots = [i for i in pages if i < kept_from
+                     and (i in full_set or PAGE_CHANGES_MARK in self.messages[i]["content"])]
         shots = [i for i, m in enumerate(self.messages)
                  if m.get("role") == "user" and isinstance(m.get("content"), list)
                  and _first_text(m["content"]).startswith(TOOL_MEDIA_MARK)
                  and any(isinstance(p, dict) and p.get("type") != "text" for p in m["content"])]
-        stale_snapshots = snapshots[: max(0, len(snapshots) - keep)]
+        stale_snapshots = snapshots
         stale_shots = shots[: max(0, len(shots) - keep)]
         media_chars = TOKENS_PER_MEDIA_PART * CHARS_PER_TOKEN
         freed = sum(len(self.messages[i]["content"]) for i in stale_snapshots)
@@ -368,6 +383,14 @@ class Session:
             self.messages[index]["content"] = f"{text}\n{CLEARED_MARK} screenshot removed: a newer one supersedes it.]"
         self.updated_at = time.time()
         return len(stale_snapshots) + len(stale_shots), freed
+
+    def _latest_full_page(self) -> int:
+        for index in range(len(self.messages) - 1, -1, -1):
+            m = self.messages[index]
+            if (m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_")
+                    and isinstance(m.get("content"), str) and FULL_PAGE_MARK in m["content"]):
+                return index
+        return -1
 
     def trim(self, budget_tokens: int, keep_recent: int = 6) -> int:
         """Убирает самые старые сообщения, пока история не влезет в бюджет.
