@@ -6,10 +6,12 @@
 
 <p align="center"><b>The autonomous engineer you can leave alone.</b></p>
 
+<p align="center"><b>English</b> · <a href="README.ru.md">Русский</a></p>
+
 <p align="center">
   <a href="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml"><img src="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.1%20alpha-orange.svg" alt="Version 0.1.1 alpha"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.2%20alpha-orange.svg" alt="Version 0.1.2 alpha"></a>
 </p>
 
 <p align="center">
@@ -77,7 +79,7 @@ And two modes per task: **"Autopilot"** (leave it alone — gates and rollback) 
 account and chat sync (keypair + QR pairing); deploy and self-heal "to production"; Autopilot/Co-pilot
 modes; generative media (via your keys); frictionless onboarding of all bodies in a couple of steps.
 
-**Known limitations in 0.1.0:**
+**Known limitations:**
 - **Phone ↔ PC works only on the same local network** (e.g. one Wi-Fi) for now. The bridge and
   everything synced over it — memory, skills, MCP servers — needs both devices on one network.
   Workaround: put both on one [Tailscale](https://tailscale.com/) network and use the PC's Tailscale address.
