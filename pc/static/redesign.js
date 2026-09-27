@@ -73,7 +73,17 @@ function scrollFeed(force = false) {
   if (!force && !state.stickToBottom) { els.jump.hidden = false; return; }
   els.feed.scrollTop = els.feed.scrollHeight; els.jump.hidden = true;
 }
-function endTurn() { finishRound(); state.answerEl = null; state.thinkingEl = null; state.turnHadInline = false; clearActivity(); }
+// Thinking is over (the answer or a tool call began, or the turn ended): the block folds into
+// a one-line summary even if it was open, like a finished round of tools.
+function finishThinking() {
+  const box = state.thinkingEl; state.thinkingEl = null;
+  if (!box || box._done) return;
+  box._done = true;
+  box.classList.remove("open"); $(".thinking-body", box).hidden = true;
+  const secs = Math.max(1, Math.round((performance.now() - (box._t0 || performance.now())) / 1000));
+  typeText($(".thinking-label", box), T("st.thoughtFor", { s: secs }));
+}
+function endTurn() { finishRound(); finishThinking(); state.answerEl = null; state.turnHadInline = false; clearActivity(); }
 function clearActivity() { statusEnd(); state.reconnectEl = null; }
 
 // -------- живой статус внизу сообщения (кружок + время работы + фаза) --------
@@ -301,7 +311,7 @@ function userBlock(text, attachments, turn) {
 function ensureAnswer() {
   if (!state.answerEl) {
     state.answerEl = append(el(`<div class="msg-agent"><div class="answer-body md"></div></div>`));
-    state.answerText = ""; state.thinkingEl = null; state.md = { end: 0, html: "" };
+    state.answerText = ""; finishThinking(); state.md = { end: 0, html: "" };
   }
   return state.answerEl;
 }
@@ -399,6 +409,8 @@ function finishRound() {
   const labels = round._tools.map((t) => t.label.replace(/<[^>]+>/g, "")).filter(Boolean);
   const summary = labels.join(" · ");
   typeText($(".tools-title", round), summary || T("tool.actions"));
+  // Folds into its summary line even if it was opened while running (a click opens it again).
+  round.dataset.open = "0"; $(".tools-body", round).hidden = true;
   state.round = null;
 }
 // Построение раунда из истории (шаги уже завершены).
@@ -632,14 +644,18 @@ const HANDLERS = {
   "tool.pending"() {},
   "reasoning.delta"(m) {
     if (!state.thinkingEl) {
-      state.thinkingEl = append(el(`<div class="thinking"><button class="thinking-row" type="button"><span class="thinking-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span>${esc(T("st.thinkingDots"))}</span></button><div class="thinking-body" hidden></div></div>`));
-      $(".thinking-row", state.thinkingEl).addEventListener("click", () => { state.thinkingEl.classList.toggle("open"); $(".thinking-body", state.thinkingEl).hidden = !state.thinkingEl.classList.contains("open"); });
-      state.thinkingEl._t = "";
+      const box = append(el(`<div class="thinking"><button class="thinking-row" type="button"><span class="thinking-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="thinking-label">${esc(T("st.thinkingDots"))}</span></button><div class="thinking-body" hidden></div></div>`));
+      // The block itself, not state.thinkingEl: that one is cleared once thinking ends, and
+      // a block left open could then never be closed again.
+      $(".thinking-row", box).addEventListener("click", () => { box.classList.toggle("open"); $(".thinking-body", box).hidden = !box.classList.contains("open"); });
+      box._t = ""; box._t0 = performance.now();
+      state.thinkingEl = box;
     }
     state.thinkingEl._t += m.text; $(".thinking-body", state.thinkingEl).textContent = state.thinkingEl._t; scrollFeed();
     statusMode("think");
   },
   "tool.started"(m) {
+    finishThinking();
     state.answerEl = null;                          // после раунда инструментов — новый ответ
     state.stepArgs.set(m.call_id, m.args);
     roundAddTool(m.call_id, m.name, m.args);
@@ -653,7 +669,7 @@ const HANDLERS = {
     // Native tabs update by themselves; the screencast fallback needs fresh tabs/address.
     if (String(m.name || "").startsWith("browser_") && paneVisible("browser") && !window.BrowserPanel?.isEmbedded()) send({ type: "browser_state" });
   },
-  "text.delta"(m) { finishRound(); ensureAnswer(); state.answerText += m.text; scheduleAnswerRender(); statusMode("wait"); },
+  "text.delta"(m) { finishRound(); finishThinking(); ensureAnswer(); state.answerText += m.text; scheduleAnswerRender(); statusMode("wait"); },
   "plan.updated"(m) { renderPlan(m.steps); },
   "question.asked"(m) { renderQuestion(m); },
   "approval.requested"(m) { renderApproval(m); },
