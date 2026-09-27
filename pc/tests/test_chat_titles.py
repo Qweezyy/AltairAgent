@@ -76,9 +76,11 @@ class _ChatLLM(ScriptedLLM):
     def __init__(self, turns, title: str | None, title_delay: float, gate=None) -> None:
         super().__init__(turns)
         self.title, self.title_delay, self.gate = title, title_delay, gate
+        self.title_prompts: list[str] = []
 
     async def complete(self, messages, **kw):
         if str(messages[-1].get("content", "")).startswith("Write a short title"):
+            self.title_prompts.append(str(messages[-1]["content"]))
             await asyncio.sleep(self.title_delay)
             if self.gate is not None:  # held until the test lets go (a thread event: another loop)
                 await asyncio.to_thread(self.gate.wait, 10)
@@ -192,7 +194,7 @@ def test_no_title_request_when_titles_are_off(monkeypatch, settings):
         ws.send_json({"type": "run", "task": "первая строка"})
         events = _collect(ws, {"run.finished"})
     assert not [e for e in events if e["type"] == "session.title"]
-    assert not any(str(c["messages"][-1].get("content", "")).startswith("Write a short title") for c in llm.calls)
+    assert llm.title_prompts == []
 
 
 def test_rename_current_and_other_chat(monkeypatch, settings):
@@ -404,3 +406,68 @@ def test_new_chat_is_stored_before_routing_decides(monkeypatch, settings):
         assert ready["session_id"] in ids  # still routing, not answering yet
         events = _collect(ws, {"run.finished", "run.failed"})
     assert events[-1]["type"] == "run.finished"
+
+
+# ------------------------------------------------------------------ chats named by the old rule
+
+
+def _old_chat(settings, title: str | None = None) -> Session:
+    from core.agent.titler import fallback_title
+
+    old = Session()
+    old.add_user("Привет! Зайди на Хабр и заполни профиль по моему проекту, он лежит в рабочей папке")
+    old.messages.append({"role": "assistant", "content": "Готово."})
+    old.title = title or fallback_title(old.messages[0]["content"])  # what the old rule stored
+    SessionStore(settings=settings).save(old)
+    return old
+
+
+def _continue(tc, session_id: str, task: str, expect_title: bool = True) -> list[dict]:
+    with tc.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "load_session", "session_id": session_id})
+        _collect(ws, {"session.loaded"})
+        ws.send_json({"type": "run", "task": task})
+        events = _collect(ws, {"run.finished"})
+        if expect_title and not any(e["type"] == "session.title" for e in events):
+            events += _collect(ws, {"session.title"}, limit=10)
+    return events
+
+
+def test_an_old_chat_named_after_its_first_line_gets_a_model_title(monkeypatch, settings):
+    llm = _ChatLLM([AssistantTurn(content="ок")], title="Профиль на Хабре", title_delay=0)
+    app, s = _app(monkeypatch, settings, llm)
+    old = _old_chat(s)
+    with TestClient(app) as tc:
+        events = _continue(tc, old.id, "ещё добавь ссылку на GitHub")
+    titles = [e for e in events if e["type"] == "session.title"]
+    assert titles and titles[0]["title"] == "Профиль на Хабре"
+    assert "Зайди на Хабр" in llm.title_prompts[0]  # titled from the FIRST message
+    assert _stored(s, old.id).title == "Профиль на Хабре"
+
+
+def test_a_chat_the_user_renamed_is_left_alone(monkeypatch, settings):
+    llm = _ChatLLM([AssistantTurn(content="ок")], title="Не должно быть", title_delay=0)
+    app, s = _app(monkeypatch, settings, llm)
+    old = _old_chat(s, title="Мой Хабр")
+    with TestClient(app) as tc:
+        events = _continue(tc, old.id, "дальше", expect_title=False)
+    assert not [e for e in events if e["type"] == "session.title"]
+    assert _stored(s, old.id).title == "Мой Хабр"
+
+
+def test_a_failing_title_model_is_asked_once_per_chat(monkeypatch, settings):
+    llm = _ChatLLM([AssistantTurn(content="ок"), AssistantTurn(content="ок")], title=None, title_delay=0)
+    app, s = _app(monkeypatch, settings, llm)
+    old = _old_chat(s)
+    with TestClient(app) as tc, tc.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "load_session", "session_id": old.id})
+        _collect(ws, {"session.loaded"})
+        for task in ("раз", "два"):
+            ws.send_json({"type": "run", "task": task})
+            _collect(ws, {"run.finished"})
+            while ws.receive_json() != {"type": "state", "state": "idle"}:  # ready for the next one
+                pass
+    assert len(llm.title_prompts) == 1
+    assert _stored(s, old.id).title == old.title  # the first line stays; nothing broke

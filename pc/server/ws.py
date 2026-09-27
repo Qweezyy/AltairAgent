@@ -142,6 +142,8 @@ class Connection:
         #: The new chat's title, asked from the model in parallel with its first answer.
         self._title_task: asyncio.Task[None] | None = None
         self._pending_title: str | None = None
+        self._title_for_new_chat = False
+        self._retitle_tried: set[str] = set()
         self._writer: asyncio.Task | None = None
         #: Мост к телефону. Ожидания обратных запросов (need_file/need_capability)
         #: по req_id — резолвятся, когда телефон пришлёт ответ.
@@ -744,9 +746,13 @@ class Connection:
         self, task_text: str, model: str | None, options: RunOptions | None = None,
         allow_route: bool = False,
     ) -> None:
-        if self.session.title == DEFAULT_TITLE and not self.session.messages:
-            if self.session_settings.chat_titles:
-                self._start_title(task_text, model)
+        new_chat = self.session.title == DEFAULT_TITLE and not self.session.messages
+        self._title_for_new_chat = new_chat
+        if self.session_settings.chat_titles:
+            first = task_text if new_chat else self._untitled_first_message()
+            if first:
+                self._start_title(first, model)
+        if new_chat:
             # A new chat goes into the list at once: routing may take a while before the run
             # itself starts (and stores the chat again). _save_session skips a chat without
             # messages, and the user's message reaches them only when the run starts.
@@ -860,6 +866,30 @@ class Connection:
             await self.store.async_save(stored)
         await self.send({"type": "session.title", "session_id": session_id, "title": title, "renamed": True})
 
+    def _untitled_first_message(self) -> str:
+        """The first message of a chat still called after it (named by the old first-line rule,
+        before the model wrote titles), or "" — the user's own names are left alone. Tried
+        once per chat per connection, so a model that cannot answer is not asked every time."""
+        from core.agent.titler import fallback_title
+
+        if not self.session.messages or self.session.id in self._retitle_tried:
+            return ""
+        # The UI feed keeps its last 400 entries and long histories get compacted, so the
+        # first message may survive in either place only.
+        candidates = [next((str(e.get("text") or "") for e in self.session.timeline if e.get("kind") == "user"), "")]
+        for m in self.session.messages:
+            if m.get("role") == "user":
+                content = m.get("content")
+                if isinstance(content, list):
+                    content = " ".join(str(p.get("text") or "") for p in content if isinstance(p, dict))
+                candidates.append(str(content or ""))
+                break
+        first = next((c for c in candidates if c.strip() and self.session.title == fallback_title(c)), "")
+        if not first:
+            return ""
+        self._retitle_tried.add(self.session.id)
+        return first
+
     def _start_title(self, task_text: str, model: str | None) -> None:
         """Ask for the chat's title alongside the first answer (the router's cheap model when
         routing is set up, otherwise the chat's model)."""
@@ -913,7 +943,7 @@ class Connection:
         if self._title_task is not None:
             if self._pending_title:
                 self.session.title = self._pending_title
-            elif not self._title_task.done():
+            elif not self._title_task.done() and self._title_for_new_chat:
                 self.session.title = DEFAULT_TITLE
         await self._save_session()
 
