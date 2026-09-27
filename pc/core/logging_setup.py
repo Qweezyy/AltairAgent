@@ -1,7 +1,7 @@
-"""Настройка логирования: один раз, из одного места, всегда UTF-8.
+"""Logging setup: once, from one place, always UTF-8.
 
-Никогда не вызывайте logging.basicConfig() в других модулях — только
-`setup_logging()` из точки входа.
+Never call logging.basicConfig() in other modules: only `setup_logging()` from the entry
+point.
 """
 
 from __future__ import annotations
@@ -17,8 +17,33 @@ _CONFIGURED = False
 FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
+class _SharedRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """A rotating log that keeps writing when it cannot rotate.
+
+    On Windows the rename of a full log fails while another process has it open (a second
+    copy of the app, the dev server, a `--check` run). The stock handler then drops that
+    record and every one after it, since it retries the rename on each line: the log went
+    silent for the rest of the session. Here a failed rotation just continues the same file.
+    """
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except OSError:
+            if self.stream is None or self.stream.closed:
+                self.stream = self._open()
+            self._rollover_failed_at = self.stream.tell()
+
+    def shouldRollover(self, record: logging.LogRecord) -> int:
+        # After a failed rotation, try again only once the file has grown by another 1 MiB.
+        failed = getattr(self, "_rollover_failed_at", None)
+        if failed is not None and self.stream is not None and self.stream.tell() < failed + 1024 * 1024:
+            return 0
+        return super().shouldRollover(record)
+
+
 def setup_logging(force: bool = False) -> logging.Logger:
-    """Инициализирует корневой логгер: файл с ротацией + консоль."""
+    """Sets up the root logger: a rotating file plus the console."""
     global _CONFIGURED
     root = logging.getLogger()
     if _CONFIGURED and not force:
@@ -32,7 +57,7 @@ def setup_logging(force: bool = False) -> logging.Logger:
 
     formatter = logging.Formatter(FORMAT)
 
-    file_handler = logging.handlers.RotatingFileHandler(
+    file_handler = _SharedRotatingFileHandler(
         settings.logs_dir / "agent.log",
         maxBytes=5 * 1024 * 1024,
         backupCount=3,
@@ -44,12 +69,12 @@ def setup_logging(force: bool = False) -> logging.Logger:
     root.addHandler(file_handler)
 
     stream = sys.stderr
-    # Windows-консоль по умолчанию не UTF-8 — иначе падают эмодзи и кириллица.
+    # The Windows console is not UTF-8 by default: emoji and Cyrillic would fail.
     if hasattr(stream, "reconfigure"):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:  # pragma: no cover - зависит от терминала
-            pass
+        except Exception:  # noqa: BLE001 - depends on the terminal; the file log is unaffected
+            logging.getLogger(__name__).debug("console stays in its own encoding", exc_info=True)
     console = logging.StreamHandler(stream)
     console.setFormatter(formatter)
     console.setLevel(level)
@@ -57,7 +82,7 @@ def setup_logging(force: bool = False) -> logging.Logger:
 
     root.setLevel(logging.DEBUG)
 
-    # Библиотеки слишком болтливы на DEBUG.
+    # Libraries are too chatty on DEBUG.
     for noisy in ("httpx", "httpcore", "openai", "urllib3", "asyncio", "multipart"):
         logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
 
