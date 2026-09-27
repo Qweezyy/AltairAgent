@@ -22,6 +22,29 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   layers are already Android-independent Kotlin); the open questions are background autonomy
   (iOS limits background work heavily) and distribution (TestFlight / sideloading).
 
+## [0.1.1] — 2026-09-27
+
+The first update after the public release: honest progress captions, chat titles and search, and a
+browser that copes with always-on VPNs.
+
+### Added
+- **Chat titles:** the model names each chat from the conversation; chats can be renamed, and search
+  jumps straight to the matching message.
+- **Per-model API keys:** every model can have its own key and provider.
+- **Browser networking:** the built-in browser picks a direct connection or the VPN per site — sites
+  blocked directly go through the VPN, while an always-on VPN no longer breaks sites that need a
+  direct connection.
+- **Commands outside the working folder:** the agent can run a command in another folder when a task
+  needs it. Every such command asks for approval — even read-only ones and in automatic modes — the
+  approval card marks it as outside the working folder, and it is not covered by rollback. File tools
+  stay inside the sandbox.
+
+### Fixed
+- Step captions no longer claim an action happened before it was approved (a pending write read
+  "Created hello.txt" while still waiting for confirmation).
+- Approval cards describe the concrete action instead of a generic "will change your system".
+- Chat titles and the new-chat row in the sidebar now work in the packaged app.
+
 ## [0.1.0] — 2026-09-26 (first public release)
 
 The first public, **early-stage** release. Expect rough edges — see the disclaimer in the README.
@@ -76,5 +99,6 @@ The first public, **early-stage** release. Expect rough edges — see the discla
 - Auto-update is off until an update feed is published.
 - Python on PATH is needed for the agent's own code checks (tests/linters) in your projects.
 
-[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Qweezyy/AltairAgent/releases/tag/v0.1.0
