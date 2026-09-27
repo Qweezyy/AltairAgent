@@ -619,8 +619,26 @@ class AgentBrowser:
             self._tabs.clear()
             self._active = ""
 
+    async def _quit_chrome_gracefully(self, timeout: float = 5.0) -> None:
+        """Let our own Chrome exit by itself: it writes its cookie store to disk only now and
+        then (about every 30 s) and on a clean exit. Killing it lost the latest logins, and
+        every cookie imported from Firefox, at each app restart."""
+        if self._chrome is None or self._chrome.poll() is not None or self._browser is None:
+            return
+        try:
+            cdp = await self._browser.new_browser_cdp_session()
+            await cdp.send("Browser.close")
+        except Exception:  # noqa: BLE001 - the browser may be gone already; the kill below remains
+            logger.debug("graceful browser close failed", exc_info=True)
+            return
+        try:
+            await asyncio.to_thread(self._chrome.wait, timeout)
+        except subprocess.TimeoutExpired:
+            logger.info("the browser did not exit in %.0f s; it will be stopped", timeout)
+
     async def close(self) -> None:
         async with self._lock:
+            await self._quit_chrome_gracefully()
             await self._disconnect()
             if self._chrome is not None and self._chrome.poll() is None:
                 self._chrome.terminate()

@@ -94,8 +94,8 @@ def _open_cookies_copy(profile_path: str) -> tuple[sqlite3.Connection, str]:
         if extra.exists():
             try:
                 shutil.copy2(extra, str(dst) + suffix)
-            except OSError:
-                pass
+            except OSError:  # a locked journal: the main file still has most of the cookies
+                logger.debug("cookies.sqlite%s was not copied", suffix, exc_info=True)
     conn = sqlite3.connect(f"file:{dst}?mode=ro", uri=True)
     return conn, tmpdir
 
@@ -115,6 +115,10 @@ def list_domains(profile_path: str) -> list[dict[str, Any]]:
             continue
         agg[site] = agg.get(site, 0) + int(cnt)
     return [{"domain": d, "count": n} for d, n in sorted(agg.items())]
+
+
+#: 31.12.9999 in unix seconds: anything larger is a millisecond expiry.
+_MAX_SECONDS = 253402300799
 
 
 def _samesite(v: Any) -> str:
@@ -146,13 +150,17 @@ def read_cookies(profile_path: str, domains: list[str]) -> list[dict[str, Any]]:
             "secure": bool(secure),
             "sameSite": _samesite(same),
         }
-        # expiry — unix-секунды. Пропускаем мусор и «миллисекундные» значения,
-        # иначе Playwright отвергает всю пачку.
+        # Recent Firefox (cookies.sqlite schema 17) stores the expiry in milliseconds, older
+        # ones in seconds. Dropping the millisecond values made every imported cookie a
+        # session cookie, which the browser erases when it closes: logins did not survive
+        # a restart or an update.
         try:
             exp = int(expiry or 0)
         except (TypeError, ValueError):
             exp = 0
-        if 0 < exp <= 253402300799:  # до 9999 года; больше — это мс, игнорируем срок
+        if exp > _MAX_SECONDS:
+            exp //= 1000
+        if 0 < exp <= _MAX_SECONDS:
             c["expires"] = exp
         cookies.append(c)
     return cookies
@@ -176,7 +184,7 @@ async def import_into_agent(profile_path: str, domains: list[str]) -> int:
             try:
                 await ctx.add_cookies([c])
                 done += 1
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001 - one bad cookie must not stop the rest
+                logger.debug("cookie %s for %s was refused: %s", c["name"], c["domain"], exc)
     logger.info("Перенесено куки из Firefox: %d/%d (сайтов: %d)", done, len(cookies), len(domains))
     return done
