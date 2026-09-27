@@ -43,23 +43,39 @@ def fallback_title(task: str) -> str:
     return first[:50] + ("..." if len(first) > 50 else "")
 
 
-async def generate_title(task: str, build_client: Callable[..., Any], client_kwargs: dict[str, Any],
-                         timeout: float = 25.0) -> str | None:
-    """Ask the model for a title; None when it fails (the caller falls back)."""
+async def generate_title(task: str, build_client: Callable[..., Any],
+                         client_kwargs: dict[str, Any] | list[dict[str, Any]],
+                         timeout: float = 15.0) -> str | None:
+    """Ask the model for a title; None when it fails (the caller falls back).
+
+    Several candidates (dicts of client kwargs) are tried in turn: a routing tier may have a
+    key that is not allowed for its model, and the title should still come from some model.
+    """
+    candidates = [client_kwargs] if isinstance(client_kwargs, dict) else list(client_kwargs)
+    for kwargs in candidates:
+        title = await _ask(task, build_client, kwargs, timeout)
+        if title:
+            return title
+    return None
+
+
+async def _ask(task: str, build_client: Callable[..., Any], client_kwargs: dict[str, Any],
+               timeout: float) -> str | None:
     try:
         client = build_client(**client_kwargs)
     except Exception as exc:  # noqa: BLE001 - a title must never break the run
-        logger.info("title: no client (%s)", exc)
+        logger.info("title: no client for %s (%s)", client_kwargs.get("model"), exc)
         return None
     try:
         prompt = [{"role": "user", "content": _PROMPT.format(task=(task or "").strip()[:1500])}]
-        turn = await asyncio.wait_for(client.complete(prompt, max_tokens=40), timeout=timeout)
-        title = clean_title(turn.content or "")
-        return title or None
+        # Reasoning models spend tokens on thinking first: a tight cap would leave no title.
+        turn = await asyncio.wait_for(client.complete(prompt, max_tokens=400), timeout=timeout)
+        return clean_title(turn.content or "") or None
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.info("title: the model did not answer (%s)", exc)
+        logger.info("title: %s did not answer (%s: %s)", client_kwargs.get("model"), type(exc).__name__,
+                    str(exc)[:200])
         return None
     finally:
         try:

@@ -15,6 +15,7 @@ import openai
 from openai import AsyncOpenAI
 
 from core.errors import ConfigError, LLMError
+from core.i18n import tr
 from core.llm.base import (
     CACHE_BREAKPOINT,
     AssistantTurn,
@@ -169,12 +170,6 @@ class OpenAICompatClient(LLMClient):
                     mark_streamed=lambda: streamed.__setitem__(0, True),  # noqa: B023
                     max_tokens=max_tokens,
                 )
-            except RETRYABLE as exc:
-                last_error = exc
-                error_details.append(f"Попытка {attempt}: {type(exc).__name__} — {exc}")
-                if attempt == attempts:
-                    break
-                await _retry(attempt, exc, f"{type(exc).__name__}: {exc}", 0.2)
             except openai.BadRequestError as exc:
                 # Временные ошибки стриминга от upstream провайдеров (DigitalOcean/Cloudflare 400 TransferEncoding)
                 err_str = str(exc).lower()
@@ -193,6 +188,10 @@ class OpenAICompatClient(LLMClient):
                 raise LLMError(
                     f"API отклонил ключ (401): {_short(exc)}. Проверьте LLM_API_KEY в настройках."
                 ) from exc
+            except openai.PermissionDeniedError as exc:
+                # A key that is valid but not allowed for this model (per-model keys on gateways):
+                # retrying cannot help and only stalls the caller.
+                raise LLMError(tr("llm.forbidden", model=self.model, detail=_short(exc))) from exc
             except openai.NotFoundError as exc:
                 raise LLMError(
                     f"Модель '{self.model}' недоступна на {self.base_url} (404). "
@@ -200,12 +199,20 @@ class OpenAICompatClient(LLMClient):
                 ) from exc
             except openai.APIStatusError as exc:
                 # Статусы 502, 503, 504, 524, 429 тоже пробуем повторить
-                if exc.status_code in (408, 429, 500, 502, 503, 504, 520, 521, 522, 524) and attempt < attempts:
+                if exc.status_code in (408, 429, 500, 502, 503, 504, 520, 521, 522, 524):
                     last_error = exc
                     error_details.append(f"Попытка {attempt}: HTTP {exc.status_code} — {exc}")
+                    if attempt == attempts:
+                        break
                     await _retry(attempt, exc, f"HTTP {exc.status_code}", 0.5)
                     continue
                 raise LLMError(f"Ошибка API {exc.status_code}: {_short(exc)}") from exc
+            except RETRYABLE as exc:
+                last_error = exc
+                error_details.append(f"Попытка {attempt}: {type(exc).__name__} — {exc}")
+                if attempt == attempts:
+                    break
+                await _retry(attempt, exc, f"{type(exc).__name__}: {exc}", 0.2)
 
         detailed_message = (
             f"Не удалось связаться с моделью «{self.model}» после {attempts} попыток переподключения. "

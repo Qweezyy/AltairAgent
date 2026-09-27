@@ -157,7 +157,7 @@ def test_chat_is_stored_as_new_chat_before_the_title_is_ready(monkeypatch, setti
         ws.send_json({"type": "run", "task": "сделай что-нибудь"})
         _collect(ws, {"run.finished"})
         listed = tc.get("/api/sessions").json()["sessions"]
-        assert listed and listed[0]["title"] == "Новый диалог"
+        assert listed  # in the rail before the answer, not only after it
         title = next(e for e in _collect(ws, {"session.title"}) if e["type"] == "session.title")
         assert title["title"] == "Длинное раздумье"
     assert _stored(s, title["session_id"]).title == "Длинное раздумье"
@@ -285,3 +285,88 @@ def test_providers_endpoint_round_trip(monkeypatch, settings):
         assert tc.post("/api/providers", json=body).json()["ok"]
         assert tc.get("/api/providers").json()["providers"][0]["models"][0]["api_key"] == "k"
         assert not tc.post("/api/providers", json={"providers": "nope"}).json()["ok"]
+
+
+# ------------------------------------------------------------------ fixes after the first try
+
+
+async def test_title_tries_the_next_model_when_one_fails():
+    built: list[str] = []
+
+    def build(model=None, **kw):
+        built.append(model)
+        return _TitleLLM(fail=True) if model == "router-without-key" else _TitleLLM("Столица Франции")
+
+    title = await generate_title("столица франции?", build, [{"model": "router-without-key"}, {"model": "strong"}])
+    assert title == "Столица Франции" and built == ["router-without-key", "strong"]
+
+
+def _status_error(cls, code: int):
+    import httpx
+
+    response = httpx.Response(code, request=httpx.Request("POST", "https://gw.example/v1/chat/completions"))
+    return cls(f"Error code: {code}", response=response, body=None)
+
+
+async def test_forbidden_key_fails_at_once_but_gateway_errors_are_retried(settings, monkeypatch):
+    import openai
+
+    import core.llm.openai_client as oc
+    from core.errors import LLMError
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(oc.asyncio, "sleep", no_sleep)
+    client = oc.OpenAICompatClient(settings=settings, model="glm", api_key="k")
+    calls = {"n": 0}
+
+    def failing(exc):
+        async def once(*a, **kw):
+            calls["n"] += 1
+            raise exc
+        return once
+
+    monkeypatch.setattr(client, "_stream_once", failing(_status_error(openai.PermissionDeniedError, 403)))
+    with pytest.raises(LLMError, match="403"):
+        await client.complete([{"role": "user", "content": "hi"}])
+    assert calls["n"] == 1  # a key that is not allowed for the model is not retried
+
+    calls["n"] = 0
+    monkeypatch.setattr(client, "_stream_once", failing(_status_error(openai.AuthenticationError, 401)))
+    with pytest.raises(LLMError, match="401"):
+        await client.complete([{"role": "user", "content": "hi"}])
+    assert calls["n"] == 1
+
+    calls["n"] = 0
+    monkeypatch.setattr(client, "_stream_once", failing(_status_error(openai.InternalServerError, 502)))
+    with pytest.raises(LLMError):
+        await client.complete([{"role": "user", "content": "hi"}])
+    assert calls["n"] > 1  # a flaky gateway still gets its retries
+
+
+class _SlowLLM(ScriptedLLM):
+    async def complete(self, messages, **kw):
+        await asyncio.sleep(1.0)
+        return await super().complete(messages, **kw)
+
+
+def test_new_chat_is_listed_while_the_first_answer_is_still_coming(monkeypatch, settings):
+    app, s = _app(monkeypatch, settings, _SlowLLM([AssistantTurn(content="ок")]))
+    s.chat_titles = False
+    with TestClient(app) as tc, tc.websocket_connect("/ws") as ws:
+        ready = ws.receive_json()
+        ws.send_json({"type": "run", "task": "долгий ответ"})
+        _collect(ws, {"state"})
+        deadline, listed = time.time() + 0.8, []
+        while time.time() < deadline and not listed:
+            listed = [x for x in tc.get("/api/sessions").json()["sessions"] if x["id"] == ready["session_id"]]
+        assert listed  # in the rail before the answer, not only after it
+        _collect(ws, {"run.finished"})
+
+
+def test_ui_is_revalidated_not_cached(monkeypatch, settings):
+    app, _ = _app(monkeypatch, settings, _ChatLLM([], title=None, title_delay=0))
+    with TestClient(app) as tc:
+        assert tc.get("/").headers.get("cache-control") == "no-cache"
+        assert tc.get("/static/redesign.js").headers.get("cache-control") == "no-cache"

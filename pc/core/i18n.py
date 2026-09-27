@@ -154,6 +154,12 @@ CATALOG: dict[str, dict[str, str]] = {
     "ws.no_retry": {"en": "Nothing to repeat.", "ru": "Не нашёл запрос для повтора."},
     "ws.folder_unavailable": {"en": "The project folder is not available.", "ru": "Рабочая папка недоступна."},
     "ws.routing": {"en": "Routing: {note}", "ru": "Маршрутизация: {note}"},
+    "llm.forbidden": {
+        "en": "The API key is not allowed to use the model '{model}' (403): {detail}. "
+              "Give this model its own key in Settings → Models and providers.",
+        "ru": "Ключ API не допущен к модели «{model}» (403): {detail}. "
+              "Задайте этой модели свой ключ в «Настройки → Модели и провайдеры».",
+    },
     "ws.routing_split": {"en": "Routing: the task was split into {n} subtasks — {summary}",
                          "ru": "Маршрутизация: задача разбита на {n} подзадач — {summary}"},
     "ws.nothing_to_resume": {"en": "No interrupted run was found — nothing to continue.",

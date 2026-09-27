@@ -740,9 +740,13 @@ class Connection:
         self, task_text: str, model: str | None, options: RunOptions | None = None,
         allow_route: bool = False,
     ) -> None:
+        if self.session.title == DEFAULT_TITLE and not self.session.messages:
+            if self.session_settings.chat_titles:
+                self._start_title(task_text, model)
+            # A new chat goes into the list at once: routing may take a while before the run
+            # itself starts (and stores the chat again).
+            await self._save_session()
         await self._state("running")
-        if self.session_settings.chat_titles and self.session.title == DEFAULT_TITLE and not self.session.messages:
-            self._start_title(task_text, model)
         # Маршрутизация по сложности. Оценщик разбивает запрос на подзадачи с
         # тиром модели у каждой. Если тиры РАЗНЫЕ — раздаём подзадачи обеим
         # моделям по очереди (дешёвая — простое, сильная — сложное). Иначе —
@@ -856,13 +860,20 @@ class Connection:
         from core.agent.router import _build_kwargs, resolve_tiers
 
         tiers = resolve_tiers(self.session_settings) if self.session_settings.model_routing else None
-        kwargs = _build_kwargs(tiers["router"]) if tiers else {"model": model or self.session_settings.default_model}
+        candidates: list[dict[str, Any]] = []
+        for tier in (tiers["router"], tiers["fast"], tiers["strong"]) if tiers else ():
+            candidates.append(_build_kwargs(tier))
+        candidates.append({"model": model or self.session.model or self.session_settings.default_model})
+        unique: list[dict[str, Any]] = []
+        for kw in candidates:
+            if kw.get("model") and kw not in unique:
+                unique.append(kw)
         self._pending_title = None
         self._title_task = asyncio.create_task(
-            self._make_title(task_text, kwargs, self.session.id), name="chat-title"
+            self._make_title(task_text, unique, self.session.id), name="chat-title"
         )
 
-    async def _make_title(self, task_text: str, kwargs: dict[str, Any], session_id: str) -> None:
+    async def _make_title(self, task_text: str, kwargs: list[dict[str, Any]], session_id: str) -> None:
         from core.agent.titler import fallback_title, generate_title
 
         title = await generate_title(task_text, build_llm_client, kwargs) or fallback_title(task_text)

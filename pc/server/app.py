@@ -17,6 +17,7 @@ import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -203,20 +204,30 @@ def _bridge_authorized(websocket: WebSocket) -> bool:
     return bool(supplied) and hmac.compare_digest(supplied, token)
 
 
+class _RevalidatedStatic(StaticFiles):
+    """The UI is served by this local server and changes with every update: the window must
+    revalidate it (a cheap 304 by ETag) instead of running a heuristically cached old copy."""
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Altair", version=__version__, lifespan=lifespan)
     # Every route, not only /ws: in LAN mode the whole server is on the network.
     app.add_middleware(RemoteAuthMiddleware)
 
     if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+        app.mount("/static", _RevalidatedStatic(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/", response_model=None)
     async def index() -> FileResponse | JSONResponse:
         index_file = STATIC_DIR / "index.html"
         if index_file.exists():
-            return FileResponse(index_file)
-        return JSONResponse({"status": "ok", "hint": "static/index.html не найден"})
+            return FileResponse(index_file, headers={"Cache-Control": "no-cache"})
+        return JSONResponse({"status": "ok", "hint": "static/index.html not found"})
 
     @app.get("/api/health")
     async def health() -> dict:
