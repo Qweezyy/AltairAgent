@@ -14,6 +14,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+### Fixed
+- State files (chats, memory, presets, permissions, providers, settings and others) no longer lose a
+  write when two threads save the same file at once — the same class of race as the rollback fix in
+  0.1.1. All of them now save through one shared atomic-write helper with a lock per file.
+- `version_sync.py` also stamps `Cargo.lock` and `package-lock.json`, so a version bump never leaves
+  the lock files behind.
+
 ### Planned for 0.2.0+
 - **Linux support** for the PC agent (replace Windows-only pieces: bundled `.exe` grep with
   system `ripgrep`, ConPTY terminal with a `pty`-based one, packaging as AppImage/deb).
