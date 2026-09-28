@@ -1,11 +1,13 @@
-"""The approval mode the user picks stays the default for new chats, restarts and updates."""
+"""Approval modes: every new chat starts in manual; a chat where the user picked another mode
+keeps it across chat switches, restarts and updates (it is stored in the chat itself)."""
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from core.agent.session import Session
+from core.agent.storage import SessionStore
 from core.config_file import config_path
-from core.settings import Settings
 
 
 def _app(monkeypatch, settings):
@@ -19,35 +21,46 @@ def _app(monkeypatch, settings):
     return create_app()
 
 
-def _pick(tc, mode: str) -> dict:
-    with tc.websocket_connect("/ws") as ws:
-        ws.receive_json()
-        ws.send_json({"type": "set_mode", "mode": mode})
-        for _ in range(40):
-            m = ws.receive_json()
-            if m["type"] == "mode.updated":
-                return m
-    raise AssertionError("no mode.updated")
+def _until(ws, kind: str) -> dict:
+    for _ in range(60):
+        m = ws.receive_json()
+        if m["type"] == kind:
+            return m
+    raise AssertionError(f"no {kind}")
 
 
-def test_the_picked_mode_is_saved_as_the_default(monkeypatch, settings):
+def test_a_chat_keeps_its_mode_and_new_chats_start_manual(monkeypatch, settings):
     settings.approval_mode = "manual"
-    with TestClient(_app(monkeypatch, settings)) as tc:
-        assert _pick(tc, "bypass")["mode"] == "bypass"
+    chat_a = Session(title="A")
+    chat_a.add_user("hi")
+    SessionStore(settings=settings).save(chat_a)
+    app = _app(monkeypatch, settings)
+
+    with TestClient(app) as tc:
+        with tc.websocket_connect("/ws") as ws:
+            assert ws.receive_json()["approval_mode"] == "manual"          # a new chat: manual
+            ws.send_json({"type": "load_session", "session_id": chat_a.id})
+            assert _until(ws, "session.loaded")["mode"] == "manual"
+            ws.send_json({"type": "set_mode", "mode": "bypass"})
+            assert _until(ws, "mode.updated")["mode"] == "bypass"
+            ws.send_json({"type": "new_session"})
+            assert _until(ws, "session.loaded")["mode"] == "manual"        # chat B: manual again
+            ws.send_json({"type": "load_session", "session_id": chat_a.id})
+            assert _until(ws, "session.loaded")["mode"] == "bypass"        # back in A: its own mode
+
+        with tc.websocket_connect("/ws") as ws:                             # a restart / an update
+            ws.receive_json()
+            ws.send_json({"type": "load_session", "session_id": chat_a.id})
+            assert _until(ws, "session.loaded")["mode"] == "bypass"
+
+    assert SessionStore(settings=settings).load(chat_a.id).approval_mode == "bypass"
     env = config_path(settings)
-    assert "APPROVAL_MODE=bypass" in env.read_text(encoding="utf-8")
-    # What the app reads after a restart or an update (the .env in the app data folder).
-    assert Settings(app_path=settings.app_dir, _env_file=str(env)).approval_mode == "bypass"
+    assert "bypass" not in (env.read_text(encoding="utf-8") if env.exists() else "")  # no global default
 
 
-def test_an_unknown_mode_changes_nothing(monkeypatch, settings):
-    settings.approval_mode = "manual"
+def test_an_unknown_mode_is_refused(monkeypatch, settings):
     with TestClient(_app(monkeypatch, settings)) as tc, tc.websocket_connect("/ws") as ws:
         ws.receive_json()
         ws.send_json({"type": "set_mode", "mode": "anything-goes"})
         ws.send_json({"type": "set_mode", "mode": "manual"})
-        for _ in range(40):
-            if ws.receive_json()["type"] == "mode.updated":
-                break
-    env = config_path(settings)
-    assert "anything-goes" not in (env.read_text(encoding="utf-8") if env.exists() else "")
+        assert _until(ws, "mode.updated")["mode"] == "manual"
