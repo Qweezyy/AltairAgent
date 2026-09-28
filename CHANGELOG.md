@@ -14,7 +14,30 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+### Changed
+- **Nothing of a conversation is lost any more.** The chat feed kept only its last 400 entries,
+  and trimming old tool outputs, dropping stale page states and folding the start of a long chat
+  edited the stored messages. Now the chat file keeps every message word for word; the model gets
+  a shortened view of it, and the agent can search the folded part.
+- The approval mode you pick stays the default for new chats, restarts and updates.
+- Your own messages render as Markdown (code, lists, tables, links, math); in the input,
+  Ctrl+B / Ctrl+I / Ctrl+E wrap the selection in bold, italic or inline code.
+- Chats named after their first line by older versions get a proper title from the model the
+  next time you write in them (titles you set yourself are kept).
+
+### Fixed
+- Logins imported from Firefox were lost on every restart: recent Firefox stores cookie expiry in
+  milliseconds, which made every imported cookie a session cookie. Import the sites once more
+  after updating. The fallback Chrome is also closed cleanly now, so its latest cookies are saved.
+- A thinking block opened while the model was thinking could not be closed again; thinking and
+  finished rounds of tools now fold into a one-line summary.
+- The log went silent for the rest of a session when Windows refused to rotate it (another copy
+  of the app had it open).
+
 ### Planned for 0.2.0+
+- **Terminal (CLI) mode** in the packaged app: an `altair` console command that shares chats,
+  settings, models and skills with the desktop window, with an interactive mode, one-shot tasks
+  for scripts and CI (`--json`, exit codes) and resuming a desktop chat from the terminal.
 - **Linux support** for the PC agent (replace Windows-only pieces: bundled `.exe` grep with
   system `ripgrep`, ConPTY terminal with a `pty`-based one, packaging as AppImage/deb).
 - **macOS support** for the PC agent (Unix path, `.icns` already in place).
@@ -51,8 +74,6 @@ A lighter, more honest context window and a browser that costs far fewer tokens.
 - Markdown files in the Files tab render as documents (with a page/code switch) instead of source.
 - Two tree refreshes at once listed every file twice in the Files tab.
 - State files (chats, memory, presets, permissions, providers, settings and others) no longer lose a
-  write when two threads save the same file at once — the same class of race as the rollback fix in
-  0.1.1. All of them now save through one shared atomic-write helper with a lock per file. (chats, memory, presets, permissions, providers, settings and others) no longer lose a
   write when two threads save the same file at once — the same class of race as the rollback fix in
   0.1.1. All of them now save through one shared atomic-write helper with a lock per file.
 - `version_sync.py` also stamps `Cargo.lock` and `package-lock.json`, so a version bump never leaves
