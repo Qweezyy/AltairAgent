@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml"><img src="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Лицензия: Apache-2.0"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.2%20alpha-orange.svg" alt="Версия 0.1.2 alpha"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.3%20alpha-orange.svg" alt="Версия 0.1.3 alpha"></a>
 </p>
 
 <p align="center">
@@ -85,8 +85,6 @@
   что по нему синхронизируется — память, навыки, MCP-серверы, — требует, чтобы оба устройства были в
   одной сети. Обходной путь: объединить их в одну сеть [Tailscale](https://tailscale.com/) и указать
   Tailscale-адрес ПК.
-- **Сканирование QR-кода для связывания с телефона пока не работает** — исправление в процессе.
-  Связывайте вручную: введите адрес ПК и токен моста, показанный на ПК, в настройках моста в приложении.
 - История чатов между телефоном и ПК пока не синхронизируется (спецификация готова, это следующий шаг).
 - ПК-агент пока только под Windows; сборка для Windows не подписана (SmartScreen может предупредить).
 

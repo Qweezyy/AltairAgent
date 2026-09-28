@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml"><img src="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.2%20alpha-orange.svg" alt="Version 0.1.2 alpha"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.3%20alpha-orange.svg" alt="Version 0.1.3 alpha"></a>
 </p>
 
 <p align="center">
@@ -83,8 +83,6 @@ modes; generative media (via your keys); frictionless onboarding of all bodies i
 - **Phone ↔ PC works only on the same local network** (e.g. one Wi-Fi) for now. The bridge and
   everything synced over it — memory, skills, MCP servers — needs both devices on one network.
   Workaround: put both on one [Tailscale](https://tailscale.com/) network and use the PC's Tailscale address.
-- **Scanning the pairing QR code from the phone does not work yet** — a fix is in progress. Pair by
-  typing the PC address and the bridge token shown on the PC into the app's bridge settings.
 - Chat history is not synced between the phone and the PC yet (specified, planned next).
 - The PC agent is Windows-only; the Windows build is not code-signed (SmartScreen may warn).
 
