@@ -1210,3 +1210,11 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 @keyframes find-hit-in { 0% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 .chat-title { cursor: text; }
 .session-item { cursor: pointer; }
+
+/* The user's messages rendered as Markdown inside the bubble */
+.mu-text.md { white-space: normal; }
+.mu-text.md > :first-child { margin-top: 0; }
+.mu-text.md > :last-child { margin-bottom: 0; }
+.mu-text.md p { margin: 0 0 .5em; }
+.mu-text.md pre { max-width: 100%; overflow-x: auto; }
+.mu-text.md h1, .mu-text.md h2, .mu-text.md h3 { font-size: 1.05em; margin: .3em 0; }

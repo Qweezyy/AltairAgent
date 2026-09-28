@@ -299,10 +299,22 @@ function scheduleAnswerRender() {
 }
 
 // ------------------------------------------------------------------ блоки ленты
+// The user's own messages are Markdown too. A separate parser: line breaks as typed, and
+// raw HTML shown as text (a pasted snippet must not turn into live markup).
+let _userMd = null;
+function userMdHtml(text) {
+  if (!_userMd && window.marked?.Marked) {
+    _userMd = new marked.Marked({ gfm: true, breaks: true, renderer: { html: (t) => esc(typeof t === "string" ? t : t.text || "") } });
+  }
+  if (!_userMd) return esc(text).replace(/\n/g, "<br>");
+  try { return _userMd.parse(String(text || "")); } catch { return esc(text).replace(/\n/g, "<br>"); }
+}
 function userBlock(text, attachments, turn) {
   const hasAtt = attachments && attachments.length;
-  const node = el(`<div class="msg-user" data-turn="${turn}"><div class="mu-bubble"><div class="mu-text">${esc(text)}</div>${hasAtt ? `<div class="attach-list"></div>` : ""}</div><div class="msg-actions msg-actions-user"><button class="btn-icon small" data-act="copy" data-tip="${escAttr(T("a.copy"))}">${iconSvg("copy", "icon icon-sm")}</button><button class="btn-icon small" data-act="return" data-tip="${escAttr(T("a.returnHere"))}">${iconSvg("undo", "icon icon-sm")}</button><button class="btn-icon small" data-act="fork" data-tip="${escAttr(T("a.forkHere"))}">${iconSvg("branch", "icon icon-sm")}</button></div></div>`);
+  const node = el(`<div class="msg-user" data-turn="${turn}"><div class="mu-bubble"><div class="mu-text md">${userMdHtml(text)}</div>${hasAtt ? `<div class="attach-list"></div>` : ""}</div><div class="msg-actions msg-actions-user"><button class="btn-icon small" data-act="copy" data-tip="${escAttr(T("a.copy"))}">${iconSvg("copy", "icon icon-sm")}</button><button class="btn-icon small" data-act="return" data-tip="${escAttr(T("a.returnHere"))}">${iconSvg("undo", "icon icon-sm")}</button><button class="btn-icon small" data-act="fork" data-tip="${escAttr(T("a.forkHere"))}">${iconSvg("branch", "icon icon-sm")}</button></div></div>`);
   if (hasAtt) { const list = $(".attach-list", node); attachments.forEach((a) => list.appendChild(attachCard(a, false))); }
+  node._raw = text;
+  postProcess($(".mu-text", node));   // code highlighting, file links, math — as in answers
   $('[data-act="copy"]', node).addEventListener("click", () => { navigator.clipboard?.writeText(text); toast(T("t.copied")); });
   $('[data-act="return"]', node).addEventListener("click", async () => { if (await confirmDialog({ message: T("cf.returnMsg"), danger: true, confirmText: T("a.returnHere") })) rewindTo(turn, text); });
   $('[data-act="fork"]', node).addEventListener("click", () => forkFrom(turn));
@@ -1435,7 +1447,7 @@ function submitComposer() {
 // Промпт пользователя для заданного turn (из ленты).
 function userPromptForTurn(turn) {
   const un = $$(".msg-user").find((n) => +n.dataset.turn === turn);
-  return un ? ($(".mu-text", un)?.textContent || "") : "";
+  return un ? (un._raw ?? $(".mu-text", un)?.textContent ?? "") : "";
 }
 // Rewind: удаляем сообщение turn и всё после него (в ленте и на сервере), а его
 // промпт возвращаем в строку ввода для правки. Автозапуска нет — юзер сам решит.
@@ -2457,6 +2469,19 @@ function toast(text, kind = "") {
 
 // ------------------------------------------------------------------ прочее
 function absPath(p) { if (/^([a-zA-Z]:[\\/]|\/)/.test(p)) return p.replace(/\\/g, "/"); return `${state.workspace}/${p}`.replace(/\\/g, "/"); }
+function wrapSelection(input, mark) {
+  const { selectionStart: a, selectionEnd: b, value } = input;
+  const picked = value.slice(a, b);
+  // Already wrapped: unwrap (the shortcut toggles, as in editors).
+  if (value.slice(a - mark.length, a) === mark && value.slice(b, b + mark.length) === mark) {
+    input.setRangeText(picked, a - mark.length, b + mark.length, "select");
+  } else {
+    input.setRangeText(mark + picked + mark, a, b, "end");
+    if (!picked) input.setSelectionRange(a + mark.length, a + mark.length);
+    else input.setSelectionRange(a + mark.length, b + mark.length);
+  }
+  input.dispatchEvent(new Event("input"));
+}
 function autoGrow() {
   const t = els.input;
   if (!t.value.trim()) { t.style.height = ""; return; } // пусто → естественная высота в одну строку
@@ -2593,6 +2618,11 @@ function init() {
     if (!els.cmdPopup.hidden && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); const its = $$(".cmd-item", els.cmdPopup); let i = its.findIndex((x) => x.classList.contains("active")); its[i]?.classList.remove("active"); i = (i + (e.key === "ArrowDown" ? 1 : -1) + its.length) % its.length; its[i]?.classList.add("active"); return; }
     if (e.key === "Escape") { if (!els.cmdPopup.hidden) { hideCmdPopup(); return; } if (state.running) send({ type: "stop" }); return; }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComposer(); }
+    // Markdown shortcuts: Ctrl+B bold, Ctrl+I italic, Ctrl+E inline code (wrap the selection).
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      const mark = { b: "**", i: "*", e: "`" }[e.key.toLowerCase()];
+      if (mark) { e.preventDefault(); wrapSelection(els.input, mark); }
+    }
   });
   els.input.addEventListener("blur", () => setTimeout(hideCmdPopup, 150));
 
