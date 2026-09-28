@@ -67,11 +67,17 @@
     requestAnimationFrame(() => {
       layoutQueued = false;
       const show = shouldShow(); const b = bounds();
+      const where = `${b.x},${b.y},${b.w},${b.h}`;
       for (const t of B.tabs) {
         const visible = show && t.id === B.active;
         if (!visible && t.placed === "hidden") continue;  // already hidden: nothing to do
+        // Already there: no call. Each one runs on the window's main thread, and a stream of
+        // them (every resize of the page, e.g. the input growing while typing) made keys like
+        // the Alt+Shift layout switch get lost.
+        if (visible && t.placed === "shown" && t.where === where) continue;
         t.placed = visible ? "shown" : "hidden";
-        inv("browser_bounds", { tab: t.id, bounds: b, visible }).catch((e) => { t.placed = ""; console.warn("browser_bounds", e); });
+        t.where = visible ? where : "";
+        inv("browser_bounds", { tab: t.id, bounds: b, visible }).catch((e) => { t.placed = ""; t.where = ""; console.warn("browser_bounds", e); });
       }
       viewEl().classList.toggle("br-live", !!B.active);
     });

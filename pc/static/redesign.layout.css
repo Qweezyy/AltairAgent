@@ -1219,3 +1219,10 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 .mu-text.md p { margin: 0 0 .5em; }
 .mu-text.md pre { max-width: 100%; overflow-x: auto; }
 .mu-text.md h1, .mu-text.md h2, .mu-text.md h3 { font-size: 1.05em; margin: .3em 0; }
+
+/* Typing stays light in long chats: the input sizes itself (no JS reflow per key), and
+   messages off screen are not laid out until they scroll near (content-visibility). */
+.css-grow .composer textarea { field-sizing: content; width: 100%; box-sizing: border-box; }
+.feed-inner > .msg-user, .feed-inner > .msg-agent, .feed-inner > .tools, .feed-inner > .thinking {
+  content-visibility: auto; contain-intrinsic-size: auto 120px;
+}

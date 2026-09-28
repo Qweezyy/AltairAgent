@@ -1426,7 +1426,16 @@ function setStatus(s) { const d = $("#status-dot"); if (!d) return; d.className 
 
 // ------------------------------------------------------------------ запуск/стоп/steering
 function setRunning(r) { state.running = r; updateSendBtn(); }
-function updateSendBtn() { const has = els.input.value.trim().length > 0; const stop = state.running && !has; els.sendBtn.classList.toggle("stop", stop); els.sendBtn.innerHTML = iconSvg(stop ? "stop" : "send"); els.sendBtn.setAttribute("data-tip", stop ? T("comp.stop") : state.running ? T("comp.steer") : T("composer.run")); }
+// Touches the button only when its look changes: it ran on every key and rebuilt the icon.
+let _sendLook = "";
+function updateSendBtn() {
+  const has = els.input.value.trim().length > 0; const stop = state.running && !has;
+  const look = `${stop}|${state.running}|${window.I18N?.lang?.() || ""}`;
+  if (look === _sendLook) return;
+  _sendLook = look;
+  els.sendBtn.classList.toggle("stop", stop); els.sendBtn.innerHTML = iconSvg(stop ? "stop" : "send");
+  els.sendBtn.setAttribute("data-tip", stop ? T("comp.stop") : state.running ? T("comp.steer") : T("composer.run"));
+}
 function runOptions() { return { web_mode: state.webMode, deep_research: state.deepResearch, routing: state.routing, skills: [...state.chosenSkills], attachments: state.attachments.map((a) => a.path) }; }
 function submitComposer() {
   const text = els.input.value.trim();
@@ -2482,9 +2491,15 @@ function wrapSelection(input, mark) {
   }
   input.dispatchEvent(new Event("input"));
 }
+// The input grows with its text. Where the engine supports it (WebView2 does), CSS does that
+// (field-sizing: content) and typing costs no layout of the page; the JS fallback reflowed
+// the whole page on every key, which a long chat made visibly slow.
+const _cssGrow = !!(window.CSS && CSS.supports && CSS.supports("field-sizing", "content"));
+if (_cssGrow) document.documentElement.classList.add("css-grow");
 function autoGrow() {
+  if (_cssGrow) return;
   const t = els.input;
-  if (!t.value.trim()) { t.style.height = ""; return; } // пусто → естественная высота в одну строку
+  if (!t.value.trim()) { t.style.height = ""; return; } // empty: one line
   t.style.height = "auto";
   t.style.height = Math.min(t.scrollHeight, 200) + "px";
 }
