@@ -56,9 +56,16 @@
     return !!document.querySelector("#overlay-root .overlay, .onb-overlay");
   }
   function shouldShow() { return paneVisible("browser") && !overlayOpen(); }
+  // Where the tab goes. With the panel closed its box is 0×0, and a tab opened (or kept)
+  // at that size was a 1×1 page: the agent's screenshots came back as one pixel and sites
+  // laid out for no width at all. A hidden tab keeps a real size: the panel's last one, or
+  // a reasonable default until the panel has been shown.
+  let lastShown = null;
   function bounds() {
     const r = viewEl().getBoundingClientRect();
-    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.max(1, Math.round(r.width)), h: Math.max(1, Math.round(r.height)) };
+    const b = { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+    if (b.w >= 200 && b.h >= 150) { lastShown = b; return b; }
+    return lastShown || { x: 0, y: 0, w: Math.max(960, Math.round(innerWidth * 0.5)), h: Math.max(700, innerHeight - 80) };
   }
   let layoutQueued = false;
   function layout() {
@@ -70,13 +77,14 @@
       const where = `${b.x},${b.y},${b.w},${b.h}`;
       for (const t of B.tabs) {
         const visible = show && t.id === B.active;
-        if (!visible && t.placed === "hidden") continue;  // already hidden: nothing to do
         // Already there: no call. Each one runs on the window's main thread, and a stream of
         // them (every resize of the page, e.g. the input growing while typing) made keys like
-        // the Alt+Shift layout switch get lost.
-        if (visible && t.placed === "shown" && t.where === where) continue;
-        t.placed = visible ? "shown" : "hidden";
-        t.where = visible ? where : "";
+        // the Alt+Shift layout switch get lost. A hidden tab is only resized (it keeps a real
+        // page size for the agent), so it needs a call only when that size changes.
+        const placed = visible ? "shown" : "hidden";
+        if (t.placed === placed && t.where === where) continue;
+        t.placed = placed;
+        t.where = where;
         inv("browser_bounds", { tab: t.id, bounds: b, visible }).catch((e) => { t.placed = ""; t.where = ""; console.warn("browser_bounds", e); });
       }
       viewEl().classList.toggle("br-live", !!B.active);

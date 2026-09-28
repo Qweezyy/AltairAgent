@@ -497,8 +497,10 @@ mod native {
         let area = rect(bounds, window.scale_factor().map_err(err)?);
         with_tab(tab, |v| unsafe {
             place(parent, v.container, area, visible);
+            // A hidden tab is sized too: the agent keeps reading, clicking and screenshotting
+            // it with the panel closed, and a page without a size renders nothing.
+            v.controller.SetBounds(inner(area))?;
             if visible {
-                v.controller.SetBounds(inner(area))?;
                 v.controller.NotifyParentWindowPositionChanged()?;
             }
             Ok(())

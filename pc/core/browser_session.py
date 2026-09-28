@@ -22,6 +22,7 @@ Playwright MCP uses), and actions target those refs.
 from __future__ import annotations
 
 import asyncio
+import base64
 import difflib
 import os
 import re
@@ -223,6 +224,19 @@ def browser_dir() -> Path:
     if configured:
         return Path(configured)
     return get_settings().data_dir / "browser"
+
+
+#: A screenshot smaller than this on a side is not a picture of the page.
+MIN_SHOT_SIDE = 16
+#: The size a sizeless tab is rendered at for a screenshot.
+FALLBACK_SHOT = (1280, 800)
+
+
+def png_size(data: bytes) -> tuple[int, int]:
+    """Width and height from a PNG header; (0, 0) when it is not a PNG."""
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return 0, 0
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
 
 
 class HostRelay(Protocol):
@@ -995,12 +1009,35 @@ class AgentBrowser:
     async def screenshot_png(self, *, full_page: bool = False) -> bytes:
         page = await self.page()
         try:
-            return await page.screenshot(full_page=full_page, timeout=15000)
+            png = await page.screenshot(full_page=full_page, timeout=15000)
+            if min(png_size(png)) < MIN_SHOT_SIDE:
+                # A tab without a real size (opened while the panel was closed, by an older
+                # shell): render it at a desktop size just for this shot.
+                png = await self._shot_at_size(page, full_page)
+        except ToolError:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise ToolError(
                 f"Could not take a screenshot ({str(exc).splitlines()[0][:160]}). "
                 "The browser panel may be closed; open it and retry."
             ) from exc
+        if min(png_size(png)) < MIN_SHOT_SIDE:
+            raise ToolError("The screenshot came out empty (the tab has no size). Open the browser panel and retry.")
+        return png
+
+    async def _shot_at_size(self, page: Any, full_page: bool) -> bytes:
+        cdp = await page.context.new_cdp_session(page)
+        try:
+            await cdp.send("Emulation.setDeviceMetricsOverride", {
+                "width": FALLBACK_SHOT[0], "height": FALLBACK_SHOT[1], "deviceScaleFactor": 1, "mobile": False})
+            try:
+                # Straight over CDP: Playwright's own screenshot re-applies the tab's size.
+                shot = await cdp.send("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": full_page})
+                return base64.b64decode(shot["data"])
+            finally:
+                await cdp.send("Emulation.clearDeviceMetricsOverride")
+        finally:
+            await cdp.detach()
 
     # --- dialogs ------------------------------------------------------------------
 
