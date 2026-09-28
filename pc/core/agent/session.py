@@ -114,6 +114,9 @@ class Session:
     #: What the provider reported the context to be on the latest request (input incl. cached
     #: tokens, plus the answer). 0 = not known yet; the ring falls back to an estimate.
     context_tokens: int = 0
+    #: Our estimate of the model's view at the moment `context_tokens` was measured: what was
+    #: added or masked since is the difference to today's estimate (see context_now).
+    context_mark: int = 0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -256,6 +259,7 @@ class Session:
 
     def reset(self) -> None:
         self.context_tokens = 0
+        self.context_mark = 0
         self.messages = []
         self.plan_steps = []
         self.artifacts = []
@@ -272,6 +276,15 @@ class Session:
 
     def token_estimate(self) -> int:
         return estimate_tokens(self.view())
+
+    def context_now(self) -> tuple[int, bool]:
+        """How full the model's window is right now, and whether that rests on the provider's
+        count. The last exact count (system prompt and tool schemas included) plus what our
+        estimate says changed since: new messages add, masked or folded ones subtract. Without
+        an exact count yet, the estimate alone."""
+        if not self.context_tokens:
+            return self.token_estimate(), False
+        return max(0, self.context_tokens + self.token_estimate() - self.context_mark), True
 
     def _start_index(self) -> int:
         """Index of the first message after the system prompt."""
@@ -456,6 +469,7 @@ class Session:
             "approval_mode": self.approval_mode,
             "timeline": self.timeline,
             "context_tokens": self.context_tokens,
+            "context_mark": self.context_mark,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -474,6 +488,7 @@ class Session:
             approval_mode=data.get("approval_mode") or "",
             timeline=data.get("timeline") or [],
             context_tokens=int(data.get("context_tokens") or 0),
+            context_mark=int(data.get("context_mark") or 0),
             created_at=data.get("created_at") or time.time(),
             updated_at=data.get("updated_at") or time.time(),
         )

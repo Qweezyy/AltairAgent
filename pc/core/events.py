@@ -248,6 +248,8 @@ class ContextUsage(BaseEvent):
 
     type: Literal["context.usage"] = "context.usage"
     tokens: int = 0
+    #: True when anchored on the provider's own count (see Session.context_now).
+    exact: bool = False
 
 
 class Reconnecting(BaseEvent):

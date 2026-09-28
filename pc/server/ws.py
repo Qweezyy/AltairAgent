@@ -355,14 +355,10 @@ class Connection:
     async def _send_context_usage(self) -> None:
         """Сколько токенов сейчас занимает контекст чата — для кольца у строки ввода."""
         try:
-            estimate = self.session.token_estimate()
+            tokens, exact = self.session.context_now()
         except Exception:  # noqa: BLE001 - the ring must never break anything
             return
-        # The provider's own count from the latest request is exact (it includes the system
-        # prompt and the tool schemas, which the estimate does not see); the estimate is for
-        # a chat that has not talked to a model yet.
-        exact = self.session.context_tokens
-        await self.send({"type": "context.usage", "tokens": exact or estimate, "exact": bool(exact)})
+        await self.send({"type": "context.usage", "tokens": tokens, "exact": exact})
 
     # ----------------------------------------------------------- команды
 

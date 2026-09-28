@@ -23,12 +23,13 @@ from typing import Any
 from core.agent.prompt import build_system_prompt
 from core.agent.run_options import RunOptions
 from core.agent.run_state import RunStateStore
-from core.agent.session import TOOL_MEDIA_MARK, Session
+from core.agent.session import TOOL_MEDIA_MARK, Session, estimate_tokens
 from core.checkpoints import CheckpointStore
 from core.cost import estimate_cost, load_pricing
 from core.errors import AgentError, LLMError
 from core.events import (
     CheckpointRestored,
+    ContextUsage,
     Emitter,
     LogEvent,
     ReasoningDelta,
@@ -206,6 +207,7 @@ class AgentRunner:
             self.session.add_run_note(note)
 
         await self._emit(RunStarted(run_id=run_id, task=task, model=self.llm.model))
+        await self._emit_context()
 
         # Логи — после run.started: интерфейс заводит блок задачи по этому
         # событию, и всё, что пришло раньше, ему некуда положить.
@@ -237,6 +239,7 @@ class AgentRunner:
                 await self._drain_vision()
 
                 await self._manage_context()
+                await self._emit_context()
 
                 model_started = time.perf_counter()
                 turn = await self._ask_model(with_tools=True)
@@ -250,6 +253,7 @@ class AgentRunner:
                 self._note_context(turn)
                 self.session.add_assistant_turn(turn)
                 await self._report_usage(usage_total, pricing)
+                await self._emit_context()
 
                 if not turn.wants_tools:
                     edited = bool(self._changed_tools & EDIT_TOOL_NAMES)
@@ -357,6 +361,7 @@ class AgentRunner:
                     )
 
                 await self._run_tools(turn.tool_calls, repeats)
+                await self._emit_context()
 
             # Достигнут абсолютный потолок шагов — просим финальный ответ без инструментов.
             return await self._wrap_up(
@@ -368,9 +373,13 @@ class AgentRunner:
             )
 
         except asyncio.CancelledError:
-            # Сообщаем UI и пробрасываем дальше: гасить CancelledError нельзя,
-            # иначе задача считается «завершённой» и ломается остановка/shutdown.
-            self.session.add_note("Пользователь остановил выполнение задачи.")
+            # Tell the UI and re-raise: swallowing CancelledError would mark the task done and
+            # break stop/shutdown. Close the step first, so the history stays whole and valid.
+            self._close_interrupted_step()
+            self.session.add_note(
+                "The user stopped this task. What was done so far is above; continue from there "
+                "if the next message asks for it."
+            )
             await asyncio.shield(self._emit(RunCancelled(run_id=run_id)))
             raise
 
@@ -444,7 +453,10 @@ class AgentRunner:
     # ------------------------------------------------------------------
 
     async def _ask_model(self, *, with_tools: bool) -> AssistantTurn:
+        self._partial_text = ""
+
         async def on_text(chunk: str) -> None:
+            self._partial_text += chunk  # kept if the user stops the answer midway
             await self._emit(TextDelta(text=chunk))
 
         async def on_reasoning(chunk: str) -> None:
@@ -466,7 +478,7 @@ class AgentRunner:
                 self.registry, self.settings.tool_search, self.session.messages, self.tool_context.scratch
             )
             tools = self.registry.schemas(active)
-        return await self.llm.complete(
+        turn = await self.llm.complete(
             self.session.snapshot(),
             tools=tools,
             on_text=on_text,
@@ -474,13 +486,19 @@ class AgentRunner:
             on_tool_progress=on_tool_progress,
             on_retry=on_retry,
         )
+        self._partial_text = ""  # the answer is complete: it goes into the history as a whole
+        return turn
 
     async def _run_tools(self, calls: list[ToolCall], repeats: Counter[str]) -> None:
         semaphore = asyncio.Semaphore(max(1, self.settings.max_parallel_tools))
 
+        self._finished_calls = {}
+
         async def execute(call: ToolCall) -> tuple[ToolCall, ToolResult]:
             async with semaphore:
-                return call, await self._execute_call(call, self.tool_context, repeats)
+                result = await self._execute_call(call, self.tool_context, repeats)
+                self._finished_calls[call.id] = result  # kept if the user stops the others
+                return call, result
 
         results = await asyncio.gather(*(execute(call) for call in calls))
 
@@ -608,12 +626,47 @@ class AgentRunner:
             return ""
         return (turn.content or "").strip()
 
+    def _close_interrupted_step(self) -> None:
+        """What the user saw before pressing stop stays in the history.
+
+        A half-streamed answer is kept (marked as interrupted) instead of vanishing, and every
+        tool call of the last step gets its answer: the real result for calls that finished,
+        a note for the ones that were cut off. A call without an answer makes providers reject
+        the whole history (HTTP 400) and leaves the model unaware of what already happened.
+        """
+        partial = getattr(self, "_partial_text", "").strip()
+        self._partial_text = ""
+        answered = {m.get("tool_call_id") for m in self.session.messages if m.get("role") == "tool"}
+        last = next((m for m in reversed(self.session.messages) if m.get("role") == "assistant"), None)
+        finished = getattr(self, "_finished_calls", {})
+        for call in (last or {}).get("tool_calls") or []:
+            call_id = call.get("id")
+            if call_id in answered:
+                continue
+            name = call.get("function", {}).get("name", "")
+            result = finished.get(call_id)
+            content = result.content if result is not None else (
+                "[Stopped by the user before this finished: its result is unknown. Check the "
+                "state before relying on it.]")
+            self.session.add_tool_result(call_id, name, content)
+        self._finished_calls = {}
+        if partial:
+            self.session.add_assistant_turn(AssistantTurn(content=f"{partial}\n\n[Interrupted by the user here.]"))
+
     def _note_context(self, turn: AssistantTurn) -> None:
         """Remember how big the context really was on this request, as the provider counted
-        it: the ring shows that instead of an estimate from characters."""
+        it: the ring shows that instead of an estimate from characters. The mark is our own
+        estimate of the same moment (the answer included), the base for live updates."""
         seen = int(turn.usage.get("context_tokens") or turn.usage.get("prompt_tokens") or 0)
         if seen:
             self.session.context_tokens = seen + int(turn.usage.get("completion_tokens") or 0)
+            self.session.context_mark = self.session.token_estimate() + estimate_tokens([turn.to_message()])
+
+    async def _emit_context(self) -> None:
+        """The ring follows the run live: after the user's message, every model answer, tool
+        results and any masking, not only when the run ends."""
+        tokens, exact = self.session.context_now()
+        await self._emit(ContextUsage(tokens=tokens, exact=exact))
 
     async def _report_usage(self, usage: Counter[str], pricing: dict) -> None:
         """Живой счётчик расхода: обновляется после каждого ответа модели."""
