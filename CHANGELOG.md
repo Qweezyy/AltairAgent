@@ -14,6 +14,34 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+### Added
+- **Chats work in the background.** A task keeps running when you open another chat, reload the
+  window or minimize the app; the chat list marks the chats at work, and opening one shows its run
+  live. Approvals and questions of a chat nobody has open wait for you, with a notice naming the chat.
+- **Reminders and waits wake the agent wherever the chat is.** A reminder, a condition, the end of
+  a background job or a watch now gives the agent a turn in its own chat and it carries on — also
+  when the chat is not on screen. What came due while the app was closed arrives on the next start
+  (saying how late), and ones still ahead keep waiting. A `wait_for` cut off by closing or updating
+  the app ends after the restart and wakes the chat. New: repeating reminders (stop after 7 days at
+  most), "only show it" reminders, `run_background(notify=true)` instead of polling a build. A busy
+  chat gets the notice at its next step; the taskbar button flashes when the app is in the background.
+- **Self-update from GitHub releases.** The app checks the project's latest release by default and
+  installs it by itself only when the release's checksums carry a valid signature of the project's
+  key; otherwise it offers the release page. The swap waits for the app to close, keeps your own
+  files in the app folder and restarts it. `UPDATE_URL=off` turns the checks off.
+
+### Fixed
+- Switching chats while the agent worked wrote the rest of its run into the chat on screen, and
+  its own chat lost it.
+- Closing the app killed the backend on the spot: the last seconds of a running task were lost and
+  it looked like a crash. Now the backend stops the runs as "the app closed", stores every chat and
+  offers to continue the task on the next start.
+- A chat stored in the middle of a tool call (after a crash) was rejected by the model provider on
+  the next message; the unanswered call now gets a "no result" answer.
+- Stopping the agent keeps the history whole (finished tool results, the part of the answer already
+  shown), and the context ring updates live during a run.
+- Typing in long chats is instant again.
+
 ### Planned for 0.2.0+
 - **The desktop app on Linux and macOS**, not only Windows: the Tauri shell already runs there;
   the Windows-only pieces get cross-platform ones (the built-in browser falls back to Chrome over

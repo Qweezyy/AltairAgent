@@ -50,11 +50,11 @@ update rule at the bottom.
 |------|-----|-------------|--------|
 | `execute_command` | execute ⚠ | Run a non-interactive shell command; returns exit code, stdout, stderr. `cwd` may be any folder: outside the workspace every command asks the user and has no rollback. | shell |
 | `run_python` | execute ⚠ | Run Python in a separate process; no state kept between calls. | python_exec |
-| `run_background` | execute ⚠ | Start a command in the background and return immediately (builds, watchers). | background_tools |
+| `run_background` | execute ⚠ | Start a command in the background and return immediately (builds, watchers); `notify=true` wakes the agent when it ends. | background_tools |
 | `read_background` | read | New output since last read + status of a background command. | background_tools |
 | `stop_background` | execute ⚠ | Stop a background command by name (whole process tree). | background_tools |
-| `wait_for` | read | Pause: wait N seconds or until a background task finishes, then resume. | background_tools |
-| `watch_background` | read | Non-blocking reminder: notify when time passes or a background task ends. | background_tools |
+| `wait_for` | read | Pause: wait N seconds or until a background task finishes, then resume. Durable: a wait cut off by closing the app ends after the restart and wakes the chat. | background_tools |
+| `watch_background` | read | Non-blocking watch: notice at the next step when time passes or a background task ends; if the task has ended, the chat is woken. Durable. | background_tools |
 
 ## Dev servers
 
@@ -180,10 +180,16 @@ workspace (for testing the sites/apps the agent builds); links out of it are ref
 
 | Tool | Cat | Description | Source |
 |------|-----|-------------|--------|
-| `set_reminder` | edit | Reminder at a relative or absolute time. | reminder_tools |
+| `set_reminder` | edit | Reminder at a relative or absolute time, optionally repeating (≤ 7 days). Wakes the agent in its chat — also when the chat is not open or the app was closed then (on the next start); `wake=false` only shows it. | reminder_tools |
 | `list_reminders` | read | List active reminders/conditions with ids. | reminder_tools |
 | `cancel_reminder` | edit | Cancel a reminder/condition by id. | reminder_tools |
-| `watch_condition` | edit | One-shot notify when a PC signal meets a condition (network/battery/charging/phone_online). | reminder_tools |
+| `watch_condition` | edit | One-shot, when a PC signal meets a condition (network/battery/charging/phone_online); wakes the agent. | reminder_tools |
+
+Reminders, waits and watches share one durable store (`core/reminders.py`). The scheduler
+(`server/reminders.py`) checks times, waits and jobs every second, conditions every 20 s, and hands
+what fired to the chat (`server/chats.py`): a busy chat gets it at its next step, an idle one is woken
+with a new turn, whether it is on screen or not. What fired while the app was closed arrives on the
+next start (with how late it is).
 
 ## Planning & skills
 

@@ -15,6 +15,7 @@ pytest.importorskip("httpx")
 def client(monkeypatch, settings):
     import core.settings as settings_module
     import server.app as app_module
+    import server.chats as chats_module
     import server.ws as ws_module
     from server.app import create_app
 
@@ -31,7 +32,7 @@ def client(monkeypatch, settings):
             AssistantTurn(content="В папке пусто."),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with TestClient(create_app()) as test_client:
         yield test_client
@@ -134,6 +135,7 @@ def test_websocket_distributed_routing(monkeypatch, settings):
     дешёвой, сложную — сильной, в одной сессии (два прогона подряд)."""
     import core.settings as settings_module
     import server.app as app_module
+    import server.chats as chats_module
     import server.ws as ws_module
     from server.app import create_app
 
@@ -156,7 +158,7 @@ def test_websocket_distributed_routing(monkeypatch, settings):
         models.append(model)
         return scripted
 
-    monkeypatch.setattr(ws_module, "build_llm_client", fake_build)
+    monkeypatch.setattr(chats_module, "build_llm_client", fake_build)
 
     with TestClient(create_app()) as tc, tc.websocket_connect("/ws") as ws:
         assert ws.receive_json()["type"] == "ready"
@@ -357,7 +359,7 @@ def test_approval_reaches_ui_and_can_be_granted(client, settings, monkeypatch):
     Регрессия: обработчик читал у запроса несуществующее поле `id`, падал,
     и все подтверждения молча отклонялись — пользователь даже не видел карточку.
     """
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -368,7 +370,7 @@ def test_approval_reaches_ui_and_can_be_granted(client, settings, monkeypatch):
             AssistantTurn(content="Файл записан."),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()  # ready
@@ -393,7 +395,7 @@ def test_approval_reaches_ui_and_can_be_granted(client, settings, monkeypatch):
 
 
 def test_approval_denied_by_user_is_reported_to_model(client, settings, monkeypatch):
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -404,7 +406,7 @@ def test_approval_denied_by_user_is_reported_to_model(client, settings, monkeypa
             AssistantTurn(content="Понял, не пишу."),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -494,7 +496,7 @@ def test_unknown_mode_is_rejected(client):
 
 def test_always_allow_in_project_skips_next_question(client, settings, monkeypatch):
     """Второй такой же вызов не должен спрашивать снова."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -506,7 +508,7 @@ def test_always_allow_in_project_skips_next_question(client, settings, monkeypat
             AssistantTurn(content="оба файла записаны"),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -524,7 +526,7 @@ def test_always_allow_in_project_skips_next_question(client, settings, monkeypat
 
 def test_approvals_are_asked_one_at_a_time(client, settings, monkeypatch):
     """Между вопросом и ответом второй карточки быть не должно."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -540,7 +542,7 @@ def test_approvals_are_asked_one_at_a_time(client, settings, monkeypatch):
             AssistantTurn(content="готово"),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     transcript: list[str] = []
     with client.websocket_connect("/ws") as ws:
@@ -569,7 +571,7 @@ def test_approvals_are_asked_one_at_a_time(client, settings, monkeypatch):
 
 def test_timeline_is_saved_and_restored(client, settings, monkeypatch):
     """Открытый заново чат обязан показывать шаги, а не только текст."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -580,7 +582,7 @@ def test_timeline_is_saved_and_restored(client, settings, monkeypatch):
             AssistantTurn(content="В папке пусто."),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -609,7 +611,7 @@ def test_timeline_is_saved_and_restored(client, settings, monkeypatch):
 def test_inline_media_persists_and_answer_is_not_duplicated(client, settings, monkeypatch):
     """Инлайн-виджет/медиа должны попадать в историю на своё место, а финальный
     текст ответа — не дублироваться поверх уже разложенных сегментов."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -620,7 +622,7 @@ def test_inline_media_persists_and_answer_is_not_duplicated(client, settings, mo
             AssistantTurn(content="Готово, виджет выше."),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -650,7 +652,7 @@ def test_inline_media_persists_and_answer_is_not_duplicated(client, settings, mo
 
 def test_rerun_rewinds_history_and_runs_again(client, settings, monkeypatch):
     """«Повторить» откатывает диалог к запросу и выполняет его заново."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM
 
@@ -663,7 +665,7 @@ def test_rerun_rewinds_history_and_runs_again(client, settings, monkeypatch):
             AssistantTurn(content="ответ 1 заново"),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -693,7 +695,7 @@ def test_cost_flows_through_events(client, settings, monkeypatch):
     """usage.updated в ходе задачи и cost_usd в финале, посчитанные по ценам."""
     import json
 
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM
 
@@ -714,7 +716,7 @@ def test_cost_flows_through_events(client, settings, monkeypatch):
         )],
         model="test/model",
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -734,7 +736,7 @@ def test_cost_flows_through_events(client, settings, monkeypatch):
 
 def test_checkpoint_flow_over_websocket(client, settings, monkeypatch):
     """Полный путь: правка файла -> событие checkpoint -> откат по команде."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -748,7 +750,7 @@ def test_checkpoint_flow_over_websocket(client, settings, monkeypatch):
             AssistantTurn(content="Готово."),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -771,7 +773,7 @@ def test_checkpoint_flow_over_websocket(client, settings, monkeypatch):
 
 def test_rollback_run_reverts_whole_run(client, settings, monkeypatch):
     """«Откатить прогон»: все файлы прогона возвращаются к состоянию до него."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import ScriptedLLM, tool_call
 
@@ -788,7 +790,7 @@ def test_rollback_run_reverts_whole_run(client, settings, monkeypatch):
             AssistantTurn(content="Готово."),
         ]
     )
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: scripted)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: scripted)
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -870,10 +872,10 @@ def test_restore_without_snapshot_warns(client, settings):
 
 def test_stop_cancels_a_running_task(client, settings, monkeypatch):
     """«Стоп» обязан прерывать задачу, а не ждать её конца."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from tests.fakes import HangingLLM
 
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: HangingLLM())
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: HangingLLM())
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -888,12 +890,12 @@ def test_stop_cancels_a_running_task(client, settings, monkeypatch):
 
 def test_stop_frees_the_connection_for_the_next_task(client, settings, monkeypatch):
     """После остановки соединение должно принимать новую задачу сразу."""
-    import server.ws as ws_module
+    import server.chats as chats_module
     from core.llm.base import AssistantTurn
     from tests.fakes import HangingLLM, ScriptedLLM
 
     clients = [HangingLLM(), ScriptedLLM([AssistantTurn(content="сделано")])]
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None: clients.pop(0))
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None: clients.pop(0))
 
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()

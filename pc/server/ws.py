@@ -1,11 +1,9 @@
-"""WebSocket-транспорт: привязка веб-интерфейса к AgentRunner и Session.
+"""WebSocket transport: a window of the web UI (or the phone over the bridge).
 
-Каждое подключение обслуживает одну сессию диалога. Поддерживаются:
-- стриминг рассуждений и ответов (TextDelta, ReasoningDelta);
-- отправка прогресса выполнения инструментов и планов (Manus-style);
-- подтверждения опасных операций (ApprovalRequest);
-- переключение и сохранение сессий в storage/sessions/;
-- переключение рабочей директории (workspace) для изоляции проектов.
+A socket shows one chat at a time; the chat itself — its session, run, approvals and
+questions — lives in server/chats.py and goes on without the socket. Here: the commands of
+the window (run, stop, switch/create/fork chats, workspace, mode, rewind, rollback), the
+browser panel's channel and the phone bridge's file and capability requests.
 """
 
 from __future__ import annotations
@@ -22,39 +20,22 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from core.agent.run_options import RunOptions
 from core.agent.run_state import RunStateStore
-from core.agent.runner import AgentRunner
 from core.agent.session import Session
 from core.agent.storage import SessionStore
 from core.checkpoints import CheckpointStore
-from core.errors import AgentError, ConfigError
-from core.events import (
-    ArtifactCreated,
-    CheckpointRestored,
-    Event,
-    PlanUpdate,
-    RunFailed,
-    RunFinished,
-    RunStarted,
-    ShowFile,
-    ShowHtml,
-    ShowImage,
-    TextDelta,
-    ToolFinished,
-    ToolStarted,
-)
+from core.errors import ConfigError
+from core.events import CheckpointRestored, Event
 from core.i18n import set_ui_language, tr
-from core.llm import build_llm_client
 from core.logging_setup import get_logger
 from core.memory import MemoryStore
-from core.security.permissions import MODES, PermissionStore, mode_catalog
-from core.settings import get_settings
-from core.tools.base import ApprovalRequest
+from core.security.permissions import MODES, mode_catalog
+from core.settings import Settings, get_settings
 from core.tools.registry import ToolRegistry
 from core.version import __version__
 from server.browser_ws import BrowserChannel
+from server.chats import DEFAULT_TITLE, ChatHub, ChatState, hub_of
 
-#: Session's default title (core/agent/session.py); the UI shows it localised as "New chat".
-DEFAULT_TITLE = "Новый диалог"
+__all__ = ["DEFAULT_TITLE", "Connection"]
 
 logger = get_logger("server.ws")
 
@@ -113,49 +94,74 @@ class Connection:
         self.registry = registry
         self.settings = get_settings()
         self.store = SessionStore(settings=self.settings)
-        # Новый чат по умолчанию получает свою персональную папку файлов —
-        # агент может писать туда заметки/файлы, и они всегда доступны в этом чате.
-        self.session = Session()
-        chat_dir = self.settings.chat_files_dir(self.session.id)
-        self.session.workspace = str(chat_dir)
+        app_hub = hub_of(getattr(websocket, "app", None))
+        #: The app's chats; a socket without the app (tests) gets a hub of its own, and its
+        #: runs stop with it, as they always did.
+        self.hub: ChatHub = app_hub if app_hub is not None else ChatHub(registry, detached_runs=False)
+        # A new chat gets its own files folder by default: the agent can keep notes and
+        # files there, always at hand in this chat.
+        session = Session()
+        chat_dir = self.settings.chat_files_dir(session.id)
+        session.workspace = str(chat_dir)
         try:
-            self.session_settings = self.settings.for_workspace(chat_dir)
+            session_settings = self.settings.for_workspace(chat_dir)
         except ConfigError:
-            self.session_settings = self.settings
+            session_settings = self.settings
         self.outbox: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=2000)
-        self.run_task: asyncio.Task | None = None
-        self.pending_approvals: dict[str, asyncio.Future[str]] = {}
-        # Подтверждения показываем по одному: параллельные инструменты
-        # иначе завалили бы экран карточками разом.
-        self._approval_lock = asyncio.Lock()
-        self.permissions = PermissionStore(settings=self.settings)
-        #: Аргументы запущенных инструментов — нужны, когда придёт результат.
-        self._tool_args: dict[str, dict[str, Any]] = {}
-        #: Накопитель текста ответа между раундами инструментов — чтобы в истории
-        #: раунды разделялись так же, как вживую (текст → инструменты → текст → …).
-        self._text_seg: str = ""
-        #: Были ли в текущем ответе инлайн-вставки (медиа/виджет). Если да — финальный
-        #: текст уже разложен по сегментам, и целиком его как «answer» писать нельзя.
-        self._turn_had_inline: bool = False
-        #: Память инструментов сессии: сюда ask кладёт ожидание ответа.
-        self._scratch: dict[str, Any] = {}
-        #: The new chat's title, asked from the model in parallel with its first answer.
-        self._title_task: asyncio.Task[None] | None = None
-        self._pending_title: str | None = None
-        self._title_for_new_chat = False
-        self._retitle_tried: set[str] = set()
         self._writer: asyncio.Task | None = None
-        #: Мост к телефону. Ожидания обратных запросов (need_file/need_capability)
-        #: по req_id — резолвятся, когда телефон пришлёт ответ.
+        #: The phone bridge: waiters of reverse requests (need_file/need_capability) by
+        #: req_id, resolved when the phone answers.
         self._bridge_waiters: dict[str, asyncio.Future[dict[str, Any]]] = {}
-        #: Что рассказал о себе собеседник в hello (platform, capabilities).
+        #: What the peer said about itself in hello (platform, capabilities).
         self.peer: dict[str, Any] = {}
-        #: Удалённое подключение (не localhost) = телефон через мост.
+        #: A remote socket (not localhost) = the phone over the bridge.
         self._is_remote = self._detect_remote()
-        #: Даём инструментам моста (phone_*) доступ к этому соединению.
-        self._scratch["_bridge"] = self
         #: The browser panel (embedded tabs host or screencast fallback).
         self.browser = BrowserChannel(self.send)
+        #: The chat this window shows. It lives in the hub, apart from the socket: its run
+        #: goes on when the window switches to another chat.
+        self.chat: ChatState = self.hub.new_chat(registry, session, session_settings)
+        self.hub.attach(self.chat, self)
+
+    # The chat on screen. The run and everything it waits on belong to the chat (see
+    # server/chats.py); these are here because the commands below act on the chat shown.
+
+    @property
+    def session(self) -> Session:
+        return self.chat.session
+
+    @session.setter
+    def session(self, value: Session) -> None:
+        self.chat.session = value
+
+    @property
+    def session_settings(self) -> Settings:
+        return self.chat.session_settings
+
+    @session_settings.setter
+    def session_settings(self, value: Settings) -> None:
+        self.chat.session_settings = value
+
+    @property
+    def run_task(self) -> asyncio.Task | None:
+        return self.chat.run_task
+
+    @property
+    def pending_approvals(self) -> dict[str, asyncio.Future[str]]:
+        return self.chat.pending_approvals
+
+    @property
+    def _scratch(self) -> dict[str, Any]:
+        return self.chat._scratch
+
+    async def _show(self, chat: ChatState) -> None:
+        """Switches this window to another chat. The previous one keeps running if it was."""
+        previous = self.chat
+        if previous is chat:
+            return
+        self.chat = chat
+        self.hub.attach(chat, self)
+        await self.hub.detach(previous, self)
 
     def _detect_remote(self) -> bool:
         """Подключение пришло не с localhost — значит, это телефон через мост."""
@@ -198,17 +204,11 @@ class Connection:
         # Stop the panel's screencast and hand the embedded browser back — otherwise
         # frames and host requests would keep going to a closed socket.
         await self.browser.close()
-        if self.run_task and not self.run_task.done():
-            self.run_task.cancel()
-            await asyncio.gather(self.run_task, return_exceptions=True)
-        for future in self.pending_approvals.values():
-            if not future.done():
-                future.set_result("deny")
-        self.pending_approvals.clear()
-        self._cancel_questions()
         self._cancel_bridge_waiters()
         self._unregister_connection()
-        await self._save_session()
+        # The chat's run goes on without the window (a reload or the tray must not stop the
+        # agent); its approvals wait for the next window that opens the chat.
+        await self.hub.detach(self.chat, self)
         await self.outbox.put(None)
         if self._writer:
             await asyncio.gather(self._writer, return_exceptions=True)
@@ -233,102 +233,10 @@ class Connection:
             logger.warning("Очередь отправки переполнена — событие отброшено.")
 
     async def emit(self, event: Event) -> None:
-        if isinstance(event, RunStarted):
-            await self._on_run_started()
-        if isinstance(event, PlanUpdate):
-            self.session.set_plan([s.model_dump() for s in event.steps])
-            await self._save_session()
-        elif isinstance(event, ArtifactCreated):
-            self.session.add_artifact(event.model_dump())
-            await self._save_session()
-        else:
-            self._record_timeline(event)
-
-        await self.send(event.model_dump(mode="json"))
-
-    def _record_timeline(self, event: Event) -> None:
-        """Пишет ход работы в сессию, чтобы открытый заново чат выглядел так же.
-
-        Поле messages для этого не годится: это формат модели, по нему не
-        восстановить, какие инструменты вызывались и чем закончились.
-        """
-        if isinstance(event, TextDelta):
-            # Копим текущий сегмент ответа; он станет либо промежуточным «text»
-            # перед следующим раундом инструментов, либо финальным «answer».
-            self._text_seg += event.text or ""
-        elif isinstance(event, ToolFinished):
-            self.session.append_timeline(
-                {
-                    "kind": "step",
-                    "name": event.name,
-                    "args": _jsonable(self._tool_args.pop(event.call_id, {})),
-                    "ok": event.ok,
-                    "duration_ms": event.duration_ms,
-                    # Полный вывод в истории не нужен: он уже отдан модели,
-                    # а файл сессии не должен пухнуть до мегабайтов.
-                    "output": event.output[:4000],
-                    "ts": event.ts,
-                }
-            )
-        elif isinstance(event, ToolStarted):
-            self._tool_args[event.call_id] = event.args
-            # Начинается раунд инструментов: если перед ним был текст — фиксируем его
-            # отдельной записью, чтобы в истории раунды разделялись как вживую.
-            seg = self._text_seg.strip()
-            if seg:
-                self.session.append_timeline({"kind": "text", "text": seg, "ts": event.ts})
-            self._text_seg = ""
-        elif isinstance(event, (ShowImage, ShowHtml, ShowFile)):
-            # Инлайн-вставка в ответе: сначала фиксируем накопленный текст отдельным
-            # сегментом (чтобы медиа/виджет встал ровно на своё место в истории),
-            # затем саму вставку. Так перезагруженный чат сохраняет расположение.
-            seg = self._text_seg.strip()
-            if seg:
-                self.session.append_timeline({"kind": "text", "text": seg, "ts": event.ts})
-            self._text_seg = ""
-            self._turn_had_inline = True
-            self.session.append_timeline(self._inline_entry(event))
-        elif isinstance(event, RunFinished):
-            # Если ответ содержал инлайн-вставки, его текст уже разложен по сегментам —
-            # как финальный «answer» пишем только незафиксированный хвост, иначе весь
-            # текст задублируется поверх уже сохранённых сегментов.
-            trailing = self._text_seg.strip()
-            self._text_seg = ""
-            answer_text = trailing if self._turn_had_inline else event.text
-            self._turn_had_inline = False
-            self.session.append_timeline(
-                {
-                    "kind": "answer",
-                    "text": answer_text,
-                    "full": event.text,
-                    "steps": event.steps,
-                    "duration_ms": event.duration_ms,
-                    "usage": event.usage,
-                    "cost_usd": event.cost_usd,
-                    "run_id": event.run_id,  # для «откатить прогон» из истории
-                    "ts": event.ts,
-                }
-            )
-        elif isinstance(event, RunFailed):
-            self.session.append_timeline({"kind": "error", "text": event.message, "ts": event.ts})
-
-    @staticmethod
-    def _inline_entry(event: ShowImage | ShowHtml | ShowFile) -> dict[str, Any]:
-        """Запись инлайн-вставки для истории — тот же формат, что уходит в UI."""
-        if isinstance(event, ShowImage):
-            return {"kind": "image", "path": event.path, "name": event.name,
-                    "caption": event.caption, "ts": event.ts}
-        if isinstance(event, ShowHtml):
-            return {"kind": "widget", "html": event.html, "caption": event.caption,
-                    "widget_kind": event.kind, "ts": event.ts}
-        return {"kind": "media", "path": event.path, "name": event.name,
-                "caption": event.caption, "media_kind": event.kind,
-                "size_bytes": event.size_bytes, "ts": event.ts}
+        await self.chat.emit(event)
 
     async def _save_session(self) -> None:
-        self.session.workspace = str(self.session_settings.workspace)
-        if self.session.messages:
-            await self.store.async_save(self.session)
+        await self.chat._save_session()
 
     async def _send_ready(self) -> None:
         await self.send(
@@ -350,15 +258,11 @@ class Connection:
         )
 
     async def _state(self, state: str) -> None:
-        await self.send({"type": "state", "state": state})
+        await self.chat._state(state)
 
     async def _send_context_usage(self) -> None:
-        """Сколько токенов сейчас занимает контекст чата — для кольца у строки ввода."""
-        try:
-            tokens, exact = self.session.context_now()
-        except Exception:  # noqa: BLE001 - the ring must never break anything
-            return
-        await self.send({"type": "context.usage", "tokens": tokens, "exact": exact})
+        """How many tokens the chat's context takes now — for the ring by the input."""
+        await self.chat._send_context_usage()
 
     # ----------------------------------------------------------- команды
 
@@ -439,38 +343,23 @@ class Connection:
     async def _load_session(self, session_id: str) -> None:
         if not session_id:
             return
-        loaded = await self.store.async_load(session_id)
-        if not loaded:
+        chat, warning = await self.hub.open(session_id, self.registry)
+        if chat is None:
             await self.send({"type": "log", "level": "error", "text": tr("ws.session_missing", id=session_id)})
             return
-        self.session = loaded
-        if self.session.workspace:
-            try:
-                self.session_settings = await asyncio.to_thread(
-                    self.settings.for_workspace, self.session.workspace
-                )
-            except ConfigError as exc:
-                # Папку могли удалить или отключить внешний диск — чат всё равно
-                # должен открыться, просто в папке по умолчанию.
-                logger.warning("Папка чата недоступна: %s", exc)
-                await self.send(
-                    {
-                        "type": "log",
-                        "level": "warning",
-                        "text": tr("ws.chat_folder_missing", path=self.session.workspace),
-                    }
-                )
-                self.session_settings = self.settings
-                self.session.workspace = str(self.settings.workspace)
-        else:
-            self.session.workspace = str(self.settings.workspace)
-            self.session_settings = self.settings
+        if warning:
+            await self.send({"type": "log", "level": "warning", "text": warning})
+        await self._show(chat)
+        await self._send_loaded()
+        self._register_workspace()
+        await self._send_context_usage()
+        # A chat running in the background: its state, waiting cards and the answer so far.
+        await chat.replay_to(self)
+        if not chat.running:
+            await self._notify_interrupted_run()
+        logger.info("Сессия %s загружена (workspace: %s)", self.session.id, self.session.workspace)
 
-        # The chat's own mode first: the UI showed the default for a chat that had its own.
-        if self.session.approval_mode in MODES:
-            self.session_settings = self.session_settings.model_copy(
-                update={"approval_mode": self.session.approval_mode}
-            )
+    async def _send_loaded(self) -> None:
         await self.send(
             {
                 "type": "session.loaded",
@@ -478,12 +367,9 @@ class Connection:
                 "workspace": str(self.session_settings.workspace),
                 "mode": self.session_settings.approval_mode,
                 "auto_workspace": self._is_auto_ws(),
+                "running": self.chat.running,
             }
         )
-        self._register_workspace()
-        await self._send_context_usage()
-        await self._notify_interrupted_run()
-        logger.info("Сессия %s загружена (workspace: %s)", self.session.id, self.session.workspace)
 
     def _auto_ws_root(self) -> Path:
         return self.settings.app_dir / "storage" / "chat_files"
@@ -528,18 +414,12 @@ class Connection:
                 clone.rewind_to_user_turn(int(turn) + 1)  # оставить 0..turn включительно
             except (TypeError, ValueError):
                 pass
-        self.session = clone
+        await self._show(self.hub.new_chat(self.registry, clone, self.session_settings))
         try:
             await self.store.async_save(self.session)
-        except Exception:  # noqa: BLE001
-            logger.debug("Не удалось сохранить ветку", exc_info=True)
-        await self.send({
-            "type": "session.loaded",
-            "session": self.session.to_dict(),
-            "workspace": str(self.session_settings.workspace),
-            "mode": self.session_settings.approval_mode,
-            "auto_workspace": self._is_auto_ws(),
-        })
+        except OSError:
+            logger.warning("the branch was not saved", exc_info=True)
+        await self._send_loaded()
 
     async def _new_session(self, message: dict[str, Any]) -> None:
         requested = str(message.get("workspace") or "").strip()
@@ -552,25 +432,14 @@ class Connection:
         else:
             workspace = requested
         try:
-            self.session_settings = await asyncio.to_thread(self.settings.for_workspace, workspace)
+            chat_settings = await asyncio.to_thread(self.settings.for_workspace, workspace)
         except ConfigError as exc:
             await self.send({"type": "log", "level": "warning", "text": tr("ws.default_folder", error=exc)})
-            self.session_settings = self.settings
+            chat_settings = self.settings
 
-        self.session = Session(
-            id=new_id,
-            title=title,
-            workspace=str(self.session_settings.workspace),
-        )
-        await self.send(
-            {
-                "type": "session.loaded",
-                "session": self.session.to_dict(),
-                "workspace": str(self.session_settings.workspace),
-                "mode": self.session_settings.approval_mode,
-                "auto_workspace": self._is_auto_ws(),
-            }
-        )
+        session = Session(id=new_id, title=title, workspace=str(chat_settings.workspace))
+        await self._show(self.hub.new_chat(self.registry, session, chat_settings))
+        await self._send_loaded()
         self._register_workspace()
         await self._send_context_usage()
         logger.info("Создан новый чат %s (workspace: %s)", self.session.id, self.session.workspace)
@@ -611,17 +480,11 @@ class Connection:
         active.add(str(self.session_settings.workspace))
 
     def _register_connection(self) -> None:
-        """Регистрирует соединение — планировщик напоминаний шлёт события в чат."""
-        try:
-            self.ws.app.state.connections.add(self)
-        except AttributeError:  # без lifespan (часть тестов)
-            pass
+        """Every window gets the chat list's news and the reminders of any chat."""
+        self.hub.connections.add(self)
 
     def _unregister_connection(self) -> None:
-        try:
-            self.ws.app.state.connections.discard(self)
-        except AttributeError:
-            pass
+        self.hub.connections.discard(self)
 
     async def _set_workspace(self, workspace: str) -> None:
         previous = self.session.workspace
@@ -736,112 +599,7 @@ class Connection:
         # Маршрутизацию по сложности при медиа НЕ выключаем (по просьбе): вместо
         # этого клиент не даёт прикрепить медиа, если модель его не принимает.
         allow_route = True
-        self.run_task = asyncio.create_task(
-            self._run(task_text, model, options, allow_route), name="agent-run"
-        )
-
-    async def _run(
-        self, task_text: str, model: str | None, options: RunOptions | None = None,
-        allow_route: bool = False,
-    ) -> None:
-        new_chat = self.session.title == DEFAULT_TITLE and not self.session.messages
-        self._title_for_new_chat = new_chat
-        if self.session_settings.chat_titles:
-            first = task_text if new_chat else self._untitled_first_message()
-            if first:
-                self._start_title(first, model)
-        if new_chat:
-            # A new chat goes into the list at once: routing may take a while before the run
-            # itself starts (and stores the chat again). _save_session skips a chat without
-            # messages, and the user's message reaches them only when the run starts.
-            self.session.workspace = str(self.session_settings.workspace)
-            await self.store.async_save(self.session)
-        await self._state("running")
-        # Маршрутизация по сложности. Оценщик разбивает запрос на подзадачи с
-        # тиром модели у каждой. Если тиры РАЗНЫЕ — раздаём подзадачи обеим
-        # моделям по очереди (дешёвая — простое, сильная — сложное). Иначе —
-        # одна модель на весь прогон. Не применяется при навязанной медиа-модели.
-        base_url: str | None = None
-        api_key: str | None = None
-        # Маршрутизацию на этот прогон задаёт тумблер «Routing» у ввода
-        # (options.routing); если он не прислан — постоянная настройка.
-        route_on = options.routing if (options and options.routing is not None) else self.session_settings.model_routing
-        route_chosen: dict[str, Any] | None = None  # выбранный тир (с запасными моделями)
-        if allow_route and route_on:
-            from core.agent.router import (
-                choose_model,
-                is_distributed_plan,
-                plan_subtasks,
-                resolve_tiers,
-            )
-
-            tiers = resolve_tiers(self.session_settings)
-            if tiers:
-                plan = await plan_subtasks(task_text, self.session_settings, build_llm_client)
-                if is_distributed_plan(plan):
-                    await self._run_distributed(plan, tiers, options)
-                    return
-                # Без распределения — выбираем одну модель: если все подзадачи
-                # одного тира, берём его; смешанного плана тут нет; пустой план
-                # (судья не ответил) → надёжный однословный choose_model.
-                if plan:
-                    name = plan[0]["tier"] if len({s["tier"] for s in plan}) == 1 else "strong"
-                    chosen: dict[str, str] | None = tiers[name]
-                    note = f"{'простая' if name == 'fast' else 'сложная'} задача → {chosen.get('model')}"
-                else:
-                    chosen, note = await choose_model(task_text, self.session_settings, build_llm_client)
-                if chosen and chosen.get("model"):
-                    route_chosen = chosen
-                    model = chosen["model"]
-                    base_url = chosen.get("base_url") or None
-                    api_key = chosen.get("api_key") or None
-                    await self.send({"type": "log", "level": "info", "text": tr("ws.routing", note=note)})
-                    await self.send({"type": "model.routed", "model": model, "note": note})
-        # Переопределения провайдера передаём только когда они есть (иначе обычный
-        # вызов build_llm_client(model=...) — совместим и с монкипатчами в тестах).
-        client_kwargs: dict[str, Any] = {"model": model}
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        if api_key:
-            client_kwargs["api_key"] = api_key
-        try:
-            # У выбранного тира могут быть запасные модели: если основная не
-            # ответит — FallbackLLM переключится на следующую.
-            if route_chosen:
-                from core.agent.router import tier_candidates
-                from core.llm.fallback import FallbackLLM
-
-                cands = tier_candidates(route_chosen)
-                llm = FallbackLLM(cands, build_llm_client) if len(cands) > 1 else build_llm_client(**client_kwargs)
-            else:
-                llm = build_llm_client(**client_kwargs)
-        except AgentError as exc:
-            await self.send({"type": "run.failed", "run_id": "", "message": str(exc)})
-            await self._state("idle")
-            return
-
-        runner = AgentRunner(
-            llm=llm,
-            registry=self.registry,
-            session=self.session,
-            settings=self.session_settings,
-            emitter=self.emit,
-            approver=self.ask_approval,
-        )
-        # Инструменту ask нужно достучаться до соединения, чтобы дождаться
-        # ответа пользователя: отдаём ему общий scratch.
-        runner.tool_context.scratch = self._scratch
-
-        try:
-            await runner.run(task_text, options)
-            await self._save_session()
-        except asyncio.CancelledError:
-            logger.info("Задача отменена пользователем (сессия %s).", self.session.id)
-            await self._save_session()
-        finally:
-            await llm.aclose()
-            await self._state("idle")
-            await self._send_context_usage()
+        self.chat.launch(task_text, model, options, allow_route)
 
     # ------------------------------------------------------------------ chat title
 
@@ -850,166 +608,17 @@ class Connection:
         title = " ".join(title.split())[:120]
         if not session_id or not title:
             return
-        if session_id == self.session.id:
-            if self._title_task is not None and not self._title_task.done():
-                self._title_task.cancel()
-            self._title_task, self._pending_title = None, None
-            self.session.title = title
-            await self._save_session()
+        live = self.hub.chats.get(session_id)
+        if live is not None:
+            live.rename(title)
+            await live._save_session()
         else:
             stored = await self.store.async_load(session_id)
             if stored is None:
                 return
             stored.title = title
             await self.store.async_save(stored)
-        await self.send({"type": "session.title", "session_id": session_id, "title": title, "renamed": True})
-
-    def _untitled_first_message(self) -> str:
-        """The first message of a chat still called after it (named by the old first-line rule,
-        before the model wrote titles), or "" — the user's own names are left alone. Tried
-        once per chat per connection, so a model that cannot answer is not asked every time."""
-        from core.agent.titler import fallback_title
-
-        if not self.session.messages or self.session.id in self._retitle_tried:
-            return ""
-        # The UI feed keeps its last 400 entries and long histories get compacted, so the
-        # first message may survive in either place only.
-        candidates = [next((str(e.get("text") or "") for e in self.session.timeline if e.get("kind") == "user"), "")]
-        for m in self.session.messages:
-            if m.get("role") == "user":
-                content = m.get("content")
-                if isinstance(content, list):
-                    content = " ".join(str(p.get("text") or "") for p in content if isinstance(p, dict))
-                candidates.append(str(content or ""))
-                break
-        first = next((c for c in candidates if c.strip() and self.session.title == fallback_title(c)), "")
-        if not first:
-            return ""
-        self._retitle_tried.add(self.session.id)
-        return first
-
-    def _start_title(self, task_text: str, model: str | None) -> None:
-        """Ask for the chat's title alongside the first answer (the router's cheap model when
-        routing is set up, otherwise the chat's model)."""
-        from core.agent.router import _build_kwargs, resolve_tiers
-
-        tiers = resolve_tiers(self.session_settings) if self.session_settings.model_routing else None
-        candidates: list[dict[str, Any]] = []
-        for tier in (tiers["router"], tiers["fast"], tiers["strong"]) if tiers else ():
-            candidates.append(_build_kwargs(tier))
-        candidates.append({"model": model or self.session.model or self.session_settings.default_model})
-        unique: list[dict[str, Any]] = []
-        for kw in candidates:
-            if kw.get("model") and kw not in unique:
-                unique.append(kw)
-        self._pending_title = None
-        self._title_task = asyncio.create_task(
-            self._make_title(task_text, unique, self.session.id), name="chat-title"
-        )
-
-    async def _make_title(self, task_text: str, kwargs: list[dict[str, Any]], session_id: str) -> None:
-        # A background task: an error here would vanish with it, so it is logged.
-        try:
-            await self._apply_title(task_text, kwargs, session_id)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("chat title failed", exc_info=True)
-
-    async def _apply_title(self, task_text: str, kwargs: list[dict[str, Any]], session_id: str) -> None:
-        from core.agent.titler import fallback_title, generate_title
-
-        title = await generate_title(task_text, build_llm_client, kwargs) or fallback_title(task_text)
-        if self.session.id != session_id:
-            # The user moved to another chat meanwhile: title the stored one, not this.
-            stored = await self.store.async_load(session_id)
-            if stored is not None and stored.title in (DEFAULT_TITLE, fallback_title(task_text)):
-                stored.title = title
-                await self.store.async_save(stored)
-            await self.send({"type": "session.title", "session_id": session_id, "title": title})
-            return
-        self._pending_title = title
-        if self.session.messages:  # the run has started: apply and store it now
-            self.session.title = title
-            await self._save_session()
-        await self.send({"type": "session.title", "session_id": session_id, "title": title})
-
-    async def _on_run_started(self) -> None:
-        """The user's message is in the session now: store the chat at once, so it is in the
-        list even if the app closes mid-answer. Until the model's title arrives the chat is
-        called "New chat" (Session.add_user put the first line there)."""
-        if self._title_task is not None:
-            if self._pending_title:
-                self.session.title = self._pending_title
-            elif not self._title_task.done() and self._title_for_new_chat:
-                self.session.title = DEFAULT_TITLE
-        await self._save_session()
-
-    async def _run_distributed(
-        self, plan: list[dict[str, str]], tiers: dict[str, dict[str, str]], options: RunOptions | None,
-    ) -> None:
-        """Раздаёт подзадачи по тирам в ОДНОЙ сессии: модель переключается между
-        подзадачами (дешёвая делает простое, сильная — сложное). Контекст общий,
-        поэтому поздние подзадачи видят результат ранних."""
-        clients: dict[str, Any] = {}
-
-        def client_for(tier_name: str) -> Any:
-            if tier_name not in clients:
-                from core.agent.router import tier_candidates
-                from core.llm.fallback import FallbackLLM
-
-                tier = tiers.get(tier_name) or tiers["strong"]
-                cands = tier_candidates(tier)
-                if len(cands) > 1:
-                    clients[tier_name] = FallbackLLM(cands, build_llm_client)
-                else:
-                    kw: dict[str, Any] = {"model": tier.get("model")}
-                    if tier.get("base_url"):
-                        kw["base_url"] = tier["base_url"]
-                    if tier.get("api_key"):
-                        kw["api_key"] = tier["api_key"]
-                    clients[tier_name] = build_llm_client(**kw)
-            return clients[tier_name]
-
-        summary = ", ".join(f"{i + 1}:{s['tier']}" for i, s in enumerate(plan))
-        await self.send({
-            "type": "log", "level": "info",
-            "text": tr("ws.routing_split", n=len(plan), summary=summary),
-        })
-        runner: AgentRunner | None = None
-        try:
-            for i, sub in enumerate(plan):
-                try:
-                    llm = client_for(sub["tier"])
-                except AgentError as exc:
-                    await self.send({"type": "run.failed", "run_id": "", "message": str(exc)})
-                    break
-                model_name = (tiers.get(sub["tier"]) or {}).get("model", "")
-                await self.send({
-                    "type": "model.routed", "model": model_name,
-                    "note": f"подзадача {i + 1}/{len(plan)} → {sub['tier']} ({model_name})",
-                })
-                if runner is None:
-                    runner = AgentRunner(
-                        llm=llm, registry=self.registry, session=self.session,
-                        settings=self.session_settings, emitter=self.emit, approver=self.ask_approval,
-                    )
-                    runner.tool_context.scratch = self._scratch
-                else:
-                    runner.llm = llm
-                await runner.run(sub["text"], options)
-                await self._save_session()
-        except asyncio.CancelledError:
-            logger.info("Распределённая задача отменена (сессия %s).", self.session.id)
-            await self._save_session()
-        finally:
-            for client in clients.values():
-                try:
-                    await client.aclose()
-                except Exception:  # noqa: BLE001
-                    pass
-            await self._state("idle")
-            await self._send_context_usage()
+        await self.hub.broadcast({"type": "session.title", "session_id": session_id, "title": title, "renamed": True})
 
     async def _restore_checkpoint(self, rel_path: str) -> None:
         """Откатывает последнее изменение файла по кнопке в интерфейсе."""
@@ -1098,112 +707,17 @@ class Connection:
                          "skipped": skipped, "message": summary})
 
     async def _stop_run(self) -> None:
-        if self.run_task and not self.run_task.done():
-            self.run_task.cancel()
-            await self.send({"type": "log", "level": "warning", "text": tr("ws.stopping")})
-        for future in self.pending_approvals.values():
-            if not future.done():
-                future.set_result("deny")
-        self.pending_approvals.clear()
-        self._cancel_questions()
+        await self.chat.stop()
         self._cancel_bridge_waiters()
 
-    def _cancel_questions(self) -> None:
-        """Снимает ожидание ответов, иначе задача зависнет навсегда."""
-        for waiter in self._scratch.get("_ask_answers", {}).values():
-            if not waiter.done():
-                waiter.set_result({})
-
-    async def ask_approval(self, request: ApprovalRequest) -> bool:
-        """Спрашивает пользователя — строго по одному запросу за раз.
-
-        Замок обязателен: инструменты выполняются параллельно, и без него на
-        экран вываливалось бы несколько карточек сразу, а ответ уходил бы не
-        тому запросу.
-        """
-        workspace = str(self.session_settings.workspace)
-
-        # Запомненное «всегда разрешать» снимает вопрос ещё до показа карточки.
-        if self.permissions.is_allowed(request.name, workspace):
-            return True
-
-        async with self._approval_lock:
-            if self.permissions.is_allowed(request.name, workspace):
-                return True
-
-            req_id = uuid.uuid4().hex[:8]
-            future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-            self.pending_approvals[req_id] = future
-
-            await self._state("waiting_approval")
-            await self.send(
-                {
-                    "type": "approval.requested",
-                    "request_id": req_id,
-                    "name": request.name,
-                    "reason": request.reason,
-                    "args": request.args,
-                    "category": request.category,
-                    "tier": request.tier,
-                    "reasons": request.reasons,
-                    "workspace": workspace,
-                }
-            )
-
-            try:
-                answer = await future
-            finally:
-                self.pending_approvals.pop(req_id, None)
-                await self._state("running")
-
-            if answer == "project":
-                await asyncio.to_thread(self.permissions.allow_project, request.name, workspace)
-            elif answer == "global":
-                await asyncio.to_thread(self.permissions.allow_global, request.name)
-
-            approved = answer in ("once", "project", "global")
-            await self.send(
-                {
-                    "type": "approval.resolved",
-                    "request_id": req_id,
-                    "approved": approved,
-                    "scope": answer,
-                }
-            )
-            return approved
-
     def _resolve_question(self, message: dict[str, Any]) -> None:
-        """Ответы на вопросы агента: {"0": ["вариант"], "1": [...]}."""
-        request_id = str(message.get("request_id") or "")
-        waiters = self._runner_scratch().get("_ask_answers", {})
-        waiter = waiters.get(request_id)
-        if waiter and not waiter.done():
-            waiter.set_result(message.get("answers") or {})
+        self.chat.resolve_question(message)
 
     def _resolve_handoff(self, message: dict[str, Any]) -> None:
-        """Пользователь нажал «Готово» в передаче управления браузером."""
-        request_id = str(message.get("request_id") or "")
-        waiters = self._runner_scratch().get("_browser_handoff", {})
-        waiter = waiters.get(request_id)
-        if waiter and not waiter.done():
-            waiter.set_result(message.get("result") or {})
-
-    def _runner_scratch(self) -> dict[str, Any]:
-        """Общая память инструментов текущего прогона."""
-        return self._scratch
+        self.chat.resolve_handoff(message)
 
     def _resolve_approval(self, message: dict[str, Any]) -> None:
-        """Ответ пользователя: once | project | global | deny."""
-        req_id = str(message.get("request_id") or "")
-        scope = str(message.get("scope") or "").strip()
-        if not scope:
-            scope = "once" if message.get("approved") else "deny"
-        if scope not in ("once", "project", "global", "deny"):
-            scope = "deny"
-
-        future = self.pending_approvals.get(req_id)
-        if future and not future.done():
-            future.set_result(scope)
+        self.chat.resolve_approval(message)
 
     # ------------------------------------------------------ мост к телефону
 
@@ -1493,13 +1007,3 @@ class Connection:
                 fut.set_result({"cancelled": True})
         self._bridge_waiters.clear()
 
-
-def _jsonable(value: Any) -> Any:
-    """Аргументы инструментов могут содержать Path и прочее — приводим к JSON."""
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)

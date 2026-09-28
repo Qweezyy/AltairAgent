@@ -96,13 +96,14 @@ class _ChatLLM(ScriptedLLM):
 def _app(monkeypatch, settings, llm):
     import core.settings as settings_module
     import server.app as app_module
+    import server.chats as chats_module
     import server.ws as ws_module
     from server.app import create_app
 
     s = settings.model_copy(update={"chat_titles": True, "health_gate": False, "verification_gate": False})
     for mod in (settings_module, app_module, ws_module):
         monkeypatch.setattr(mod, "get_settings", lambda s=s: s)
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None, **kw: llm)
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None, **kw: llm)
     return create_app(), s
 
 

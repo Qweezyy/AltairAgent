@@ -1,13 +1,15 @@
-"""Фоновые команды общего назначения (аналог run_in_background / BashOutput / KillShell).
+"""General background commands (like run_in_background / BashOutput / KillShell), waits and
+watches.
 
-В отличие от `execute_command` (ждёт завершения) и `start_dev_server` (заточен под
-dev-серверы), эти инструменты запускают ЛЮБУЮ долгую команду в фоне и позволяют
-дочитывать её вывод по мере появления: сборка, длинный тест-ран, watcher, бэкап.
+Unlike `execute_command` (waits for the end) and `start_dev_server` (made for dev servers),
+these start ANY long command in the background and read its output as it comes: a build, a
+long test run, a watcher, a backup. They reuse the process-wide manager of the dev servers
+(`core/devserver/manager.py`): Popen with merged stdout/stderr, a reader thread into a ring
+buffer, incremental reads and stopping the whole process tree (taskkill /T on Windows).
 
-Переиспользуют тот же процессо-глобальный менеджер, что и dev-серверы
-(`core/devserver/manager.py`): Popen со слитыми stdout/stderr, фоновый читатель в
-кольцевой буфер, инкрементальное чтение и корректная остановка дерева процессов
-(на Windows — через taskkill /T). Менеджер гасится в lifespan приложения.
+Waits and watches are durable (core/reminders.py): the scheduler delivers them to the chat
+even when the task has ended, the user is in another chat, or the app was closed and started
+again — a wait cut off by closing the app ends on the next start and wakes the chat.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -23,6 +26,7 @@ from core.devserver import get_manager
 from core.devserver.manager import DevServerError
 from core.events import LogEvent
 from core.i18n import tr
+from core.reminders import LIVE_WAITS, Reminder, ReminderStore, new_id
 from core.tools.base import Tool, ToolContext, ToolResult
 from core.tools.builtin.shell import (
     check_command,
@@ -31,11 +35,14 @@ from core.tools.builtin.shell import (
     resolve_command_cwd,
 )
 
-#: Максимум, сколько инструмент подождёт свежего вывода за один вызов.
+#: The longest a tool waits for fresh output in one call.
 _MAX_WAIT = 20.0
 
-#: Потолок ожидания для wait_for (30 минут) — страховка от вечного зависания задачи.
+#: The cap of one wait_for (30 minutes): longer waits are reminders (set_reminder).
 _WAIT_CAP = 1800.0
+
+#: Watches last at most this long (a day): a forgotten watch must not stay forever.
+_WATCH_CAP = 86400.0
 
 _counter = itertools.count(1)
 _counter_lock = threading.Lock()
@@ -46,23 +53,36 @@ def _auto_name() -> str:
         return f"job-{next(_counter)}"
 
 
+def _job_ref(name: str) -> str:
+    """Tells this run of the job from a later one with the same name (after a restart the
+    counter starts again): the pid it runs under."""
+    try:
+        return str(get_manager().get(name).proc.pid)
+    except (DevServerError, AttributeError):
+        return ""
+
+
 class RunBackgroundArgs(BaseModel):
-    command: str = Field(description="Любая неинтерактивная команда: сборка, тесты, watcher и т.п.")
-    name: str = Field(default="", description="Короткое имя для последующих обращений (пусто — назначу сам)")
+    command: str = Field(description="Any non-interactive command: a build, tests, a watcher…")
+    name: str = Field(default="", description="A short name to refer to it later (empty: one is assigned)")
     cwd: str = Field(
         default=".",
         description="Folder to run in: relative to the workspace, or an absolute path (outside it needs approval)",
     )
-    wait_sec: float = Field(default=1.0, description="Сколько секунд подождать первого вывода (0–20)")
+    wait_sec: float = Field(default=1.0, description="Seconds to wait for the first output (0–20)")
+    notify: bool = Field(
+        default=False,
+        description="Wake you in this chat when it ends (use it for builds/tests you would otherwise poll)",
+    )
 
 
 class RunBackgroundTool(Tool):
     name = "run_background"
     description = (
-        "Запускает команду в ФОНЕ и сразу возвращает управление, не дожидаясь завершения. "
-        "Для долгих задач (сборка, длинный тест-ран, watcher, бэкап), за которыми нужно "
-        "наблюдать. Потом читай вывод через read_background и останавливай через stop_background. "
-        "Для быстрых команд используй execute_command, для dev-серверов — start_dev_server."
+        "Starts a command in the BACKGROUND and returns at once. For long jobs (a build, a long test run, "
+        "a watcher, a backup). notify=true wakes you when it ends, so you do not poll; otherwise read "
+        "its output with read_background and stop it with stop_background. For quick commands use "
+        "execute_command, for dev servers start_dev_server."
     )
     Args = RunBackgroundArgs
     category = "execute"
@@ -102,34 +122,38 @@ class RunBackgroundTool(Tool):
 
         first = job.read_new()
         if not job.is_running():
-            body = "\n".join(first) or "(без вывода)"
+            body = "\n".join(first) or "(no output)"
             ok = job.exit_code() == 0
-            verdict = "успешно" if ok else f"с кодом {job.exit_code()}"
-            return ToolResult(
-                content=(
-                    f"Фоновая команда «{name}» уже завершилась {verdict}.\n{body}"
-                ),
-                ok=ok,
-            )
+            verdict = "successfully" if ok else f"with exit code {job.exit_code()}"
+            return ToolResult(content=f"Background command '{name}' has already finished {verdict}.\n{body}", ok=ok)
 
-        parts = [
-            f"Фоновая команда «{name}» запущена (pid {job.proc.pid}). "
-            f"Читай вывод: read_background name=\"{name}\".",
-        ]
-        parts.append("\n".join(first) if first else "(вывода пока нет)")
+        parts = [f"Background command '{name}' started (pid {job.proc.pid}). Read its output: "
+                 f"read_background name=\"{name}\"."]
+        if args.notify:
+            _watch_job(ctx, name, "")
+            parts[0] += " You will be woken in this chat when it ends — no need to poll."
+        parts.append("\n".join(first) if first else "(no output yet)")
         return ToolResult(content="\n\n".join(parts))
 
 
+def _watch_job(ctx: ToolContext, name: str, note: str) -> Reminder:
+    reminder = Reminder(
+        id=new_id(), kind="job", note=note, session_id=ctx.run_id, job=name, value=_job_ref(name),
+        expires_at=time.time() + _WATCH_CAP,
+    )
+    return ReminderStore(ctx.settings.data_dir).add(reminder)
+
+
 class ReadBackgroundArgs(BaseModel):
-    name: str = Field(description="Имя фоновой команды, заданное при запуске")
-    wait_sec: float = Field(default=0.0, description="Сколько секунд подождать нового вывода (0–20)")
+    name: str = Field(description="The background command's name, given at start")
+    wait_sec: float = Field(default=0.0, description="Seconds to wait for new output (0–20)")
 
 
 class ReadBackgroundTool(Tool):
     name = "read_background"
     description = (
-        "Возвращает НОВЫЙ вывод фоновой команды с прошлого чтения и её статус "
-        "(работает / завершилась с кодом). Вызывай, чтобы следить за ходом и поймать результат."
+        "Returns the NEW output of a background command since the last read and its status "
+        "(running / finished with a code). Use it to follow progress and catch the result."
     )
     Args = ReadBackgroundArgs
     category = "read"
@@ -149,38 +173,31 @@ class ReadBackgroundTool(Tool):
             deadline -= step
             lines = job.read_new()
 
-        header = f"Команда «{args.name}»"
-        if not job.is_running():
-            header += f" ЗАВЕРШИЛАСЬ (код {job.exit_code()})"
-        else:
-            header += " выполняется"
+        header = f"Command '{args.name}'"
+        header += f" FINISHED (exit code {job.exit_code()})" if not job.is_running() else " is running"
 
         if not lines:
             tail = job.tail(3)
-            hint = "\nПоследние строки:\n" + "\n".join(tail) if tail else ""
-            return ToolResult(content=f"{header}: нового вывода нет.{hint}")
+            hint = "\nLast lines:\n" + "\n".join(tail) if tail else ""
+            return ToolResult(content=f"{header}: no new output.{hint}")
 
-        return ToolResult(content=f"{header}. Новый вывод:\n" + "\n".join(lines))
+        return ToolResult(content=f"{header}. New output:\n" + "\n".join(lines))
 
 
 class WaitForArgs(BaseModel):
-    seconds: float = Field(
-        default=0.0, description="Подождать столько секунд (таймер). 0 — не по времени"
-    )
-    background: str = Field(
-        default="", description="Имя фоновой задачи: ждать её завершения (вместо таймера)"
-    )
-    reason: str = Field(default="", description="Зачем ждём — покажется пользователю в ленте")
-    timeout: float = Field(default=_WAIT_CAP, ge=1, le=_WAIT_CAP, description="Потолок ожидания, сек")
+    seconds: float = Field(default=0.0, description="Wait this many seconds (a timer). 0 = not by time")
+    background: str = Field(default="", description="A background job's name: wait until it ends (instead of a timer)")
+    reason: str = Field(default="", description="Why we wait — shown to the user, and to you if the wait is cut off")
+    timeout: float = Field(default=_WAIT_CAP, ge=1, le=_WAIT_CAP, description="The longest to wait, seconds")
 
 
 class WaitForTool(Tool):
     name = "wait_for"
     description = (
-        "Пауза с последующим продолжением работы. Два режима: подождать N секунд (таймер, "
-        "например «проверю через 2 минуты») ИЛИ дождаться завершения фоновой задачи "
-        "(background=имя, например долгой сборки). Когда время вышло или задача закончилась — "
-        "инструмент вернёт управление, и ты идёшь проверять результат. Пользователь видит, что идёт ожидание."
+        "Pauses the task, then continues it. Either wait N seconds (\"check again in 2 minutes\") or until "
+        "a background job ends (background=name, e.g. a long build). Then you go on and check the result. "
+        "The wait survives switching chats and closing the app: if the app closes meanwhile, you are woken "
+        "on the next start when the time is up. For hours or days use set_reminder instead."
     )
     Args = WaitForArgs
     category = "read"
@@ -189,151 +206,126 @@ class WaitForTool(Tool):
     async def _note(self, ctx: ToolContext, text: str) -> None:
         try:
             await ctx.emitter(LogEvent(text=text, level="info"))
-        except Exception:  # noqa: BLE001 - статус не должен ронять ожидание
-            pass
+        except Exception:  # noqa: BLE001 - a status line must not break the wait
+            return
 
     async def run(self, args: WaitForArgs, ctx: ToolContext) -> ToolResult:
         cap = max(1.0, min(args.timeout, _WAIT_CAP))
-        tag = f" — {args.reason.strip()}" if args.reason.strip() else ""
+        reason = args.reason.strip()
+        tag = f" — {reason}" if reason else ""
+        store = ReminderStore(ctx.settings.data_dir)
 
-        # Режим ожидания завершения фоновой задачи.
         if args.background.strip():
             name = args.background.strip()
             try:
                 job = get_manager().get(name)
             except DevServerError as exc:
                 return ToolResult.fail(str(exc))
-
-            await self._note(ctx, f"⏳ Жду завершения задачи «{name}»{tag}…")
-            waited = 0.0
-            while job.is_running() and waited < cap:
-                step = min(1.0, cap - waited)
-                await asyncio.sleep(step)
-                waited += step
-
+            # Durable: if the app closes during the wait, the chat is told on the next start.
+            record = store.add(Reminder(
+                id=new_id(), kind="job", note=reason or "continue the task", session_id=ctx.run_id,
+                job=name, value=_job_ref(name),
+            ))
+            await self._note(ctx, f"⏳ Waiting for '{name}' to finish{tag}…")
+            waited = await self._sleep(record, ctx, cap, lambda: not job.is_running())
             if job.is_running():
                 tail = "\n".join(job.tail(5))
-                return ToolResult(
-                    content=(
-                        f"Задача «{name}» всё ещё выполняется спустя {int(waited)} с "
-                        f"(достигнут лимит ожидания). Продолжай ждать через wait_for или проверь "
-                        f"read_background. Последние строки:\n{tail}"
-                    )
-                )
+                return ToolResult(content=(
+                    f"'{name}' is still running after {int(waited)} s (the wait's limit). Wait again with "
+                    f"wait_for, or check read_background. Last lines:\n{tail}"))
             code = job.exit_code()
             tail = "\n".join(job.tail(8))
-            verdict = "успешно" if code == 0 else f"с кодом {code}"
+            verdict = "successfully" if code == 0 else f"with exit code {code}"
             return ToolResult(
-                content=(
-                    f"✅ Задача «{name}» завершилась {verdict} за ~{int(waited)} с ожидания. "
-                    f"Теперь проверь результат.\nПоследние строки вывода:\n{tail or '(пусто)'}"
-                ),
+                content=(f"'{name}' finished {verdict} after ~{int(waited)} s of waiting. Check the result "
+                         f"now.\nLast lines of its output:\n{tail or '(empty)'}"),
                 ok=code == 0,
             )
 
-        # Режим таймера.
         delay = min(args.seconds, cap)
         if delay <= 0:
-            return ToolResult.fail(
-                "Укажи seconds (таймер) или background (ждать задачу). Оба пусты."
-            )
-        await self._note(ctx, f"⏳ Пауза {int(delay)} с{tag}…")
-        await asyncio.sleep(delay)
-        return ToolResult(
-            content=(
-                f"Прошло {int(delay)} с{tag}. Продолжаю — можно проверять то, ради чего ждали."
-            )
-        )
+            return ToolResult.fail("give seconds (a timer) or background (a job to wait for); both are empty")
+        record = store.add(Reminder(
+            id=new_id(), kind="wait", note=reason or "continue the task", session_id=ctx.run_id,
+            fire_at=time.time() + delay,
+        ))
+        await self._note(ctx, f"⏳ Waiting {int(delay)} s{tag}…")
+        await self._sleep(record, ctx, delay, lambda: False)
+        return ToolResult(content=f"{int(delay)} s have passed{tag}. Go on: check what you waited for.")
+
+    async def _sleep(self, record: Reminder, ctx: ToolContext, cap: float, done) -> float:
+        """Sleeps until `done()` or the cap. The durable record goes when the wait ends here; it
+        stays when the app closes mid-wait, so the scheduler ends the wait after the restart."""
+        store = ReminderStore(ctx.settings.data_dir)
+        LIVE_WAITS.add(record.id)
+        started = time.monotonic()
+        try:
+            while not done():
+                left = cap - (time.monotonic() - started)
+                if left <= 0:
+                    break
+                await asyncio.sleep(min(1.0, left))
+        except asyncio.CancelledError:
+            if not ctx.scratch.get("_shutdown"):
+                store.remove(record.id)  # the user stopped the task: the wait goes with it
+            raise
+        finally:
+            LIVE_WAITS.discard(record.id)
+        store.remove(record.id)
+        return time.monotonic() - started
 
 
 class WatchBackgroundArgs(BaseModel):
-    seconds: float = Field(default=0.0, description="Уведомить через столько секунд (таймер). 0 — не по времени")
-    background: str = Field(default="", description="Имя фоновой задачи: уведомить, когда она завершится")
-    note: str = Field(default="", description="Текст напоминания — что проверить/сделать, когда сработает")
-    timeout: float = Field(default=_WAIT_CAP, ge=1, le=_WAIT_CAP, description="Потолок наблюдения, сек")
+    seconds: float = Field(default=0.0, description="Notify after this many seconds (a timer). 0 = not by time")
+    background: str = Field(default="", description="A background job's name: notify when it ends")
+    note: str = Field(default="", description="What to check or do when it fires")
+    timeout: float = Field(default=_WATCH_CAP, ge=1, le=_WATCH_CAP, description="The longest to watch, seconds")
 
 
 class WatchBackgroundTool(Tool):
     name = "watch_background"
     description = (
-        "НЕ блокирует работу: ставит фоновое напоминание и сразу возвращает управление, "
-        "чтобы ты продолжал заниматься другим. Когда пройдёт время (seconds) ИЛИ завершится "
-        "фоновая задача (background=имя), тебе придёт уведомление на границе следующего шага — "
-        "оно не прервёт текущее действие, но ты его увидишь и сможешь заняться напоминанием. "
-        "Отличие от wait_for: тот останавливает тебя и ждёт, а этот работает параллельно."
+        "Does NOT block: sets a background watch and returns at once, so you keep working. When the time "
+        "passes (seconds) OR a background job ends (background=name), you get a notice at the next step "
+        "boundary — or, if you have finished by then, you are woken in this chat with it (also after "
+        "the user switched chats or the app was restarted). Unlike wait_for, which stops you and waits."
     )
     Args = WatchBackgroundArgs
     category = "read"
     timeout = None
 
     async def run(self, args: WatchBackgroundArgs, ctx: ToolContext) -> ToolResult:
-        cap = max(1.0, min(args.timeout, _WAIT_CAP))
         note = args.note.strip()
+        tail = f" Note: {note}." if note else ""
 
         if args.background.strip():
             name = args.background.strip()
             try:
-                get_manager().get(name)  # проверяем, что задача существует
+                get_manager().get(name)  # the job must exist
             except DevServerError as exc:
                 return ToolResult.fail(str(exc))
+            _watch_job(ctx, name, note)
+            return ToolResult(content=f"Watching '{name}' in the background — you will be told when it ends; "
+                                      f"keep working.{tail}")
 
-            async def _watch_job() -> None:
-                waited = 0.0
-                while waited < cap:
-                    try:
-                        job = get_manager().get(name)
-                    except DevServerError:
-                        break
-                    if not job.is_running():
-                        code = job.exit_code()
-                        verdict = "успешно" if code == 0 else f"с кодом {code}"
-                        msg = f"Фоновая задача «{name}» завершилась {verdict}."
-                        if note:
-                            msg += f" Напоминание: {note}"
-                        ctx.scratch.setdefault("notifications", []).append(msg)
-                        return
-                    await asyncio.sleep(1.0)
-                    waited += 1.0
-
-            task = asyncio.create_task(_watch_job(), name=f"watch-{name}")
-            ctx.scratch.setdefault("_watch_tasks", []).append(task)
-            tail = f" Напомню: {note}." if note else ""
-            return ToolResult(
-                content=(
-                    f"Слежу за задачей «{name}» в фоне — уведомлю, когда завершится, "
-                    f"и продолжу работать дальше.{tail}"
-                )
-            )
-
-        delay = min(args.seconds, cap)
+        delay = min(args.seconds, max(1.0, min(args.timeout, _WATCH_CAP)))
         if delay <= 0:
-            return ToolResult.fail("Укажи seconds (таймер) или background (следить за задачей).")
-
-        async def _watch_timer() -> None:
-            await asyncio.sleep(delay)
-            msg = f"Прошло {int(delay)} с (фоновый таймер)."
-            if note:
-                msg += f" Напоминание: {note}"
-            ctx.scratch.setdefault("notifications", []).append(msg)
-
-        task = asyncio.create_task(_watch_timer(), name="watch-timer")
-        ctx.scratch.setdefault("_watch_tasks", []).append(task)
-        tail = f" Напомню: {note}." if note else ""
-        return ToolResult(
-            content=(
-                f"Поставил фоновый таймер на {int(delay)} с — уведомлю по истечении, "
-                f"работу не прерываю.{tail}"
-            )
-        )
+            return ToolResult.fail("give seconds (a timer) or background (a job to watch)")
+        ReminderStore(ctx.settings.data_dir).add(Reminder(
+            id=new_id(), kind="time", note=note or f"the {int(delay)} s background timer is up",
+            session_id=ctx.run_id, fire_at=time.time() + delay,
+        ))
+        return ToolResult(content=f"Background timer set for {int(delay)} s — you will be told when it is up; "
+                                  f"keep working.{tail}")
 
 
 class StopBackgroundArgs(BaseModel):
-    name: str = Field(description="Имя фоновой команды для остановки")
+    name: str = Field(description="The background command's name to stop")
 
 
 class StopBackgroundTool(Tool):
     name = "stop_background"
-    description = "Останавливает фоновую команду по имени (гасит всё дерево процессов)."
+    description = "Stops a background command by its name (the whole process tree)."
     Args = StopBackgroundArgs
     category = "execute"
     dangerous = True
@@ -343,11 +335,16 @@ class StopBackgroundTool(Tool):
         return tr("appr.bg_stop", name=args.name)
 
     def auto_verdict(self, args: StopBackgroundArgs, ctx: ToolContext) -> str:  # type: ignore[override]
-        # Остановка своего же процесса безопасна.
+        # Stopping one's own process is safe.
         return "allow"
 
     async def run(self, args: StopBackgroundArgs, ctx: ToolContext) -> ToolResult:
         stopped = get_manager().stop(args.name)
         if not stopped:
-            return ToolResult.fail(f"Фоновая команда «{args.name}» не найдена или уже остановлена.")
-        return ToolResult(content=f"Фоновая команда «{args.name}» остановлена.")
+            return ToolResult.fail(f"Background command '{args.name}' not found or already stopped.")
+        # A stopped job is not "finished": its watches would only wake the chat for nothing.
+        store = ReminderStore(ctx.settings.data_dir)
+        for r in store.active(ctx.run_id):
+            if r.kind == "job" and r.job == args.name:
+                store.remove(r.id)
+        return ToolResult(content=f"Background command '{args.name}' stopped.")

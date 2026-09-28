@@ -5,7 +5,7 @@
 
 mod browser;
 
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -138,7 +138,9 @@ fn spawn_backend(port: u16, host: &browser::BrowserHost) -> Option<Child> {
             if sidecar.exists() {
                 return Command::new(sidecar)
                     .args(["--server", "--host", "127.0.0.1", "--port", &port.to_string(), "--parent-pid", &parent])
+                    .arg("--stop-on-stdin-eof")
                     .args(extra)
+                    .stdin(Stdio::piped())
                     .spawn()
                     .ok();
             }
@@ -150,7 +152,9 @@ fn spawn_backend(port: u16, host: &browser::BrowserHost) -> Option<Child> {
     let py = if cfg!(windows) { "python" } else { "python3" };
     Command::new(py)
         .args(["main.py", "--server", "--host", "127.0.0.1", "--port", &port.to_string(), "--parent-pid", &parent])
+        .arg("--stop-on-stdin-eof")
         .args(extra)
+        .stdin(Stdio::piped())
         .current_dir(&root)
         .spawn()
         .ok()
@@ -212,11 +216,24 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            // Гасим Python-процесс при выходе — иначе он переживёт окно.
+            // Stop the Python backend with the app, or it would outlive the window. Gracefully
+            // first: closing its stdin asks it to stop its runs as "the app closed" (their
+            // waits stay scheduled) and to store every chat; a kill only if it takes too long.
+            // The window is already gone, so the wait is not seen.
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(backend) = app.try_state::<Backend>() {
                     if let Some(mut child) = backend.0.lock().unwrap().take() {
-                        let _ = child.kill();
+                        drop(child.stdin.take());
+                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+                        while std::time::Instant::now() < deadline {
+                            match child.try_wait() {
+                                Ok(Some(_)) | Err(_) => break,
+                                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                            }
+                        }
+                        if let Ok(None) = child.try_wait() {
+                            let _ = child.kill();
+                        }
                     }
                 }
             }

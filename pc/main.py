@@ -66,12 +66,55 @@ def _configure_console() -> None:
 # --------------------------------------------------------------- сервер
 
 
+#: The running server, so a graceful stop can be asked from another thread.
+_SERVER = None
+#: A graceful stop that has not finished by then is cut short.
+_GRACEFUL_EXIT_SEC = 8.0
+_exit_once = threading.Lock()
+
+
 def run_server(host: str, port: int) -> None:
     import uvicorn
 
     from server.app import app
 
-    uvicorn.run(app, host=host, port=port, log_level="warning", ws_ping_interval=30)
+    global _SERVER
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning", ws_ping_interval=30,
+                            timeout_graceful_shutdown=3)
+    _SERVER = uvicorn.Server(config)
+    _SERVER.run()
+
+
+def _graceful_exit(reason: str) -> None:
+    """Stops the server the normal way: the app's shutdown stops the chats' runs as "the app
+    closed" (their waits stay scheduled) and stores every chat. A kill would lose the chats'
+    last seconds and leave the waits looking like a crash. Cut short if it takes too long."""
+    if not _exit_once.acquire(blocking=False):
+        return
+    logger.info("%s: stopping the backend.", reason)
+    if _SERVER is not None:
+        # The main thread leaves run_server() when the server has stopped and ends the
+        # process; this thread only makes sure it ends even if something hangs.
+        _SERVER.should_exit = True
+        time.sleep(_GRACEFUL_EXIT_SEC)
+    os._exit(0)
+
+
+def _stop_when_stdin_closes() -> None:
+    """The Tauri shell holds the write end of our stdin: it closes it to ask for a graceful
+    exit (and it closes by itself when the shell dies). Only with --stop-on-stdin-eof: a
+    backend started otherwise may have no stdin at all, which reads as closed at once."""
+
+    def watch() -> None:
+        try:
+            while os.read(0, 1024):
+                pass
+        except OSError as exc:
+            logger.warning("stdin is not readable (%s): the shell's graceful stop is off", exc)
+            return
+        _graceful_exit("The shell asked to close")
+
+    threading.Thread(target=watch, name="stdin-watch", daemon=True).start()
 
 
 def _launch_native_windows_app(url: str) -> bool:
@@ -449,8 +492,7 @@ def _exit_with_parent(parent_pid: int) -> None:
                 except OSError:
                     break
                 time.sleep(2)
-        logger.info("Оболочка (PID %s) завершилась — выключаю бэкенд.", parent_pid)
-        os._exit(0)
+        _graceful_exit(f"The shell (PID {parent_pid}) has exited")
 
     threading.Thread(target=watch, name="parent-watch", daemon=True).start()
 
@@ -540,12 +582,18 @@ def main() -> int:
     parser.add_argument(
         "--parent-pid", type=int, default=None, help="Завершиться вместе с этим процессом (оболочка Tauri)"
     )
+    parser.add_argument("--stop-on-stdin-eof", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--browser-cdp-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--browser-net-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--browser-dir", type=str, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.parent_pid:
         _exit_with_parent(args.parent_pid)
+        from core import updater
+
+        updater.SHELL_PID = args.parent_pid  # the update waits for the window's process too
+    if args.stop_on_stdin_eof:
+        _stop_when_stdin_closes()
     if args.browser_net_port:
         # The shell baked this port into the browser's PAC script (core/browser_net.py).
         from core.browser_net import configure as configure_net

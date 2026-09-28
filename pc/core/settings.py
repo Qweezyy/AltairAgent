@@ -249,7 +249,8 @@ class Settings(BaseSettings):
     android_timeout: float = 120.0
 
     # --- Обновления ---
-    #: Ссылка на JSON-манифест или путь к нему в общей папке. Пусто — не проверять.
+    #: Empty = the project's signed GitHub releases; or a JSON manifest (a URL or a path on
+    #: a share); "off" = never check (core/updater.py).
     update_url: str = ""
     #: Проверять обновления при запуске (тихо, без окон).
     update_check_on_start: bool = True

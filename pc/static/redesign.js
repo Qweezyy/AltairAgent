@@ -646,7 +646,12 @@ const HANDLERS = {
   browser_agent_active: (m) => window.BrowserPanel?.handle(m),
   "browser.handoff": (m) => showHandoff(m),
   state(m) { setRunning(m.state === "running" || m.state === "waiting_approval"); setStatus(m.state); },
-  "session.loaded"(m) { setWorkspace(m.workspace); if (m.mode) updateMode(m.mode); state.autoWorkspace = !!m.auto_workspace; loadSession(m.session); if (state.jumpTo) setTimeout(jumpToMatch, 60); else refreshSessions(); },
+  "session.loaded"(m) {
+    // The previous chat may still be running in the background: its live turn is not this one.
+    endTurn(); setRunning(!!m.running); if (m.running) statusStart(); else clearActivity();
+    setWorkspace(m.workspace); if (m.mode) updateMode(m.mode); state.autoWorkspace = !!m.auto_workspace; loadSession(m.session); if (state.jumpTo) setTimeout(jumpToMatch, 60); else refreshSessions();
+  },
+  "chat.activity"() { refreshSessions(); },
   "session.title"(m) { applySessionTitle(m); },
   "workspace.updated"(m) { setWorkspace(m.workspace); toast(T("ev.wsUpdated")); },
   "workspace.error"(m) { toast(m.message, "error"); },
@@ -733,7 +738,21 @@ const HANDLERS = {
   "run.failed"(m) { clearActivity(); append(el(`<div class="card"><div class="card-head">${iconSvg("alert")} ${esc(T("ev.error"))}</div><div class="card-body"><div class="muted">${esc(m.message)}</div></div></div>`)); endTurn(); setRunning(false); },
   "run.cancelled"() { clearActivity(); endTurn(); setRunning(false); },
   "steering.queued"() { toast(T("ev.steeringQueued")); },
-  "reminder.fired"(m) { append(el(`<div class="reminder">${iconSvg("bell")}<span>${esc(m.text || m.note || T("ev.reminder"))}</span></div>`)); toast(m.note || m.text || T("ev.reminder")); },
+  "reminder.fired"(m) {
+    const text = m.text || m.note || T("ev.reminder");
+    if (m.here !== false && (!m.session_id || m.session_id === state.sessionId)) {
+      if (!m.attention) append(reminderLine(text));
+      toast(m.note || text);
+    } else {
+      // Another chat was woken (or waits for an answer): say which, one click opens it.
+      const t = toast(T(m.attention ? "ev.chatNeedsYou" : "ev.chatWoken", { title: dispTitle(m.title) || T("side.untitled"), text: m.note || text }));
+      t.classList.add("clickable");
+      t.addEventListener("click", () => send({ type: "load_session", session_id: m.session_id }));
+    }
+    refreshSessions();
+    // Minimized or in the background: the taskbar button flashes.
+    if (!document.hasFocus()) state.appWin?.requestUserAttention?.(2)?.catch?.(() => {});
+  },
   log(m) { if (m.level === "warning" || m.level === "error") toast(m.text, m.level === "error" ? "error" : ""); },
   pong() {},
 };
@@ -888,11 +907,15 @@ function loadSession(session) {
     else if (e.kind === "media") { closeGroup(); els.feedInner.appendChild(mediaFigure({ ...e, kind: e.media_kind || "file" })); }
     else if (e.kind === "widget") { closeGroup(); els.feedInner.appendChild(widgetFigure(e.html, e.widget_kind, e.caption)); }
     else if (e.kind === "answer") { closeGroup(); const n = el(`<div class="msg-agent">${(e.text || "").trim() ? `<div class="answer-body md"></div>` : ""}</div>`); if ((e.text || "").trim()) renderFinal($(".answer-body", n), e.text); addAnswerFooter(n, { text: e.full || e.text, duration_ms: e.duration_ms || 0, run_id: e.run_id }, state.userTurn - 1); els.feedInner.appendChild(n); }
+    else if (e.kind === "wake") { closeGroup(); els.feedInner.appendChild(reminderLine(e.text)); }
     else if (e.kind === "error") { closeGroup(); els.feedInner.appendChild(el(`<div class="card"><div class="card-head">${iconSvg("alert")} ${esc(T("ev.error"))}</div><div class="card-body"><div class="muted">${esc(e.text)}</div></div></div>`)); }
   }
   closeGroup();
   scrollFeed(true);
   updateWorkspaceLock();
+}
+function reminderLine(text) {
+  return el(`<div class="reminder">${iconSvg("bell")}<span>${esc(text || T("ev.reminder"))}</span></div>`);
 }
 const STARTERS = [
   { icon: "folder", key: "welcome.s1" },
@@ -935,7 +958,7 @@ function refreshSessions() {
 }
 function sessionRow(s) {
   const title = dispTitle(s.title) || T("side.untitled");
-  const item = el(`<div class="session-item ${s.id === state.sessionId ? "active" : ""}" role="button" tabindex="0" data-id="${escAttr(s.id)}">${iconSvg("message", "icon icon-sm")}<span class="s-title truncate">${esc(title)}</span><span class="s-ren btn-icon small" data-tip="${escAttr(T("side.rename"))}">${iconSvg("doc", "icon icon-sm")}</span><span class="s-del btn-icon small" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</span></div>`);
+  const item = el(`<div class="session-item ${s.id === state.sessionId ? "active" : ""} ${s.running ? "running" : ""}" role="button" tabindex="0" data-id="${escAttr(s.id)}"${s.running ? ` data-tip="${escAttr(T("side.runningBg"))}"` : ""}>${iconSvg("message", "icon icon-sm")}<span class="s-title truncate">${esc(title)}</span><span class="s-ren btn-icon small" data-tip="${escAttr(T("side.rename"))}">${iconSvg("doc", "icon icon-sm")}</span><span class="s-del btn-icon small" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</span></div>`);
   item.addEventListener("click", (e) => {
     if (e.target.closest(".s-del")) { deleteSession(s.id); e.stopPropagation(); return; }
     if (e.target.closest(".s-ren")) { e.stopPropagation(); startRename(item, s.id, s.title); return; }
@@ -2465,15 +2488,37 @@ async function checkUpdate() {
 }
 function openUpdate() {
   const d = state.updateInfo || {};
-  const body = d.available ? `<p>${esc(T("upd.newVersion", { version: d.version || "" }))}${state.version ? esc(T("upd.youHave", { cur: state.version })) : ""}</p>${d.notes ? `<div class="md">${esc(d.notes)}</div>` : ""}` : `<div class="empty">${iconSvg("check", "icon")}<div>${esc(T("upd.upToDate"))}${state.version ? ` (${esc(state.version)})` : ""}</div></div>`;
-  openModal({ title: T("upd.title"), bodyHtml: body, footHtml: d.available && d.installable ? `<span class="grow"></span><button class="btn btn-primary" id="upd-install">${esc(T("upd.install"))}</button>` : "",
-    onMount: (ov) => { $("#upd-install", ov)?.addEventListener("click", async () => { toast(T("upd.installing")); try { const r = await (await fetch("/api/update/install", { method: "POST" })).json(); toast(r.ok ? T("upd.installed") : r.error || T("t.error"), r.ok ? "" : "error"); } catch { toast(T("upd.installErr"), "error"); } }); } });
+  const notes = d.notes ? `<div class="md upd-notes"></div>` : "";
+  const why = d.available && !d.installable && d.error ? `<p class="muted">${esc(d.error)}</p>` : "";
+  const body = d.available ? `<p>${esc(T("upd.newVersion", { version: d.version || "" }))}${state.version ? esc(T("upd.youHave", { cur: state.version })) : ""}</p>${why}${notes}` : `<div class="empty">${iconSvg("check", "icon")}<div>${esc(T("upd.upToDate"))}${state.version ? ` (${esc(state.version)})` : ""}</div></div>`;
+  let foot = "";
+  if (d.available && d.installable) foot = `<span class="grow"></span><button class="btn btn-primary" id="upd-install">${esc(T("upd.install"))}</button>`;
+  else if (d.available && d.page) foot = `<span class="grow"></span><a class="btn" href="${escAttr(d.page)}" target="_blank" rel="noopener">${esc(T("upd.download"))}</a>`;
+  openModal({ title: T("upd.title"), bodyHtml: body, footHtml: foot,
+    onMount: (ov) => {
+      const n = $(".upd-notes", ov); if (n) renderFinal(n, d.notes);
+      $("#upd-install", ov)?.addEventListener("click", async (e) => {
+        // Installing restarts the app: chats working in the background are paused (their
+        // waits stay scheduled, the task can be continued after the restart).
+        const busy = (state.sessionList || []).filter((x) => x.running).length + (state.running ? 1 : 0);
+        if (busy && !confirm(T("upd.busy", { n: busy }))) return;
+        e.currentTarget.disabled = true; toast(T("upd.installing"));
+        try {
+          const r = await (await fetch("/api/update/install", { method: "POST" })).json();
+          if (!r.ok) { toast(r.error || T("t.error"), "error"); e.currentTarget.disabled = false; return; }
+          toast(T("upd.restarting"));
+          // The swap waits for the app to close; the window closes it (and the backend with it).
+          setTimeout(() => { if (state.appWin) state.appWin.close(); else toast(T("upd.closeToFinish")); }, 800);
+        } catch { toast(T("upd.installErr"), "error"); e.currentTarget.disabled = false; }
+      });
+    } });
 }
 
 // ------------------------------------------------------------------ toasts
 function toast(text, kind = "") {
   const t = el(`<div class="toast ${kind}">${kind === "error" ? iconSvg("alert") : ""}<span>${esc(text)}</span></div>`);
   els.toasts.appendChild(t); setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 200); }, 4200);
+  return t;
 }
 
 // ------------------------------------------------------------------ прочее
@@ -2717,16 +2762,17 @@ function init() {
 }
 // Кнопки управления окном в нативной оболочке (Tauri, без системной рамки).
 function initWindowControls() {
-  const T = window.__TAURI__;
-  if (!T || !T.window) return; // в браузере — обычное окно, без своих кнопок
+  const TA = window.__TAURI__;
+  if (!TA || !TA.window) return; // in a browser: a normal window, without our own buttons
   document.body.classList.add("tauri");
   const winctl = $("#winctl");
   if (winctl) winctl.hidden = false;
   // Имя функции менялось между версиями: v2 — getCurrentWindow, ранее — getCurrent.
-  const getWin = T.window.getCurrentWindow || T.window.getCurrent;
+  const getWin = TA.window.getCurrentWindow || TA.window.getCurrent;
   let appWin;
-  try { appWin = getWin ? getWin() : T.window.appWindow; } catch (e) { console.error("win api", e); }
-  if (!appWin) { console.error("Tauri window API недоступен"); return; }
+  try { appWin = getWin ? getWin() : TA.window.appWindow; } catch (e) { console.error("win api", e); }
+  if (!appWin) { console.error("Tauri window API is not available"); return; }
+  state.appWin = appWin;
   const guard = (p) => Promise.resolve(p).catch((e) => { console.error("win ctl", e); toast(T("win.ctlFail", { e: (e && e.message || e) }), "error"); });
   const syncMax = async () => {
     try {

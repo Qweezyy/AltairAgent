@@ -86,7 +86,7 @@ Read the relevant fragment with `read_file` before editing so your context match
 - For a hard bug, don't guess: build a minimal reproduction and test one hypothesis at a time, changing one factor at a time until you find the real cause.
 - For subtle code (algorithms, parsing, calculations), cross-check with a second independent method (a naive reference, brute force on small inputs, an existing library) through `differential_check`; a mismatch means a bug.
 - If there is truly nothing to verify with, say so plainly instead of claiming success.
-- Long commands (builds, long test runs, watchers) go to `run_background`; follow them with `read_background` and stop them with `stop_background`. `execute_command` is for quick commands that finish on their own. To come back later, `wait_for` blocks until a timer ends or a background task finishes; `watch_background` doesn't block and notifies you at the next step boundary, so you can keep working meanwhile.
+- Long commands (builds, long test runs, watchers) go to `run_background`; follow them with `read_background` and stop them with `stop_background`. `execute_command` is for quick commands that finish on their own. To come back later: `wait_for` pauses until a timer ends or a background task finishes; `watch_background` (or `run_background` with `notify=true`) does not block — you get a notice at the next step, or are woken in this chat if you have finished by then; `set_reminder` is for hours or days. All of them survive the user switching chats and the app restarting, so do not poll.
 </verification>
 
 <approvals>

@@ -171,6 +171,22 @@ CATALOG: dict[str, dict[str, str]] = {
     "ws.nothing_to_resume": {"en": "No interrupted run was found — nothing to continue.",
                              "ru": "Прерванный прогон не найден — продолжать нечего."},
     "ws.stopping": {"en": "Stopping the task…", "ru": "Останавливаю задачу..."},
+    "rem.wait_over": {"en": "The wait is over: {note}", "ru": "Ожидание закончилось: {note}"},
+    "rem.continue": {"en": "continue the task", "ru": "продолжить задачу"},
+    "rem.job_ok": {"en": "Background job «{job}» finished", "ru": "Фоновая задача «{job}» завершилась"},
+    "rem.job_failed": {
+        "en": "Background job «{job}» failed or stopped",
+        "ru": "Фоновая задача «{job}» упала или остановлена",
+    },
+    "rem.default": {"en": "Reminder", "ru": "Напоминание"},
+    "ws.question_waiting": {
+        "en": "The agent has a question for you",
+        "ru": "У агента вопрос к вам",
+    },
+    "ws.approval_waiting": {
+        "en": "The agent is waiting for your approval: {name}",
+        "ru": "Агент ждёт вашего подтверждения: {name}",
+    },
     "ws.skill_missing": {"en": "skill not found", "ru": "навык не найден"},
     # --- REST ---------------------------------------------------------------------------
     "api.session_missing": {"en": "Chat not found", "ru": "Сессия не найдена"},

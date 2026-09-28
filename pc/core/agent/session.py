@@ -39,6 +39,8 @@ CLEARED_MARK = "[Earlier"
 VIEW = "_view"            # the content the model gets instead of the original
 HIDDEN = "_hidden"        # not sent at all (folded into a summary)
 DROP_CALLS = "_drop_calls"  # sent without its tool calls (their results were dropped)
+#: A user-role message that is a reminder waking the agent, not something the user wrote.
+WAKE = "_wake"
 #: The text that opens a message carrying images from tools (browser/vision screenshots),
 #: so they can be told apart from the user's own attachments and dropped once stale.
 TOOL_MEDIA_MARK = "[Tool screenshot]"
@@ -163,7 +165,8 @@ class Session:
         seen = -1
         cut_at = None
         for index, message in enumerate(self.messages):
-            if message.get("role") == "user":
+            # A wake-up from a reminder is not the user's message: the feed does not count it.
+            if message.get("role") == "user" and not message.get(WAKE):
                 seen += 1
                 if seen == turn:
                     cut_at = index
@@ -213,6 +216,34 @@ class Session:
             {"role": "tool", "tool_call_id": call_id, "name": name, "content": content}
         )
         self.updated_at = time.time()
+
+    def answer_open_calls(self, content: str) -> int:
+        """Gives every tool call still without a result that result. A chat stored mid-step
+        (the app crashed or was killed while a tool ran) has such calls, and providers
+        reject a history with them (HTTP 400). Returns how many were answered."""
+        answered = {m.get("tool_call_id") for m in self.messages if m.get("role") == "tool"}
+        added = 0
+        index = 0
+        while index < len(self.messages):
+            message = self.messages[index]
+            index += 1
+            if message.get("role") != "assistant" or not message.get("tool_calls"):
+                continue
+            # The results go right after the call's existing ones, in the calls' order.
+            while index < len(self.messages) and self.messages[index].get("role") == "tool":
+                index += 1
+            for call in message["tool_calls"]:
+                if call.get("id") in answered:
+                    continue
+                name = (call.get("function") or {}).get("name", "")
+                self.messages.insert(index, {"role": "tool", "tool_call_id": call.get("id"),
+                                             "name": name, "content": content})
+                answered.add(call.get("id"))
+                index += 1
+                added += 1
+        if added:
+            self.updated_at = time.time()
+        return added
 
     def append_timeline(self, entry: dict[str, Any]) -> None:
         """Adds an entry to the UI feed (a question, a step, an answer). The whole feed is

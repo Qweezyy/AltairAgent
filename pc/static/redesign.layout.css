@@ -428,7 +428,13 @@ audio.chat-media { background: transparent; }
   border: 1px solid var(--accent); border-radius: var(--r-md);
   background: var(--accent-soft);
 }
-.reminder .icon { color: var(--accent); }
+.reminder .icon { color: var(--accent); flex: none; }
+.reminder span { white-space: pre-wrap; }
+/* A chat working in the background: a pulsing dot on its icon. */
+.session-item.running > .icon:first-child { color: var(--accent); animation: bg-run-pulse 1.4s ease-in-out infinite; }
+@keyframes bg-run-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .session-item.running > .icon:first-child { animation: none; } }
+.toast.clickable { cursor: pointer; }
 
 /* Лог-строка (тихая) */
 .logline { font-size: var(--fs-xs); color: var(--text-3); padding: 0 var(--sp-3); }

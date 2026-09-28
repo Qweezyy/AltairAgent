@@ -124,9 +124,13 @@ async def lifespan(app: FastAPI):
     app.state.active_workspaces = {str(settings.workspace)}
     app.state.mcp = mcp
     app.state.store = store
-    # Активные подключения — планировщик напоминаний шлёт сработавшие события в
-    # нужный чат, а сигнал phone_online проверяет наличие телефона по мосту.
-    app.state.connections = set()
+    # Chats live apart from the windows showing them (server/chats.py): a run goes on when
+    # its window shows another chat, and a reminder can wake a chat nobody has open.
+    from server.chats import ChatHub
+
+    app.state.chats = ChatHub(registry)
+    # Every window's socket: the phone_online signal looks for the phone among them.
+    app.state.connections = app.state.chats.connections
     logger.info(
         "Агент готов: инструментов %d (из них MCP %d), workspace %s",
         len(registry),
@@ -158,6 +162,9 @@ async def lifespan(app: FastAPI):
         reminder_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await reminder_task
+        # First the chats: their runs stop as "the app closed" (waits stay scheduled, the
+        # task can be continued) and every chat is stored before anything else goes down.
+        await app.state.chats.shutdown()
         await app.state.lan.close()
         await stop_proxy()
         await mcp.stop()
@@ -283,6 +290,10 @@ def create_app() -> FastAPI:
     async def list_sessions() -> dict:
         store: SessionStore = app.state.store
         sessions = await store.async_list()
+        # Chats working in the background are marked in the list.
+        running = app.state.chats.running_ids() if hasattr(app.state, "chats") else set()
+        for item in sessions:
+            item["running"] = item.get("id") in running
         return {"sessions": sessions}
 
     @app.get("/api/sessions/search")
@@ -329,6 +340,13 @@ def create_app() -> FastAPI:
     @app.delete("/api/sessions/{session_id}")
     async def delete_session(session_id: str) -> dict:
         store: SessionStore = app.state.store
+        # A deleted chat stops working: its run would otherwise store it back at its end.
+        live = app.state.chats.chats.get(session_id) if hasattr(app.state, "chats") else None
+        if live is not None:
+            if live.running:
+                await live.stop()
+                await asyncio.gather(live.run_task, return_exceptions=True)
+            live.deleted = True  # a window still showing it must not store it back
         deleted = await store.async_delete(session_id)
         return {"ok": deleted}
 

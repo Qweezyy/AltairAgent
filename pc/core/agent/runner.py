@@ -199,6 +199,10 @@ class AgentRunner:
         # Переключатели действуют на один запуск. Если их не убрать, прошлое
         # «не искать в интернете» будет тихо действовать и в следующей задаче.
         self.session.clear_run_notes()
+        self.session.answer_open_calls(
+            "[No result: the app stopped before this call finished. Check the state before "
+            "relying on it.]"
+        )
         self.session.add_user(
             self._task_text(task, options),
             parts=options.attachments.parts(),
@@ -376,10 +380,16 @@ class AgentRunner:
             # Tell the UI and re-raise: swallowing CancelledError would mark the task done and
             # break stop/shutdown. Close the step first, so the history stays whole and valid.
             self._close_interrupted_step()
-            self.session.add_note(
-                "The user stopped this task. What was done so far is above; continue from there "
-                "if the next message asks for it."
-            )
+            if self._app_closing():
+                self.session.add_note(
+                    "The app was closed during this task. What was done so far is above; "
+                    "continue from there when asked (or when a wait you set wakes you)."
+                )
+            else:
+                self.session.add_note(
+                    "The user stopped this task. What was done so far is above; continue from "
+                    "there if the next message asks for it."
+                )
             await asyncio.shield(self._emit(RunCancelled(run_id=run_id)))
             raise
 
@@ -395,9 +405,11 @@ class AgentRunner:
             return RunResult(ok=False, steps=step, error=message)
 
         finally:
-            # Снимаем след прогона: любой штатный выход (успех/ошибка/отмена)
-            # доходит сюда. Оставшийся маркер = процесс умер посреди задачи.
-            self.run_state.clear(self.session.id)
+            # Clear the run's trace: every normal exit (success/error/stop) comes here. A trace
+            # left = the process died mid-task, or the app closed on it: both are offered to
+            # be continued on the next start.
+            if not self._app_closing():
+                self.run_state.clear(self.session.id)
             # Гасим фоновые наблюдатели (watch_background), не переживших задачу.
             for task in self.tool_context.scratch.get("_watch_tasks", []):
                 if not task.done():
@@ -405,15 +417,19 @@ class AgentRunner:
             self.tool_context.scratch["_watch_tasks"] = []
 
     async def _drain_notifications(self) -> None:
-        """Переносит готовые фоновые уведомления в историю — модель увидит их сейчас."""
+        """Moves the fired notifications into the history: the model sees them now."""
         pending = self.tool_context.scratch.get("notifications")
         if not pending:
             return
-        # Забираем и очищаем атомарно (один поток event loop, гонок нет).
+        # Take and clear at once (one event loop thread, no races).
         self.tool_context.scratch["notifications"] = []
         for text in pending:
-            self.session.add_note(f"[Фоновое уведомление] {text}")
+            self.session.add_note(f"[Background notice] {text}")
             await self._log(tr("log.background", text=text), "info")
+        # The chat marks the reminders behind them delivered (server/chats.py).
+        taken = self.tool_context.scratch.get("_on_notifications")
+        if callable(taken):
+            taken(list(pending))
 
     async def _drain_steering(self) -> None:
         """Вносит реплики пользователя, присланные во время прогона, как ход диалога.
@@ -626,6 +642,10 @@ class AgentRunner:
             return ""
         return (turn.content or "").strip()
 
+    def _app_closing(self) -> bool:
+        """The run is being stopped because the app closes, not by the user's stop button."""
+        return bool(self.tool_context.scratch.get("_shutdown"))
+
     def _close_interrupted_step(self) -> None:
         """What the user saw before pressing stop stays in the history.
 
@@ -645,13 +665,15 @@ class AgentRunner:
                 continue
             name = call.get("function", {}).get("name", "")
             result = finished.get(call_id)
+            who = "The app was closed" if self._app_closing() else "Stopped by the user"
             content = result.content if result is not None else (
-                "[Stopped by the user before this finished: its result is unknown. Check the "
-                "state before relying on it.]")
+                f"[{who} before this finished: its result is unknown. Check the state before "
+                "relying on it.]")
             self.session.add_tool_result(call_id, name, content)
         self._finished_calls = {}
         if partial:
-            self.session.add_assistant_turn(AssistantTurn(content=f"{partial}\n\n[Interrupted by the user here.]"))
+            who = "the app closing" if self._app_closing() else "the user"
+            self.session.add_assistant_turn(AssistantTurn(content=f"{partial}\n\n[Interrupted by {who} here.]"))
 
     def _note_context(self, turn: AssistantTurn) -> None:
         """Remember how big the context really was on this request, as the provider counted
@@ -660,7 +682,8 @@ class AgentRunner:
         seen = int(turn.usage.get("context_tokens") or turn.usage.get("prompt_tokens") or 0)
         if seen:
             self.session.context_tokens = seen + int(turn.usage.get("completion_tokens") or 0)
-            self.session.context_mark = self.session.token_estimate() + estimate_tokens([turn.to_message()])
+            # One estimate of the whole, as context_now() makes it: two rounded halves drift.
+            self.session.context_mark = estimate_tokens(self.session.view() + [turn.to_message()])
 
     async def _emit_context(self) -> None:
         """The ring follows the run live: after the user's message, every model answer, tool
@@ -779,11 +802,9 @@ class AgentRunner:
         parts = [self.memory.prompt_section(task), FolderMemory(self.settings.workspace).prompt_section()]
         # Сработавшие/активные напоминания этого чата — чтобы модель знала контекст
         # срабатывания и что она уже запланировала. После показа помечаем доставленными.
-        reminders = ReminderStore(self.settings.data_dir)
-        reminder_section = reminders.prompt_section(self.session.id)
+        reminder_section = ReminderStore(self.settings.data_dir).prompt_section(self.session.id)
         if reminder_section:
             parts.append(reminder_section)
-            reminders.mark_delivered(self.session.id)
         memory = "\n\n".join(p for p in parts if p.strip())
         return build_system_prompt(
             settings=self.settings,

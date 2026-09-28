@@ -149,12 +149,13 @@ def test_ws_ring_reports_exact_count_and_404_page(monkeypatch, settings):
 
     import core.settings as settings_module
     import server.app as app_module
+    import server.chats as chats_module
     import server.ws as ws_module
 
     for mod in (settings_module, app_module, ws_module):
         monkeypatch.setattr(mod, "get_settings", lambda s=settings: s)
     turn = AssistantTurn(content="ok", usage={"prompt_tokens": 40_000, "completion_tokens": 100})
-    monkeypatch.setattr(ws_module, "build_llm_client", lambda model=None, **kw: ScriptedLLM([turn]))
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None, **kw: ScriptedLLM([turn]))
     with TestClient(app_module.create_app()) as tc:
         with tc.websocket_connect("/ws") as ws:
             first = ws.receive_json()

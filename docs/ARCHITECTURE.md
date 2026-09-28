@@ -8,7 +8,9 @@ change to the core. Step-by-step recipes live in [EXTENDING.md](EXTENDING.md).
 ```
         UI (static/, console)
                |  events / commands
-        server/ws.py  server/app.py
+  server/ws.py (a window's socket)  server/app.py
+               |
+        server/chats.py              <-- chats, apart from the windows showing them
                |
         core/agent/runner.py         <-- agent loop
          /            |         \
@@ -30,8 +32,12 @@ If you feel the urge to import `server` from `core`, that is a sign the design i
 ## 2. The flow of a single task
 
 1. The browser sends to `/ws`: `{"type": "run", "task": "..."}`.
-2. `server/ws.py::Connection` creates an `AgentRunner` with the current `Session` and runs it
-   in a separate `asyncio.Task` (so "Stop" works while the socket keeps accepting commands).
+2. `server/ws.py::Connection` is a window's socket: it shows one chat at a time. The chat itself
+   (`server/chats.py::ChatState`, kept in the app's `ChatHub`) creates an `AgentRunner` with its
+   `Session` and runs it in a separate `asyncio.Task` (so "Stop" works while the socket keeps
+   accepting commands). The run, its approvals and questions belong to the chat, not the socket:
+   the run goes on when the window shows another chat, reloads or closes, and a chat nobody has
+   open can be woken by a reminder (`server/reminders.py` → `ChatHub.dispatch`).
 3. `AgentRunner.run()`:
    1. assembles the system prompt (`core/agent/prompt.py`) — the list of tools and skills is
       built from the registry, not hardcoded;
@@ -163,7 +169,7 @@ Three independent lines of defense:
    `edit`: a forgotten category must not silently disable confirmation.
 
    It is not the core that asks, but the current `Approver`: on the web it is a card
-   with four options (`server/ws.py`), in the console a `[y/N]` prompt
+   with four options (`server/chats.py`), in the console a `[y/N]` prompt
    (`core/security/console.py`). "Always allow" answers are stored in
    `PermissionStore` and drop the question ahead of time.
 
