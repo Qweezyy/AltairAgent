@@ -656,13 +656,27 @@ class Connection:
         )
 
     async def _set_approval_mode(self, mode: str) -> None:
-        """Режим разрешений выбирается в каждом чате отдельно."""
+        """The approval mode of this chat, which also becomes the default for new chats: the
+        user's last choice survives new chats, restarts and updates (it is kept in the app
+        data .env, which an update does not touch)."""
         if mode not in MODES:
             await self.send({"type": "log", "level": "warning", "text": tr("ws.unknown_mode", mode=mode)})
             return
         self.session_settings = self.session_settings.model_copy(update={"approval_mode": mode})
         self.session.approval_mode = mode
         await self._save_session()
+        if self.settings.approval_mode != mode:
+            import core.settings as settings_module
+            from core.config_file import write_values
+
+            try:
+                await asyncio.to_thread(write_values, {"APPROVAL_MODE": mode}, self.settings)
+                clear = getattr(settings_module.get_settings, "cache_clear", None)
+                if clear is not None:  # the next get_settings() reads the saved default
+                    clear()
+                self.settings = self.settings.model_copy(update={"approval_mode": mode})
+            except OSError as exc:  # the chat keeps its mode; only the default was not saved
+                logger.warning("approval mode default not saved: %s", exc)
         await self.send({"type": "mode.updated", "mode": mode})
         await self.send(
             {"type": "log", "level": "info", "text": tr("ws.mode", title=MODES[mode]["title"])}
