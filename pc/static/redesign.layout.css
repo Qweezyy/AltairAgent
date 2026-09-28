@@ -1163,8 +1163,9 @@ body.solo .pane { flex: 1 1 100%; }
 
 /* --- связывание телефона (QR + ссылка) --- */
 .pair-grid { display: flex; gap: var(--sp-5); align-items: flex-start; flex-wrap: wrap; }
-.pair-qr-box { background: #fff; padding: 12px; border-radius: var(--r-md); border: 1px solid var(--border); flex: none; box-shadow: var(--shadow-1); }
-.pair-qr-box svg, .pair-qr-box .pair-qr { width: 180px; height: 180px; display: block; }
+.pair-qr-box { background: #fff; padding: 0; border-radius: var(--r-md); border: 1px solid var(--border); flex: none; box-shadow: var(--shadow-1); }
+/* Its own size (whole pixels per module) — a forced size used to crop the code. */
+.pair-qr-box svg, .pair-qr-box .pair-qr { display: block; width: auto; height: auto; max-width: min(300px, 70vw); }
 .pair-qr-missing { display: grid; place-items: center; width: 180px; height: 180px; color: #555; font-size: var(--fs-xs); text-align: center; padding: 16px; }
 .pair-side { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: var(--sp-3); }
 .pair-field { display: grid; gap: 4px; }

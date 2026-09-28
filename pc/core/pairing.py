@@ -136,29 +136,48 @@ def build_pair_link(url: str, token: str, workspace: str = "") -> str:
     return "altair://pair?" + "&".join(parts)
 
 
-def qr_svg(data: str, scale: int = 6) -> str | None:
-    """SVG QR-кода для строки. None, если segno недоступна.
+#: On-screen size of the pairing QR code, in CSS pixels (a phone camera reads it off a monitor).
+QR_TARGET_PX = 300
 
-    Цвета не задаём (чёрное на прозрачном) — интерфейс раскрасит через currentColor
-    обёртки; segno рисует path'ы, читаемые в любой теме на светлой подложке.
+
+def qr_svg(data: str, target_px: int = QR_TARGET_PX) -> str | None:
+    """The pairing QR code as an SVG to put straight into the page; None without segno.
+
+    Tuned for a phone camera reading a monitor: error level L (fewer, larger modules for the
+    same link), a whole number of pixels per module with crisp edges, the full 4-module quiet
+    zone, and a viewBox so the page can resize it without cropping. The old code had no
+    viewBox while the CSS forced a smaller size, so only a corner of the code was shown and
+    no scanner could read it.
     """
     try:
         import segno
     except ImportError:
-        logger.debug("segno не установлена — QR не рисуем, отдаём только ссылку.")
+        logger.debug("segno is not installed: no QR, only the link.")
         return None
     try:
-        qr = segno.make(data, error="m")
         import io
 
-        # segno пишет SVG байтами — берём BytesIO и декодируем.
-        # Без XML-пролога, чтобы встроить прямо в DOM через innerHTML.
+        qr = segno.make(data, error="l")
+        modules = qr.symbol_size(scale=1, border=4)[0]
+        scale = max(4, target_px // modules)
         buf = io.BytesIO()
-        qr.save(buf, kind="svg", scale=scale, border=2, svgclass="pair-qr", xmldecl=False)
-        return buf.getvalue().decode("utf-8")
-    except Exception:  # noqa: BLE001 - рисование QR не критично
-        logger.debug("Не удалось нарисовать QR.", exc_info=True)
+        qr.save(buf, kind="svg", scale=scale, border=4, svgclass="pair-qr", xmldecl=False, dark="#000", light="#fff")
+        size = modules * scale
+        svg = buf.getvalue().decode("utf-8")
+        return svg.replace("<svg ", f'<svg viewBox="0 0 {size} {size}" shape-rendering="crispEdges" ', 1)
+    except Exception:  # noqa: BLE001 - the link is shown anyway
+        logger.debug("the QR code was not drawn", exc_info=True)
         return None
+
+
+def _is_auto_workspace(workspace: str, settings: Settings) -> bool:
+    from pathlib import Path
+
+    try:
+        auto = (Path(settings.app_dir) / "storage" / "chat_files").resolve()
+        return Path(workspace).resolve().is_relative_to(auto)
+    except (OSError, ValueError):
+        return False
 
 
 def pair_info(workspace: str = "", settings: Settings | None = None, port: int | None = None,
@@ -173,6 +192,10 @@ def pair_info(workspace: str = "", settings: Settings | None = None, port: int |
     url = bridge_base_url(settings, real_port, listening)
     token = ensure_bridge_token(settings)
     ws = (workspace or "").strip()
+    # A chat's own scratch folder (the app picks it when the user chose none) means nothing to
+    # the phone and makes the QR code much denser: send only a folder the user chose.
+    if ws and _is_auto_workspace(ws, settings):
+        ws = ""
     link = build_pair_link(url, token, ws)
     return {
         "url": url,
