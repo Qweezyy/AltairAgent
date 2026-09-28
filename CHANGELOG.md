@@ -33,14 +33,19 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   finished rounds of tools now fold into a one-line summary.
 - The log went silent for the rest of a session when Windows refused to rotate it (another copy
   of the app had it open).
+- **The phone pairing QR code can be scanned again.** The page cropped it to a corner, so no
+  scanner could read it; it is now shown whole, larger and sharper, and less dense.
 
 ### Planned for 0.2.0+
-- **Terminal (CLI) mode** in the packaged app: an `altair` console command that shares chats,
-  settings, models and skills with the desktop window, with an interactive mode, one-shot tasks
-  for scripts and CI (`--json`, exit codes) and resuming a desktop chat from the terminal.
-- **Linux support** for the PC agent (replace Windows-only pieces: bundled `.exe` grep with
-  system `ripgrep`, ConPTY terminal with a `pty`-based one, packaging as AppImage/deb).
-- **macOS support** for the PC agent (Unix path, `.icns` already in place).
+- **The desktop app on Linux and macOS**, not only Windows: the Tauri shell already runs there;
+  the Windows-only pieces get cross-platform ones (the built-in browser falls back to Chrome over
+  CDP where WebView2 tabs are not available, a `pty` terminal instead of ConPTY, system
+  `ripgrep`), packaged as AppImage/deb and dmg.
+- **Terminal (CLI) mode** on every OS: an `altair` console command that shares chats, settings,
+  models and skills with the desktop window, with an interactive mode, one-shot tasks for scripts
+  and CI (`--json`, exit codes) and resuming a desktop chat from the terminal.
+- **A server agent** ("second master"): Altair on a headless server that the desktop and the phone
+  connect to, so long tasks keep running while the PC is off.
 - **iOS** for the phone agent — explored via Kotlin Multiplatform (the Android core/tools/LLM
   layers are already Android-independent Kotlin); the open questions are background autonomy
   (iOS limits background work heavily) and distribution (TestFlight / sideloading).
