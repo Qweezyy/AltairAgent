@@ -455,18 +455,27 @@ not exact text — the model is non-deterministic. For a self-contained task, us
 
 ## Memory and chat search
 
-Long-term memory — `core/memory.py` (`MemoryStore`): facts in `storage/memory.json`, shared
-across chats. No embeddings — deliberately: a heavy vector DB would bloat the local exe several
-times over, and semantic search is covered by the agent rephrasing.
+Long-term memory is two folders of notes laid out the same way (`core/memory.py`):
+global — `<data dir>/memory/` (`MemoryStore`, about the user, all chats) — and project —
+`<workspace>/.agent/memory/` (`core/folder_memory.py`, `FolderMemory`). Each holds `MEMORY.md`,
+an index with one line per note (`- [Title](name.md) — gist`), and one markdown file per note: a
+header (`name`, `title`, one-line `description`, `type`: user / feedback / project / reference,
+`created`, `modified`) and the note itself. The store writes the index from the headers and
+stamps `modified` on every write, so neither drifts. No embeddings — deliberately: a heavy vector
+DB would bloat the local exe, and plain files stay readable and editable by the user.
 
-Categories: `user`, `preference` (almost always relevant — always fed into the prompt),
-`project`, `fact` (inserted on a match with the task topic). The runner calls
-`memory.prompt_section(task)` and inserts the result into the system prompt.
+Only the two indexes go into the system prompt (capped at 200 lines / 25 KB each; near the cap a
+write tells the model to tighten the index). The model opens a note with `memory_read` when it
+needs the details. The old `memory.json` and `.agent/memory.md` are moved over once on first use
+(kept aside as `*.migrated`).
 
 Chat search — `core/chat_search.py`: full-text search over the session JSON (the user/answer
 feed), ranked by the number of matched words and recency.
 
-The tools are in `core/tools/builtin/memory_tools.py`: `remember`, `recall`, `search_chats`.
+The tools are in `core/tools/builtin/memory_tools.py`: `remember` (a new note), `memory_read`,
+`memory_edit`, `memory_delete`, `recall` (search in the notes' text), `suggest_memory`,
+`search_chats`. **A note can be edited or deleted only after `memory_read` of it in the same chat,
+and only while it is unchanged since** (the user may edit the files by hand).
 Transparency — `/api/memory` (GET/DELETE) and the "🧠 Memory" button.
 
 **Rule:** memory is short facts, not a dumping ground. The agent is told in the prompt not to

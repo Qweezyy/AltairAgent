@@ -466,7 +466,8 @@ def create_app() -> FastAPI:
         store = MemoryStore(app.state.settings.data_dir)
         return {
             "facts": [
-                {"id": f.id, "text": f.text, "category": f.category, "created_at": f.created_at}
+                {"id": f.id, "title": f.title, "text": f.text, "category": f.category,
+                 "created_at": f.created_at, "modified": f.modified}
                 for f in sorted(store.all(), key=lambda f: f.created_at, reverse=True)
             ]
         }

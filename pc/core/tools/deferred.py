@@ -36,6 +36,7 @@ CORE_TOOLS = frozenset({
     "update_plan",
     "ask",
     "remember",
+    "memory_read",
     "git_diff",
     "read_skill",
 })

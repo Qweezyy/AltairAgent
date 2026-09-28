@@ -1,88 +1,54 @@
-"""Пер-папочная память агента: `.agent/memory.md` в рабочей папке.
-
-Смысл — у КАЖДОЙ папки/чата своя память (в отличие от глобальной памяти о
-пользователе). Заметки о проекте и извлечённые уроки хранятся рядом с проектом,
-человекочитаемым markdown, и АВТОМАТИЧЕСКИ подмешиваются в системный промпт — так
-агент всегда «помнит» контекст этой папки, не тратя вызовы на recall.
+"""The memory of a workspace: `<workspace>/.agent/memory/`, laid out like the global memory
+(core/memory.py): an index `MEMORY.md` and one note per file. Notes about this project —
+decisions, constraints, lessons learned — live next to the project, readable by a human.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
+from core.fs_atomic import path_lock
 from core.logging_setup import get_logger
+from core.memory import _OLD_CATEGORY, MemoryDir
 
 logger = get_logger("folder_memory")
 
-#: Сколько символов памяти папки максимум кладём в промпт (свежие — в приоритете).
-_PROMPT_LIMIT = 4000
-#: Потолок размера файла: старое подрезаем, чтобы memory.md не разрастался бесконечно.
-_FILE_LIMIT = 20_000
-_HEADER = "# Память папки\n\nЗаметки агента об этом проекте/чате: решения, договорённости, уроки.\n"
+_BULLET = re.compile(r"^- \[(?P<cat>\w+)\] (?P<date>\d{4}-\d{2}-\d{2}): (?P<text>.+)$")
 
 
-class FolderMemory:
-    """Читает и дополняет `<workspace>/.agent/memory.md`."""
+class FolderMemory(MemoryDir):
+    label = "project_memory"
+    heading = "Project memory (this workspace)"
 
     def __init__(self, workspace: Path | str) -> None:
-        self.path = Path(workspace) / ".agent" / "memory.md"
+        self.workspace = Path(workspace)
+        super().__init__(self.workspace / ".agent" / "memory")
 
-    def read(self) -> str:
-        try:
-            return self.path.read_text(encoding="utf-8")
-        except OSError:
-            return ""
-
-    def append(self, text: str, category: str = "fact") -> bool:
-        """Добавляет заметку (с датой и категорией). Дубликаты пропускает."""
-        note = " ".join((text or "").split()).strip()
-        if not note:
-            return False
-        existing = self.read()
-        if note in existing:  # грубый дедуп: точная строка уже записана
-            return False
-        line = f"- [{category}] {datetime.now():%Y-%m-%d}: {note}\n"
-        body = existing if existing.strip() else _HEADER
-        body = body.rstrip("\n") + "\n" + line
-        # Подрезаем старое, если файл слишком разросся (заголовок + свежий хвост).
-        if len(body) > _FILE_LIMIT:
-            tail = body[-(_FILE_LIMIT - len(_HEADER)) :]
-            body = _HEADER + "\n…(старые заметки подрезаны)…\n" + tail[tail.find("\n") + 1 :]
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(body, encoding="utf-8")
-        except OSError:  # pragma: no cover
-            logger.debug("Не удалось записать память папки", exc_info=True)
-            return False
-        return True
-
-    def bullet_lines(self) -> list[str]:
-        """Строки-пункты («- …») файла памяти, по порядку — для просмотра/правки."""
-        return [ln for ln in self.read().splitlines() if ln.lstrip().startswith("- ")]
-
-    def write_bullets(self, lines: list[str]) -> bool:
-        """Перезаписывает файл: заголовок + переданные пункты (для remove/replace)."""
-        body = _HEADER if not lines else _HEADER.rstrip("\n") + "\n" + "\n".join(
-            ln.rstrip() for ln in lines
-        ) + "\n"
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(body, encoding="utf-8")
-        except OSError:  # pragma: no cover
-            logger.debug("Не удалось перезаписать память папки", exc_info=True)
-            return False
-        return True
-
-    def prompt_section(self) -> str:
-        """Раздел системного промпта с памятью этой папки (или пусто)."""
-        content = self.read().strip()
-        if not content:
-            return ""
-        if len(content) > _PROMPT_LIMIT:
-            content = "…(most recent part shown)…\n" + content[-_PROMPT_LIMIT:]
-        return (
-            "<folder_memory>\nmemory.md of this workspace — context about the project:\n"
-            + content
-            + "\n</folder_memory>"
-        )
+    def _migrate(self) -> None:
+        """The bullets of the old `.agent/memory.md` become notes, once; the file is kept aside."""
+        old = self.workspace / ".agent" / "memory.md"
+        if not old.exists():
+            return
+        with path_lock(self.index_path):
+            if not old.exists():
+                return
+            try:
+                lines = old.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                return
+            for line in lines:
+                if not line.startswith("- "):
+                    continue
+                m = _BULLET.match(line.strip())
+                text = m.group("text") if m else line[2:].strip()
+                cat = m.group("cat") if m else "project"
+                date = m.group("date") if m else datetime.now().date().isoformat()
+                if text.strip():
+                    self._import(text.strip(), _OLD_CATEGORY.get(cat, "project"), f"{date}T00:00:00")
+            try:
+                old.replace(old.with_name("memory.md.migrated"))
+            except OSError:
+                logger.warning(".agent/memory.md could not be set aside after the migration")
+            self._write_index()

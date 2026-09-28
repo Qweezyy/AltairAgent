@@ -123,8 +123,8 @@ def test_prompt_sections_are_english_tagged(settings):
     assert "read_skill" in section
 
     fm = FolderMemory(settings.workspace)
-    fm.append("Tests run via pytest -q", "project")
-    assert fm.prompt_section().endswith("</folder_memory>")
+    fm.create("Test command", "Tests run via pytest -q", "project", "")
+    assert fm.prompt_section().startswith("<project_memory>") and fm.prompt_section().endswith("</project_memory>")
     assert ReminderStore(settings.data_dir).prompt_section("none") == ""
 
 

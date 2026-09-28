@@ -6,8 +6,6 @@ import pytest
 
 from core.agent.session import Session
 from core.events import ContextUsage, ShowFile, ShowHtml
-from core.memory import MemoryStore
-from core.security.approval import ApprovalRequest
 from core.tools.base import ToolContext
 from core.tools.builtin.canvas_tools import (
     AttachFileTool,
@@ -19,12 +17,6 @@ from core.tools.builtin.context_tools import (
     ContextDropTool,
     ContextInfoTool,
 )
-from core.tools.builtin.memory_tools import (
-    MemoryRemoveTool,
-    MemoryReplaceTool,
-    MemoryViewTool,
-    SuggestMemoryTool,
-)
 
 
 class Capture:
@@ -35,70 +27,6 @@ class Capture:
 
     async def __call__(self, event) -> None:
         self.events.append(event)
-
-
-# ------------------------------------------------------------------ память
-
-
-@pytest.mark.asyncio
-async def test_memory_view_remove_replace_global(ctx, settings):
-    store = MemoryStore(settings.data_dir)
-    store.remember("Пользователь любит Kotlin", category="user")
-    store.remember("Часовой пояс МСК", category="user")
-
-    view = await MemoryViewTool().run(MemoryViewTool.Args(scope="global"), ctx)
-    assert "1." in view and "Kotlin" in view and "МСК" in view
-
-    # Замена по номеру.
-    await MemoryReplaceTool().run(
-        MemoryReplaceTool.Args(scope="global", index=1, new_text="Пользователь любит Rust"), ctx
-    )
-    texts = {f.text for f in MemoryStore(settings.data_dir).all()}
-    assert "Пользователь любит Rust" in texts and "Пользователь любит Kotlin" not in texts
-
-    # Удаление по подстроке.
-    await MemoryRemoveTool().run(MemoryRemoveTool.Args(scope="global", contains="МСК"), ctx)
-    texts = {f.text for f in MemoryStore(settings.data_dir).all()}
-    assert not any("МСК" in t for t in texts)
-
-
-@pytest.mark.asyncio
-async def test_memory_folder_scope(ctx, settings):
-    from core.folder_memory import FolderMemory
-
-    fm = FolderMemory(settings.workspace)
-    fm.append("Проект собирается через gradle", "project")
-    fm.append("Тесты запускать pytest -q", "project")
-
-    view = await MemoryViewTool().run(MemoryViewTool.Args(scope="folder"), ctx)
-    assert "gradle" in view and "pytest" in view
-
-    await MemoryRemoveTool().run(MemoryRemoveTool.Args(scope="folder", index=1), ctx)
-    remaining = FolderMemory(settings.workspace).read()
-    assert "gradle" not in remaining and "pytest" in remaining
-
-    await MemoryReplaceTool().run(
-        MemoryReplaceTool.Args(scope="folder", find="pytest -q", replace="pytest -x"), ctx
-    )
-    assert "pytest -x" in FolderMemory(settings.workspace).read()
-
-
-@pytest.mark.asyncio
-async def test_suggest_memory_respects_user_choice(settings):
-    async def deny(_req: ApprovalRequest) -> bool:
-        return False
-
-    async def allow(_req: ApprovalRequest) -> bool:
-        return True
-
-    ctx_deny = ToolContext(settings=settings, approver=deny)
-    out = await SuggestMemoryTool().run(SuggestMemoryTool.Args(text="Любит чай"), ctx_deny)
-    assert "не сохранять" in out
-    assert not any("чай" in f.text for f in MemoryStore(settings.data_dir).all())
-
-    ctx_allow = ToolContext(settings=settings, approver=allow)
-    await SuggestMemoryTool().run(SuggestMemoryTool.Args(text="Любит чай"), ctx_allow)
-    assert any("чай" in f.text for f in MemoryStore(settings.data_dir).all())
 
 
 # ---------------------------------------------------------------- контекст

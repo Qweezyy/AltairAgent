@@ -165,12 +165,12 @@ workspace (for testing the sites/apps the agent builds); links out of it are ref
 
 | Tool | Cat | Description | Source |
 |------|-----|-------------|--------|
-| `remember` | read | Save a durable fact/lesson to global or folder memory. | memory_tools |
-| `recall` | read | Search long-term memory about the user/projects. | memory_tools |
-| `memory_view` | read | List memory items with numbers (global / folder). | memory_tools |
-| `memory_replace` | edit | Replace a memory item (by index, or find/replace substring). | memory_tools |
-| `memory_remove` | edit | Remove a memory item (by index or substring). | memory_tools |
-| `suggest_memory` | read | Propose a fact for the user to confirm before saving. | memory_tools |
+| `remember` | read | Save a new memory note (file with header + a line in the index): global (user/feedback) or project (project/reference). | memory_tools |
+| `memory_read` | read | Read a note in full, or the indexes (no name). Required before editing/deleting. | memory_tools |
+| `memory_edit` | edit | Change a note read in this chat (old→new text, whole body, title/description/type); index and date update. | memory_tools |
+| `memory_delete` | edit | Delete a note read in this chat. | memory_tools |
+| `recall` | read | Search the text of all memory notes. | memory_tools |
+| `suggest_memory` | read | Propose a note for the user to confirm before saving. | memory_tools |
 | `search_chats` | read | Search saved chats for what was discussed/answered before. | memory_tools |
 | `context_info` | read | Context-window usage breakdown. | context_tools |
 | `context_compress` | edit | Replace old history with a self-written summary, keeping the last N messages. | context_tools |

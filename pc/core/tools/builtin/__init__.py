@@ -95,9 +95,9 @@ from core.tools.builtin.lsp_nav_tools import CodeIntelTool
 from core.tools.builtin.lsp_tools import TypeCheckTool
 from core.tools.builtin.media_tools import VideoTool
 from core.tools.builtin.memory_tools import (
-    MemoryRemoveTool,
-    MemoryReplaceTool,
-    MemoryViewTool,
+    MemoryDeleteTool,
+    MemoryEditTool,
+    MemoryReadTool,
     RecallTool,
     RememberTool,
     SearchChatsTool,
@@ -258,14 +258,13 @@ def builtin_tools() -> list[Tool]:
         DbSchemaTool(),
         DbQueryTool(),
         DbDiagramTool(),
-        # память и поиск по чатам
+        # memory (notes + index) and search in chats
         RememberTool(),
+        MemoryReadTool(),
+        MemoryEditTool(),
+        MemoryDeleteTool(),
         RecallTool(),
         SearchChatsTool(),
-        # курирование памяти (просмотр/чистка/правка) — паритет с телефоном
-        MemoryViewTool(),
-        MemoryRemoveTool(),
-        MemoryReplaceTool(),
         SuggestMemoryTool(),
         # самоконтроль контекстного окна
         ContextInfoTool(),

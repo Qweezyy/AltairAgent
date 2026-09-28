@@ -415,9 +415,11 @@ Handy to try a different model (switch it in the input bar) or if the answer did
 ## Memory and chat search
 
 The agent remembers durable facts about you and your projects **across chats** — stack, code-style
-preferences, goals, important decisions. It saves them itself (the `remember` tool), and relevant ones
-are prepended to each new conversation. Everything is transparent: the "🧠 Memory" button in the sidebar
-shows the list of facts, any can be deleted, and there's "Erase all".
+preferences, goals, important decisions. It keeps each as a small markdown note with dates, plus a
+one-line index that every new conversation starts with; it opens a note for the details when it needs
+them, and edits a note only after reading it. There are two memories: global (about you, all chats) and
+per project (`.agent/memory/` in the project folder). Everything is transparent: they are plain files
+you can open and edit, and the "🧠 Memory" section in the settings lists them, any can be deleted.
 
 The `search_chats` tool searches saved conversations — this chat and others: "where did we discuss proxy
 setup", "what did I say about the report format". It's ordinary full-text search — fast and offline,

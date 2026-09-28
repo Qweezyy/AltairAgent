@@ -879,7 +879,7 @@ class Connection:
             store = MemoryStore(self.settings.data_dir)  # та же общая память, что у агента
             for text in incoming:
                 store.remember(text, category="fact", session_id="bridge")
-            return [f.text for f in store.all()]
+            return [note.fact for note in store.all()]
 
         facts = await asyncio.to_thread(_merge)
         await self.send({"type": "memory_sync", "facts": facts})

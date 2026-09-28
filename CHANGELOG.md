@@ -30,7 +30,16 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   key; otherwise it offers the release page. The swap waits for the app to close, keeps your own
   files in the app folder and restarts it. `UPDATE_URL=off` turns the checks off.
 
+- **Memory as notes with an index.** Each thing the agent remembers is a small markdown note with a
+  header (title, one-line gist, kind, created/modified dates) in a memory folder — global (about you)
+  and per project (`.agent/memory/`) — plus `MEMORY.md`, one line per note. Only the indexes are in
+  the agent's context; it opens a note for the details, updates an existing note instead of adding a
+  twin, and may change or delete a note only after reading it (and re-reads it if you edited the file).
+  Existing memory is moved over on first start.
+
 ### Fixed
+- The agent's browser screenshots of a tab opened while the browser panel was closed came back as a
+  single pixel (the tab had no size); hidden tabs now keep a real size.
 - Switching chats while the agent worked wrote the rest of its run into the chat on screen, and
   its own chat lost it.
 - Closing the app killed the backend on the spot: the last seconds of a running task were lost and

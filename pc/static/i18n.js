@@ -328,7 +328,7 @@
       "ins.ph": "e.g.: be concise; code comments in English; don't suggest the obvious.",
       // --- память ---
       "mem.title": "Agent memory",
-      "mem.desc": "Shared memory — facts the agent remembers across ALL chats. Each working folder also has its own memory (an <code>.agent/memory.md</code> file).",
+      "mem.desc": "Shared memory — notes the agent keeps across ALL chats (one file per note plus an index, in the app's data folder). Each working folder also has its own memory in <code>.agent/memory/</code>.",
       "mem.loading": "Loading…",
       "mem.empty": "Memory is empty",
       "mem.clear": "Clear all memory",
@@ -957,7 +957,7 @@
       "ins.desc": "Личные указания: стиль ответов, предпочтения, что всегда учитывать. Добавляются в системный промпт для всех чатов.",
       "ins.ph": "Например: пиши кратко и по делу; комментарии в коде — на русском; не предлагай очевидное.",
       "mem.title": "Память агента",
-      "mem.desc": "Общая память — факты, которые агент помнит во ВСЕХ чатах. У каждой рабочей папки есть своя память (файл <code>.agent/memory.md</code> в ней).",
+      "mem.desc": "Общая память — заметки, которые агент помнит во ВСЕХ чатах (по файлу на заметку плюс индекс, в папке данных приложения). У каждой рабочей папки есть своя память в <code>.agent/memory/</code>.",
       "mem.loading": "Загрузка…",
       "mem.empty": "Память пуста",
       "mem.clear": "Очистить всю память",
