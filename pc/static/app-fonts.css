@@ -1,5 +1,5 @@
 /* Interface fonts, bundled (the app works offline). All are open (SIL OFL 1.1).
-   The one in use is chosen in Settings → Appearance (html[data-font]); the default is Inter in the
+   The one in use is chosen in Settings → Appearance (html[data-font]); the default is Geist in the
    premium look (premium.css) and Onest in the classic one. */
 
 @font-face { font-family: "Onest"; font-style: normal; font-weight: 100 900; font-display: swap;

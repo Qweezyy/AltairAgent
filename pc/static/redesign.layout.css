@@ -1278,3 +1278,28 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 .fi-name { font-size: var(--fs-md); font-weight: 600; color: var(--text-1); }
 .fi-glyphs { font-size: 22px; line-height: 1.25; color: var(--text-1); letter-spacing: -0.01em; }
 .fi-sample { font-size: var(--fs-sm); color: var(--text-2); }
+
+/* ------------------------------------------------------------------ Alti: small lives */
+.alti-eyes { transform-box: fill-box; transform-origin: center; animation: alti-blink 5.2s var(--ease) infinite; }
+.alti-sleep .alti-eyes, .alti-happy .alti-eyes, .alti-still .alti-eyes { animation: none; }
+@keyframes alti-blink { 0%, 93%, 100% { transform: scaleY(1); } 95.5% { transform: scaleY(0.1); } }
+.alti-sleep .alti-core { animation: alti-breathe 3.6s ease-in-out infinite; }
+@keyframes alti-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.95) translateY(3%); } }
+.alti-z { color: var(--text-3); animation: alti-z 3.6s ease-in-out infinite; transform-box: fill-box; }
+@keyframes alti-z { 0% { opacity: 0; transform: translate(0, 1px) scale(0.7); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(2px, -4px) scale(1.1); } }
+.alti-happy .alti-core { animation: alti-hop 1.9s cubic-bezier(0.32, 0.72, 0, 1) infinite; }
+@keyframes alti-hop { 0%, 60%, 100% { transform: translateY(0) scale(1); } 20% { transform: translateY(-9%) scale(1.04, 0.97); } 35% { transform: translateY(0) scale(0.98, 1.03); } }
+.alti-sad .alti-core { animation: alti-droop 4s ease-in-out infinite; }
+@keyframes alti-droop { 0%, 100% { transform: rotate(-4deg) translateY(2%); } 50% { transform: rotate(-7deg) translateY(4%); } }
+.alti-help .alti-core { animation: alti-wiggle 2.4s ease-in-out infinite; }
+@keyframes alti-wiggle { 0%, 70%, 100% { transform: rotate(0); } 78% { transform: rotate(-8deg); } 86% { transform: rotate(7deg); } 94% { transform: rotate(-3deg); } }
+.alti-inline { display: inline-block; vertical-align: -0.25em; flex: none; }
+.alti-mascot:hover .alti-core { animation: alti-boop 0.6s cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes alti-boop { 0% { transform: scale(1); } 40% { transform: scale(1.12, 0.9); } 70% { transform: scale(0.96, 1.05); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .alti-eyes, .alti-z, .alti-sleep .alti-core, .alti-happy .alti-core, .alti-sad .alti-core, .alti-help .alti-core, .alti-mascot:hover .alti-core { animation: none; }
+}
+/* Where Alti appears: empty places, the running status, cards that need you. */
+.alti-empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-4); color: var(--text-3); text-align: center; font-size: var(--fs-sm); }
+.rs-alti { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; }
+.card-head .alti-mascot { flex: none; }

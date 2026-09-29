@@ -7,7 +7,7 @@
    window.Mascot.svg({ size, satellites, mood, id }) -> строка SVG.
      size       — пиксели (число или CSS-строка), по умолчанию 96.
      satellites — рисовать 2 звезды-спутника (ПК/телефон/сервер), по умолчанию true.
-     mood       — "idle" | "think" | "happy" | "help" (влияет на глаза/наклон).
+     mood       — "idle" | "think" | "happy" | "help" | "sleep" | "sad" (eyes and motion).
      id         — суффикс для уникальных id градиентов (несколько маскотов на странице).
 */
 (function () {
@@ -23,6 +23,18 @@
       // Прищур — довольные дуги.
       return `<path d="M8.9 12.7 q0.8 -1.1 1.6 0" fill="none" stroke="#241608" stroke-width="1.3" stroke-linecap="round"/>
               <path d="M13.5 12.7 q0.8 -1.1 1.6 0" fill="none" stroke="#241608" stroke-width="1.3" stroke-linecap="round"/>`;
+    }
+    if (mood === "sleep") {
+      // Asleep: closed eyes (arcs down) and a small "z" floating up (see .alti-z).
+      return `<path d="M8.9 12.3 q0.8 1.0 1.6 0" fill="none" stroke="#241608" stroke-width="1.2" stroke-linecap="round"/>
+              <path d="M13.5 12.3 q0.8 1.0 1.6 0" fill="none" stroke="#241608" stroke-width="1.2" stroke-linecap="round"/>`;
+    }
+    if (mood === "sad") {
+      // Something went wrong: brows tilted up in the middle, eyes a little lower.
+      return `<rect x="${ex1 - w / 2}" y="${ey - 0.9}" width="${w}" height="${h * 0.8}" rx="${r}" fill="#241608"/>
+              <rect x="${ex2 - w / 2}" y="${ey - 0.9}" width="${w}" height="${h * 0.8}" rx="${r}" fill="#241608"/>
+              <path d="M8.6 10.1 l1.9 -0.7" stroke="#241608" stroke-width="0.7" stroke-linecap="round"/>
+              <path d="M15.4 10.1 l-1.9 -0.7" stroke="#241608" stroke-width="0.7" stroke-linecap="round"/>`;
     }
     if (mood === "help") {
       // Тревога — глаза выше + «?».
@@ -88,8 +100,9 @@
         <path d="${STAR}" fill="url(#alti-fill-${id})" stroke="url(#alti-rim-${id})" stroke-width="0.5"/>
         <path d="${STAR}" fill="url(#alti-gloss-${id})"/>
         <ellipse cx="9.6" cy="8.7" rx="2.7" ry="1.7" fill="#fff" opacity="0.35" transform="rotate(-24 9.6 8.7)"/>
-        ${eyes(mood)}
+        <g class="alti-eyes">${eyes(mood)}</g>
       </g>
+      ${mood === "sleep" ? `<text class="alti-z" x="17.6" y="6.6" font-size="4.2" font-weight="700" fill="currentColor">z</text>` : ""}
     </svg>`;
   }
 

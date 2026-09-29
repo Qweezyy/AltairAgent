@@ -84,6 +84,13 @@ function finishThinking() {
   typeText($(".thinking-label", box), T("st.thoughtFor", { s: secs }));
 }
 function endTurn() { finishRound(); finishThinking(); state.answerEl = null; state.turnHadInline = false; clearActivity(); }
+// Alti, the mascot, in a place: a mood ("idle", "think", "happy", "help", "sleep", "sad") and a size.
+function alti(mood, size, extra = "") {
+  return window.Mascot ? window.Mascot.svg({ mood, size, satellites: size >= 40, class: "alti-inline " + extra }) : "";
+}
+function altiEmpty(text, mood = "sleep", size = 56) {
+  return `<div class="alti-empty">${alti(mood, size)}<div>${esc(text)}</div></div>`;
+}
 function clearActivity() { statusEnd(); state.reconnectEl = null; }
 
 // -------- живой статус внизу сообщения (кружок + время работы + фаза) --------
@@ -91,7 +98,7 @@ function statusStart() {
   if (state.statusEl) return;
   state.runStart = Date.now();
   state.statusMode = "wait"; state.statusModeStart = Date.now();
-  state.statusEl = append(el(`<div class="run-status"><span class="rs-dot"></span><span class="rs-phase"></span><span class="rs-time"></span></div>`));
+  state.statusEl = append(el(`<div class="run-status"><span class="rs-alti">${alti("think", 18)}</span><span class="rs-phase"></span><span class="rs-time"></span></div>`));
   statusPaint();
   clearInterval(state.statusTimer);
   state.statusTimer = setInterval(statusPaint, 1000);
@@ -758,7 +765,7 @@ const HANDLERS = {
     }
     endTurn(); setRunning(false); refreshSessions();
   },
-  "run.failed"(m) { clearActivity(); append(el(`<div class="card"><div class="card-head">${iconSvg("alert")} ${esc(T("ev.error"))}</div><div class="card-body"><div class="muted">${esc(m.message)}</div></div></div>`)); endTurn(); setRunning(false); },
+  "run.failed"(m) { clearActivity(); append(el(`<div class="card card-error"><div class="card-head">${alti("sad", 24)} ${esc(T("ev.error"))}</div><div class="card-body"><div class="muted">${esc(m.message)}</div></div></div>`)); endTurn(); setRunning(false); },
   "run.cancelled"() { clearActivity(); endTurn(); setRunning(false); },
   "steering.queued"() { toast(T("ev.steeringQueued")); },
   "reminder.fired"(m) {
@@ -866,7 +873,7 @@ function renderApproval(m) {
   const reasons = tier && (m.reasons || []).length
     ? `<ul class="approval-reasons">${(m.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`
     : "";
-  const card = el(`<div class="card" data-approval="${m.request_id}"><div class="card-head">${iconSvg("shield")} ${esc(T("ap.title"))} ${badge}</div><div class="card-body"><div><b>${esc(m.name)}</b> — ${esc(m.reason || "")}</div>${reasons}<div class="approval-meta">${esc(JSON.stringify(m.args || {}).slice(0, 500))}</div></div><div class="card-actions"><button class="btn btn-primary" data-scope="once">${esc(T("ap.allowOnce"))}</button><button class="btn btn-outline" data-scope="project">${esc(T("ap.allowProject"))}</button><button class="btn btn-outline" data-scope="global">${esc(T("ap.allowGlobal"))}</button><span class="grow"></span><button class="btn btn-danger" data-scope="deny">${esc(T("ap.deny"))}</button></div></div>`);
+  const card = el(`<div class="card" data-approval="${m.request_id}"><div class="card-head">${alti("help", 24)} ${esc(T("ap.title"))} ${badge}</div><div class="card-body"><div><b>${esc(m.name)}</b> — ${esc(m.reason || "")}</div>${reasons}<div class="approval-meta">${esc(JSON.stringify(m.args || {}).slice(0, 500))}</div></div><div class="card-actions"><button class="btn btn-primary" data-scope="once">${esc(T("ap.allowOnce"))}</button><button class="btn btn-outline" data-scope="project">${esc(T("ap.allowProject"))}</button><button class="btn btn-outline" data-scope="global">${esc(T("ap.allowGlobal"))}</button><span class="grow"></span><button class="btn btn-danger" data-scope="deny">${esc(T("ap.deny"))}</button></div></div>`);
   $$("[data-scope]", card).forEach((b) => b.addEventListener("click", () => { send({ type: "approval", request_id: m.request_id, scope: b.dataset.scope }); card.remove(); }));
   append(card);
 }
@@ -878,7 +885,7 @@ function renderQuestion(m) {
     const opts = (q.options || []).map((o, oi) => `<button class="q-opt" data-q="${qi}" data-o="${oi}"><div class="grow"><div class="q-opt-label">${esc(o.label)}${o.recommended ? ` <span class="q-opt-rec">${esc(T("q.recommend"))}</span>` : ""}</div>${o.description ? `<div class="q-opt-desc">${esc(o.description)}</div>` : ""}</div></button>`).join("");
     return `<div class="q-block"><div class="q-title">${esc(q.question)}</div><div class="q-opts">${opts}</div></div>`;
   }).join("");
-  const card = el(`<div class="card"><div class="card-head">${iconSvg("message")} ${esc(T("q.title"))}</div><div class="card-body">${blocks}</div><div class="card-actions"><button class="btn btn-ghost" id="q-skip">${esc(T("q.decide"))}</button><span class="grow"></span><button class="btn btn-primary" id="q-send">${esc(T("q.answer"))}</button></div></div>`);
+  const card = el(`<div class="card"><div class="card-head">${alti("help", 24)} ${esc(T("q.title"))}</div><div class="card-body">${blocks}</div><div class="card-actions"><button class="btn btn-ghost" id="q-skip">${esc(T("q.decide"))}</button><span class="grow"></span><button class="btn btn-primary" id="q-send">${esc(T("q.answer"))}</button></div></div>`);
   const multi = (qi) => m.questions[qi].kind === "multiple";
   $$(".q-opt", card).forEach((b) => b.addEventListener("click", () => {
     const qi = b.dataset.q, oi = +b.dataset.o, label = m.questions[qi].options[oi].label;
@@ -1047,7 +1054,7 @@ function renderSessions(list) {
   // The new chat shows up right after the user's first message, before the server has it.
   const pending = state.pendingChat && !list.some((x) => x.id === state.pendingChat.id) ? [state.pendingChat] : [];
   const all = [...pending, ...list];
-  els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.chats"))}</div>` + (all.length ? "" : `<div class="dim" style="padding:8px 12px">${esc(T("side.empty"))}</div>`);
+  els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.chats"))}</div>` + (all.length ? "" : altiEmpty(T("side.empty"), "sleep", 48));
   for (const s of all) els.sessions.appendChild(sessionRow(s));
 }
 // Inline rename in the rail (also from the chat title in the header).
@@ -1084,7 +1091,7 @@ async function renderSearch(q) {
   let d; try { d = await (await fetch(`/api/sessions/search?q=${encodeURIComponent(q)}`)).json(); } catch { return; }
   if ((($("#session-search")?.value) || "").trim() !== q) return;  // typed on meanwhile
   const res = d.results || [];
-  els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.found", { n: res.length }))}</div>` + (res.length ? "" : `<div class="dim" style="padding:8px 12px">${esc(T("side.notFound"))}</div>`);
+  els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.found", { n: res.length }))}</div>` + (res.length ? "" : altiEmpty(T("side.notFound"), "sad", 44));
   const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
   const mark = (text) => { let h = esc(text); words.forEach((w) => { h = h.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (x) => `<mark>${x}</mark>`); }); return h; };
   for (const r of res) {
@@ -1428,7 +1435,7 @@ async function loadDiff() {
     const d = await (await fetch(`/api/git/diff?workspace=${encodeURIComponent(state.workspace)}`)).json();
     if (!d.available) { v.innerHTML = `<div class="empty">${iconSvg("git", "icon")}<div>${esc(d.reason || T("diff.noRepo"))}</div></div>`; return; }
     const head = `<div class="preview-tools"><span class="chip">${iconSvg("git", "icon icon-sm")} ${esc(d.branch || "")}</span><span class="grow"></span><button class="btn btn-outline" id="diff-refresh">${iconSvg("refresh", "icon icon-sm")} ${esc(T("a.refresh"))}</button></div>`;
-    if (!d.diff?.trim() && !(d.untracked || []).length) { v.innerHTML = head + `<div class="empty">${iconSvg("check", "icon")}<div>${esc(T("diff.noChanges"))}</div></div>`; }
+    if (!d.diff?.trim() && !(d.untracked || []).length) { v.innerHTML = head + altiEmpty(T("diff.noChanges"), "happy", 56); }
     else { v.innerHTML = head + `<div class="diff">${renderDiff(d.diff || "")}${(d.untracked || []).map((f) => `<div class="diff-line diff-add">＋ ${esc(T("diff.newFile", { f }))}</div>`).join("")}</div>`; }
     $("#diff-refresh", v).addEventListener("click", loadDiff);
     $$("[data-revert-hunk]", v).forEach((b) => b.addEventListener("click", async () => {
@@ -2215,7 +2222,7 @@ async function openTrash() {
   try { list = (await (await fetch("/api/trash/sessions")).json()).sessions || []; } catch {}
   const body = list.length
     ? `<div class="trash-list">${list.map((s) => `<div class="trash-item" data-id="${escAttr(s.id)}"><div class="grow" style="min-width:0"><div class="trash-title truncate">${esc(dispTitle(s.title) || T("side.untitled"))}</div><div class="trash-meta">${esc(T("trash.msgs", { n: s.message_count || 0 }))}</div></div><button class="btn btn-outline btn-sm" data-restore>${esc(T("trash.restore"))}</button></div>`).join("")}</div>`
-    : `<div class="empty" style="padding:24px;text-align:center;color:var(--text-3)">${esc(T("trash.empty"))}</div>`;
+    : altiEmpty(T("trash.empty"), "sleep", 56);
   const { overlay, close } = openModal({ title: T("trash.title"), bodyHtml: body });
   $$(".trash-item [data-restore]", overlay).forEach((b) => b.addEventListener("click", async () => {
     const id = b.closest(".trash-item").dataset.id;
@@ -2517,7 +2524,7 @@ async function renderMemorySection(main) {
     const facts = ((await (await fetch("/api/memory")).json()).facts) || [];
     const byCat = {}; facts.forEach((f) => { (byCat[f.category] = byCat[f.category] || []).push(f); });
     const box = $("#mem-list", main); box.classList.remove("dim");
-    box.innerHTML = facts.length ? (Object.entries(byCat).map(([cat, list]) => `<div class="cat-label">${esc(cat)}</div>` + list.map((f) => `<div class="list-row"><span class="grow lr-title">${f.title && f.title !== f.text ? `<b>${esc(f.title)}</b> — ` : ""}${esc(f.text)}</span><button class="btn-icon small" data-forget="${f.id}" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</button></div>`).join("")).join("") + `<button class="btn btn-danger" id="mem-clear" style="margin-top:14px">${esc(T("mem.clear"))}</button>`) : `<div class="empty">${iconSvg("brain", "icon")}<div>${esc(T("mem.empty"))}</div></div>`;
+    box.innerHTML = facts.length ? (Object.entries(byCat).map(([cat, list]) => `<div class="cat-label">${esc(cat)}</div>` + list.map((f) => `<div class="list-row"><span class="grow lr-title">${f.title && f.title !== f.text ? `<b>${esc(f.title)}</b> — ` : ""}${esc(f.text)}</span><button class="btn-icon small" data-forget="${f.id}" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</button></div>`).join("")).join("") + `<button class="btn btn-danger" id="mem-clear" style="margin-top:14px">${esc(T("mem.clear"))}</button>`) : altiEmpty(T("mem.empty"), "sleep", 64);
     $$("[data-forget]", box).forEach((b) => b.addEventListener("click", async () => { await fetch(`/api/memory/${b.dataset.forget}`, { method: "DELETE" }); b.closest(".list-row").remove(); }));
     $("#mem-clear", box)?.addEventListener("click", async () => { if (await confirmDialog({ message: T("mem.clearConfirm"), danger: true })) { await fetch("/api/memory/all", { method: "DELETE" }); renderMemorySection(main); } });
   } catch { $("#mem-list", main).textContent = T("mem.loadError"); }
@@ -2638,7 +2645,7 @@ function openUpdate() {
   const d = state.updateInfo || {};
   const notes = d.notes ? `<div class="md upd-notes"></div>` : "";
   const why = d.available && !d.installable && d.error ? `<p class="muted">${esc(d.error)}</p>` : "";
-  const body = d.available ? `<p>${esc(T("upd.newVersion", { version: d.version || "" }))}${state.version ? esc(T("upd.youHave", { cur: state.version })) : ""}</p>${why}${notes}` : `<div class="empty">${iconSvg("check", "icon")}<div>${esc(T("upd.upToDate"))}${state.version ? ` (${esc(state.version)})` : ""}</div></div>`;
+  const body = d.available ? `<p>${esc(T("upd.newVersion", { version: d.version || "" }))}${state.version ? esc(T("upd.youHave", { cur: state.version })) : ""}</p>${why}${notes}` : altiEmpty(T("upd.upToDate") + (state.version ? ` (${state.version})` : ""), "happy", 64);
   let foot = "";
   if (d.available && d.installable) foot = `<span class="grow"></span><button class="btn btn-primary" id="upd-install">${esc(T("upd.install"))}</button>`;
   else if (d.available && d.page) foot = `<span class="grow"></span><a class="btn" href="${escAttr(d.page)}" target="_blank" rel="noopener">${esc(T("upd.download"))}</a>`;
@@ -2712,16 +2719,16 @@ const THEMES = [
 ];
 const FONT_KEY = "agent_font";
 const FONTS = [
-  { id: "inter", name: "Inter", css: "'Inter Var', sans-serif" },
   { id: "geist", name: "Geist", css: "'Geist', sans-serif" },
+  { id: "inter", name: "Inter", css: "'Inter Var', sans-serif" },
   { id: "onest", name: "Onest", css: "'Onest', sans-serif" },
   { id: "wix", name: "Wix Madefor", css: "'Wix Madefor Text', sans-serif" },
   { id: "golos", name: "Golos Text", css: "'Golos Text', sans-serif" },
   { id: "manrope", name: "Manrope", css: "'Manrope', sans-serif" },
   { id: "system", name: "System", css: "system-ui, 'Segoe UI', sans-serif" },
 ];
-// The font used when none is chosen: Inter in the premium look, Onest in the classic one.
-const defaultFont = () => (document.documentElement.dataset.ui === "classic" ? "onest" : "inter");
+// The font used when none is chosen: Geist in the premium look, Onest in the classic one.
+const defaultFont = () => (document.documentElement.dataset.ui === "classic" ? "onest" : "geist");
 function applyFont(id) {
   if (!id || id === defaultFont()) { delete document.documentElement.dataset.font; LS.set(FONT_KEY, ""); }
   else { document.documentElement.dataset.font = id; LS.set(FONT_KEY, id); }
