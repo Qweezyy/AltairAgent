@@ -2299,7 +2299,8 @@ function renderSettingsSection(sec, main, s) {
     render();
   } else if (sec === "appearance") {
     const cur = LS.get(THEME_KEY, "") || "system";
-    const curFont = LS.get(FONT_KEY, "") || "onest";
+    const curFont = LS.get(FONT_KEY, "") || defaultFont();
+    const curUi = document.documentElement.dataset.ui === "classic" ? "classic" : "premium";
     const accentHue = LS.get("accent_hue", "");
     const dark = effectiveDark();
     const bgStyles = dark ? [["nebula", T("appear.bgNebula")], ["amoled", T("appear.bgAmoled")]] : [["dawn", T("appear.bgDawn")], ["aurora", T("appear.bgAurora")]];
@@ -2308,8 +2309,9 @@ function renderSettingsSection(sec, main, s) {
     const curIcon = currentAppIcon();
     main.innerHTML = `<div class="settings-section"><h2>${esc(T("appear.title"))}</h2>
       <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.language"))}</div><div class="sr-desc">${esc(T("appear.languageDesc"))}</div></div><div class="sr-control"><div class="theme-seg" id="lang-seg">${[["en", "English"], ["ru", "Русский"]].map(([v, t]) => `<button data-lang="${v}" class="${curLang === v ? "on" : ""}">${esc(t)}</button>`).join("")}</div></div></div>
+      <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.uiStyle"))}</div><div class="sr-desc">${esc(T("appear.uiStyleDesc"))}</div></div><div class="sr-control"><div class="theme-seg" id="ui-seg">${[["premium", T("appear.uiPremium")], ["classic", T("appear.uiClassic")]].map(([v, t]) => `<button data-ui="${v}" class="${curUi === v ? "on" : ""}">${esc(t)}</button>`).join("")}</div></div></div>
       <div class="setting-block"><div class="sr-title">${esc(T("appear.theme"))}</div><div class="sr-desc">${esc(T("appear.themeDesc"))}</div><div class="theme-cards" id="theme-cards">${THEMES.map((th) => `<button class="theme-card ${cur === th.id ? "on" : ""}" data-t="${th.id}" type="button"><span class="tc-preview" style="--p-bg:${th.bg};--p-rail:${th.rail};--p-text:${th.text}"><span class="tc-rail"></span><span class="tc-lines"><i></i><i></i><i></i></span></span><span class="tc-name">${esc(T("theme." + th.id))}</span></button>`).join("")}</div></div>
-      <div class="setting-block"><div class="sr-title">${esc(T("appear.font"))}</div><div class="sr-desc">${esc(T("appear.fontDesc"))}</div><div class="font-list" id="font-list">${FONTS.map((f) => `<button class="font-item ${curFont === f.id ? "on" : ""}" data-font="${f.id}" type="button" style="font-family:${f.css}"><span class="fi-name">${esc(f.name)}</span><span class="fi-sample">${esc(T("appear.fontSample"))}</span></button>`).join("")}</div></div>
+      <div class="setting-block"><div class="sr-title">${esc(T("appear.font"))}</div><div class="sr-desc">${esc(T("appear.fontDesc"))}</div><div class="font-list" id="font-list">${FONTS.map((f) => `<button class="font-item ${curFont === f.id ? "on" : ""}" data-font="${f.id}" type="button" style="font-family:${f.css}"><span class="fi-name">${esc(f.name)}</span><span class="fi-glyphs">Aa Бб Яя 0123</span><span class="fi-sample">${esc(T("appear.fontSample"))}</span></button>`).join("")}</div></div>
       <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.accent"))}</div><div class="sr-desc">${esc(T("appear.accentDesc"))}</div></div><div class="sr-control"><div class="swatches" id="swatches">${ACCENTS.map((a) => `<div class="swatch ${String(a.hue ?? "") === accentHue ? "on" : ""}" data-hue="${a.hue ?? ""}" title="${esc(T(a.key))}" style="background:${a.hue == null ? "hsl(15 56% 57%)" : `hsl(${a.hue} 62% 55%)`}"></div>`).join("")}</div></div></div>
       <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.bg"))}</div><div class="sr-desc">${esc(dark ? T("appear.bgDescDark") : T("appear.bgDescLight"))}</div></div><div class="sr-control"><div class="theme-seg" id="cosmos-seg">${bgStyles.map(([v, t]) => `<button data-bg="${v}" class="${curBg === v ? "on" : ""}">${esc(t)}</button>`).join("")}</div></div></div>
       ${appIconSupported() ? `<div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.icon"))}</div><div class="sr-desc">${esc(T("appear.iconDesc"))}</div></div><div class="sr-control"><div class="icon-swatches" id="icon-swatches">${APP_ICONS.map((v) => `<button class="icon-swatch ${v === curIcon ? "on" : ""}" data-icon="${v}" title="${esc(T("appIcon." + v))}"><img src="/static/icons/variants/${v}.png?v=60" alt="${esc(v)}" /></button>`).join("")}</div></div></div>` : ""}
@@ -2321,6 +2323,7 @@ function renderSettingsSection(sec, main, s) {
     }));
     $$("#theme-cards .theme-card", main).forEach((b) => b.addEventListener("click", () => { applyTheme(b.dataset.t === "system" ? "" : b.dataset.t); renderSettingsSection("appearance", main, s); }));
     $$("#font-list .font-item", main).forEach((b) => b.addEventListener("click", () => { applyFont(b.dataset.font); $$("#font-list .font-item", main).forEach((x) => x.classList.toggle("on", x === b)); }));
+    $$("#ui-seg button", main).forEach((b) => b.addEventListener("click", () => { applyUiStyle(b.dataset.ui); applyFont(LS.get(FONT_KEY, "")); renderSettingsSection("appearance", main, s); }));
     $$("#swatches .swatch", main).forEach((sw) => sw.addEventListener("click", () => { applyAccent(sw.dataset.hue === "" ? null : +sw.dataset.hue); $$("#swatches .swatch", main).forEach((x) => x.classList.toggle("on", x === sw)); }));
     $$("#cosmos-seg button", main).forEach((b) => b.addEventListener("click", () => { window.Cosmos?.setStyle(b.dataset.bg); $$("#cosmos-seg button", main).forEach((x) => x.classList.toggle("on", x === b)); }));
     $$("#icon-swatches .icon-swatch", main).forEach((b) => b.addEventListener("click", () => { setAppIcon(b.dataset.icon); $$("#icon-swatches .icon-swatch", main).forEach((x) => x.classList.toggle("on", x === b)); }));
@@ -2709,17 +2712,28 @@ const THEMES = [
 ];
 const FONT_KEY = "agent_font";
 const FONTS = [
+  { id: "inter", name: "Inter", css: "'Inter Var', sans-serif" },
+  { id: "geist", name: "Geist", css: "'Geist', sans-serif" },
   { id: "onest", name: "Onest", css: "'Onest', sans-serif" },
-  { id: "manrope", name: "Manrope", css: "'Manrope', sans-serif" },
+  { id: "wix", name: "Wix Madefor", css: "'Wix Madefor Text', sans-serif" },
   { id: "golos", name: "Golos Text", css: "'Golos Text', sans-serif" },
-  { id: "inter", name: "Inter", css: "'Inter', sans-serif" },
-  { id: "plex", name: "IBM Plex Sans", css: "'IBM Plex Sans', sans-serif" },
+  { id: "manrope", name: "Manrope", css: "'Manrope', sans-serif" },
   { id: "system", name: "System", css: "system-ui, 'Segoe UI', sans-serif" },
 ];
+// The font used when none is chosen: Inter in the premium look, Onest in the classic one.
+const defaultFont = () => (document.documentElement.dataset.ui === "classic" ? "onest" : "inter");
 function applyFont(id) {
-  if (!id || id === "onest") { delete document.documentElement.dataset.font; LS.set(FONT_KEY, ""); }
+  if (!id || id === defaultFont()) { delete document.documentElement.dataset.font; LS.set(FONT_KEY, ""); }
   else { document.documentElement.dataset.font = id; LS.set(FONT_KEY, id); }
   window.AgentTerminal?.applyTheme?.();
+}
+// The interface style: premium (premium.css on) or classic (the look before the redesign).
+const UI_KEY = "agent_ui";
+function applyUiStyle(style) {
+  const classic = style === "classic";
+  document.documentElement.dataset.ui = classic ? "classic" : "premium";
+  const link = document.getElementById("premium-css"); if (link) link.disabled = classic;
+  LS.set(UI_KEY, classic ? "classic" : "");
 }
 function applyTheme(theme) {
   const th = THEMES.find((x) => x.id === theme && x.scheme);

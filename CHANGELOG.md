@@ -15,8 +15,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **A premium look.** Larger type and controls, layered surfaces with soft highlights, generous
+  radii, a glassy header, menus and toasts, and the accent used on purpose: primary actions, focus
+  rings, the selected chat and settings section, what is running. Settings → Appearance →
+  Interface style → Classic brings back the look from before.
 - **Themes and fonts.** Five themes (Black, Dark, Graphite, Light, White) or the system's, and a choice
-  of bundled fonts (Onest by default, Manrope, Golos Text, Inter, IBM Plex Sans or the system font) in
+  of bundled fonts (Inter by default, Geist, Onest, Wix Madefor, Golos Text, Manrope or the system font;
+  code in JetBrains Mono) in
   Settings → Appearance.
 - **Your profile.** The row of buttons at the bottom of the chat list is one button with your avatar and
   name; it opens the settings (theme and updates moved there, "Recently deleted" to the ⋯ menu). Set any

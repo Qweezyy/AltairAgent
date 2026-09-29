@@ -9,9 +9,10 @@
   <link rel="stylesheet" href="/static/vendor/highlight.min.css" />
   <link rel="stylesheet" href="/static/vendor/katex/katex.min.css" />
   <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
-  <link rel="stylesheet" href="/static/redesign.css?v=80" />
-  <link rel="stylesheet" href="/static/redesign.layout.css?v=80" />
-  <link rel="stylesheet" href="/static/app-fonts.css?v=80" />
+  <link rel="stylesheet" href="/static/redesign.css?v=81" />
+  <link rel="stylesheet" href="/static/redesign.layout.css?v=81" />
+  <link rel="stylesheet" href="/static/app-fonts.css?v=81" />
+  <link rel="stylesheet" href="/static/premium.css?v=81" id="premium-css" />
   <script>
     // Пред-покраска темы до первого кадра, чтобы не мигало
     (function () {
@@ -23,12 +24,16 @@
         if (scheme) root.dataset.theme = scheme;
         else if (window.matchMedia("(prefers-color-scheme: light)").matches) root.dataset.theme = "light";
         if (t === "black" || t === "graphite" || t === "snow") root.dataset.palette = t;
+        // The premium look is the default; "classic" turns premium.css off (see applyUiStyle).
+        const classic = localStorage.getItem("agent_ui") === "classic";
+        root.dataset.ui = classic ? "classic" : "premium";
+        if (classic) document.getElementById("premium-css").disabled = true;
         const f = localStorage.getItem("agent_font");
         if (f) root.dataset.font = f;
       } catch (e) {}
     })();
   </script>
-  <script src="/static/i18n.js?v=80"></script>
+  <script src="/static/i18n.js?v=81"></script>
 </head>
 <body>
   <!-- Иконки: набор Lucide (MIT), 24×24, штрих 2. Id сохранены. -->
@@ -236,13 +241,13 @@
   <script src="/static/vendor/mermaid/mermaid.min.js" defer></script>
   <script src="/static/vendor/xterm/xterm.js"></script>
   <script src="/static/vendor/xterm/addon-fit.js"></script>
-  <script src="/static/math.js?v=80"></script>
-  <script src="/static/terminal.js?v=80"></script>
-  <script src="/static/mascot.js?v=80"></script>
-  <script src="/static/cosmos.js?v=80"></script>
-  <script src="/static/onboarding.js?v=80"></script>
-  <script src="/static/redesign.js?v=80"></script>
-  <script src="/static/browser.js?v=80"></script>
-  <script src="/static/extensions.js?v=80"></script>
+  <script src="/static/math.js?v=81"></script>
+  <script src="/static/terminal.js?v=81"></script>
+  <script src="/static/mascot.js?v=81"></script>
+  <script src="/static/cosmos.js?v=81"></script>
+  <script src="/static/onboarding.js?v=81"></script>
+  <script src="/static/redesign.js?v=81"></script>
+  <script src="/static/browser.js?v=81"></script>
+  <script src="/static/extensions.js?v=81"></script>
 </body>
 </html>

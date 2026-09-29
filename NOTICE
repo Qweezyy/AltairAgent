@@ -11,4 +11,5 @@ each under its own license (e.g. FastAPI, Uvicorn, ripgrep, Jetpack Compose,
 Ktor, OkHttp, and others). Their licenses apply to those components.
 
 The desktop interface bundles these fonts under the SIL Open Font License 1.1:
-Onest, Manrope, Golos Text, IBM Plex Sans, Inter, IBM Plex Mono and Unbounded.
+Inter, Geist, Onest, Wix Madefor Text, Golos Text, Manrope, JetBrains Mono,
+IBM Plex Mono and Unbounded.

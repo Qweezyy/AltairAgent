@@ -1276,4 +1276,5 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 .font-item:hover { border-color: var(--border-strong); }
 .font-item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .fi-name { font-size: var(--fs-md); font-weight: 600; color: var(--text-1); }
+.fi-glyphs { font-size: 22px; line-height: 1.25; color: var(--text-1); letter-spacing: -0.01em; }
 .fi-sample { font-size: var(--fs-sm); color: var(--text-2); }
