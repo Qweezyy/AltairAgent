@@ -82,7 +82,15 @@ def run_server(host: str, port: int) -> None:
     config = uvicorn.Config(app, host=host, port=port, log_level="warning", ws_ping_interval=30,
                             timeout_graceful_shutdown=3)
     _SERVER = uvicorn.Server(config)
-    _SERVER.run()
+    # The terminal (altair) finds this backend by this file and talks to it: the same chats,
+    # live, in the window and in the terminal.
+    from core.backend_info import advertise, withdraw
+
+    advertise(port)
+    try:
+        _SERVER.run()
+    finally:
+        withdraw()
 
 
 def _graceful_exit(reason: str) -> None:

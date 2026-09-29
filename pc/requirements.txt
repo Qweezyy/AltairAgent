@@ -19,6 +19,8 @@ beautifulsoup4>=4.12,<5
 # ConPTY на Windows. Без него панель терминала покажет сообщение, что движок
 # не установлен, но остальное приложение работает.
 pywinpty>=2.0,<4; sys_platform == "win32"
+# Linux and macOS: the terminal panel runs on a POSIX pty.
+ptyprocess>=0.7,<1; sys_platform != "win32"
 
 # --- Глубокое исследование ---
 # Без этих пакетов агент работает, но deep_research не прочитает PDF и Excel,

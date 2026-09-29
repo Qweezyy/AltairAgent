@@ -15,6 +15,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **Terminal: `altair`.** The same agent and chats in a terminal: an interactive mode, one-shot tasks for
+  scripts and CI (`-p`, the task from stdin, `--output-format json|stream-json`, exit codes 0/1/2),
+  continuing the latest chat (`-c`) or any chat by id or title (`-r`), also one started in the window.
+  When the desktop app runs, `altair` joins it (a chat shows up live in both); otherwise it starts the
+  backend in the background. `install.ps1` puts it on PATH.
+- **Long chats open fast.** A chat opens at its end and draws earlier parts as you scroll up to them.
+- **Old file writes stop filling the context.** With the old tool outputs, the text of old
+  `write_file` / `edit_file` / `apply_patch` calls leaves the model's view (the file holds it; the chat
+  keeps everything).
+- **Linux and macOS builds** from CI (`Build desktop` workflow): the backend, the Tauri window and the
+  terminal command; the terminal panel uses a POSIX pty there.
 - **Chats work in the background.** A task keeps running when you open another chat, reload the
   window or minimize the app; the chat list marks the chats at work, and opening one shows its run
   live. Approvals and questions of a chat nobody has open wait for you, with a notice naming the chat.

@@ -1232,3 +1232,7 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 .feed-inner > .msg-user, .feed-inner > .msg-agent, .feed-inner > .tools, .feed-inner > .thinking {
   content-visibility: auto; contain-intrinsic-size: auto 120px;
 }
+
+/* The top of a long chat drawn in parts: the earlier part loads on reaching it. */
+.feed-earlier { display: block; margin: 0 auto var(--sp-4); padding: var(--sp-2) var(--sp-4); border: 1px dashed var(--border); border-radius: var(--r-md); background: none; color: var(--text-3); font-size: var(--fs-xs); cursor: pointer; }
+.feed-earlier:hover { color: var(--text-1); }

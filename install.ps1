@@ -108,7 +108,8 @@ try {
         }
 
         # Locate the launch exe (Altair shell preferred, else the backend exe).
-        $exe = Get-ChildItem $Root -Recurse -Filter "$AppName.exe" | Select-Object -First 1
+        # Not bin\altair.exe (the terminal command): Windows file names ignore case.
+        $exe = Get-ChildItem $Root -Recurse -Filter "$AppName.exe" | Where-Object { $_.Directory.Name -ne "bin" } | Select-Object -First 1
         if (-not $exe) { $exe = Get-ChildItem $Root -Recurse -Filter "LocalAIAgent.exe" | Select-Object -First 1 }
         if (-not $exe) { throw "Couldn't find the application executable in the archive." }
 
@@ -123,6 +124,17 @@ try {
             $lnk.Save()
         }
         Ok "$AppName installed into $Root (shortcuts created)."
+        # The terminal command `altair` (altair.exe next to the app): the app folder goes on the
+        # user's PATH, so it works in any new terminal. ALTAIR_NO_PATH=1 skips this.
+        $cli = Get-ChildItem (Join-Path $Root "bin") -Filter "altair.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($cli -and -not $env:ALTAIR_NO_PATH) {
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            $parts = @($userPath -split ";" | Where-Object { $_ })
+            if ($parts -notcontains $cli.DirectoryName) {
+                [Environment]::SetEnvironmentVariable("Path", (($parts + $cli.DirectoryName) -join ";"), "User")
+                Ok "Terminal command 'altair' added to PATH (open a new terminal to use it)."
+            }
+        }
 
         $wv2 = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
         $hasWebView2 = @(

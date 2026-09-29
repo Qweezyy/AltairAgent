@@ -897,6 +897,7 @@ function loadSession(session) {
   state.artifacts.clear(); state.undoable.clear();
   (session.artifacts || []).forEach((a) => state.artifacts.set(a.path, a));
   renderArtifacts();
+  state.feedRest = null;
   els.feedInner.innerHTML = ""; state.userTurn = 0;
   const tl = session.timeline || [];
   // Помним последний чат с содержимым — чтобы вернуть его при следующем запуске.
@@ -907,22 +908,72 @@ function loadSession(session) {
   // first message of a new chat).
   window.Cosmos?.unmount();
   els.app?.classList.remove("welcome-active", "welcome-leaving");
-  let group = null;
-  const closeGroup = () => { if (group) { finalizeHistoryRound(group); group = null; } };
-  for (const e of tl) {
-    if (e.kind === "user") { closeGroup(); els.feedInner.appendChild(userBlock(e.text, e.attachments, state.userTurn++)); }
-    else if (e.kind === "step") { if (!group) { group = startHistoryRound(); els.feedInner.appendChild(group); } historyAddRow(group, e); }
-    else if (e.kind === "text") { closeGroup(); if ((e.text || "").trim()) { const n = el(`<div class="msg-agent"><div class="answer-body md"></div></div>`); renderFinal($(".answer-body", n), e.text); els.feedInner.appendChild(n); } }
-    else if (e.kind === "image") { closeGroup(); els.feedInner.appendChild(mediaFigure({ ...e, kind: "image" })); }
-    else if (e.kind === "media") { closeGroup(); els.feedInner.appendChild(mediaFigure({ ...e, kind: e.media_kind || "file" })); }
-    else if (e.kind === "widget") { closeGroup(); els.feedInner.appendChild(widgetFigure(e.html, e.widget_kind, e.caption)); }
-    else if (e.kind === "answer") { closeGroup(); const n = el(`<div class="msg-agent">${(e.text || "").trim() ? `<div class="answer-body md"></div>` : ""}</div>`); if ((e.text || "").trim()) renderFinal($(".answer-body", n), e.text); addAnswerFooter(n, { text: e.full || e.text, duration_ms: e.duration_ms || 0, run_id: e.run_id }, state.userTurn - 1); els.feedInner.appendChild(n); }
-    else if (e.kind === "wake") { closeGroup(); els.feedInner.appendChild(reminderLine(e.text)); }
-    else if (e.kind === "error") { closeGroup(); els.feedInner.appendChild(el(`<div class="card"><div class="card-head">${iconSvg("alert")} ${esc(T("ev.error"))}</div><div class="card-body"><div class="muted">${esc(e.text)}</div></div></div>`)); }
-  }
-  closeGroup();
+  // A long chat opens at its end: only the last part is drawn, the earlier parts when you
+  // scroll up to them (a chat of thousands of steps used to take seconds to open).
+  let from = feedChunkStart(tl, tl.length);
+  const turn0 = countUserTurns(tl, from);
+  els.feedInner.appendChild(renderTimeline(tl.slice(from), turn0));
+  state.userTurn = turn0 + countUserTurns(tl.slice(from), Infinity);
+  state.feedRest = from > 0 ? { tl, end: from } : null;
+  if (state.feedRest) addEarlierSentinel();
   scrollFeed(true);
   updateWorkspaceLock();
+}
+const FEED_CHUNK = 160;
+// Where the chunk before `end` starts: FEED_CHUNK entries back, moved to a user message so a
+// round of tools is never split across chunks.
+function feedChunkStart(tl, end) {
+  let from = Math.max(0, end - FEED_CHUNK);
+  while (from > 0 && tl[from].kind !== "user") from--;
+  return from;
+}
+function countUserTurns(tl, end) {
+  let n = 0; const stop = Math.min(end, tl.length);
+  for (let i = 0; i < stop; i++) if (tl[i].kind === "user") n++;
+  return n;
+}
+function renderTimeline(entries, turn0) {
+  const frag = document.createDocumentFragment();
+  let turn = turn0;
+  let group = null;
+  const closeGroup = () => { if (group) { finalizeHistoryRound(group); group = null; } };
+  for (const e of entries) {
+    if (e.kind === "user") { closeGroup(); frag.appendChild(userBlock(e.text, e.attachments, turn++)); }
+    else if (e.kind === "step") { if (!group) { group = startHistoryRound(); frag.appendChild(group); } historyAddRow(group, e); }
+    else if (e.kind === "text") { closeGroup(); if ((e.text || "").trim()) { const n = el(`<div class="msg-agent"><div class="answer-body md"></div></div>`); renderFinal($(".answer-body", n), e.text); frag.appendChild(n); } }
+    else if (e.kind === "image") { closeGroup(); frag.appendChild(mediaFigure({ ...e, kind: "image" })); }
+    else if (e.kind === "media") { closeGroup(); frag.appendChild(mediaFigure({ ...e, kind: e.media_kind || "file" })); }
+    else if (e.kind === "widget") { closeGroup(); frag.appendChild(widgetFigure(e.html, e.widget_kind, e.caption)); }
+    else if (e.kind === "answer") { closeGroup(); const n = el(`<div class="msg-agent">${(e.text || "").trim() ? `<div class="answer-body md"></div>` : ""}</div>`); if ((e.text || "").trim()) renderFinal($(".answer-body", n), e.text); addAnswerFooter(n, { text: e.full || e.text, duration_ms: e.duration_ms || 0, run_id: e.run_id }, turn - 1); frag.appendChild(n); }
+    else if (e.kind === "wake") { closeGroup(); frag.appendChild(reminderLine(e.text)); }
+    else if (e.kind === "error") { closeGroup(); frag.appendChild(el(`<div class="card"><div class="card-head">${iconSvg("alert")} ${esc(T("ev.error"))}</div><div class="card-body"><div class="muted">${esc(e.text)}</div></div></div>`)); }
+  }
+  closeGroup();
+  return frag;
+}
+function addEarlierSentinel() {
+  const node = el(`<button class="feed-earlier" type="button">${esc(T("feed.earlier"))}</button>`);
+  node.addEventListener("click", () => loadEarlier());
+  els.feedInner.prepend(node);
+  // Coming near the top loads the previous part by itself.
+  if (!state.feedScrollHooked) {
+    state.feedScrollHooked = true;
+    els.feed.addEventListener("scroll", () => { if (state.feedRest && els.feed.scrollTop < 600) loadEarlier(); }, { passive: true });
+  }
+}
+function loadEarlier() {
+  const rest = state.feedRest; if (!rest) return false;
+  const sentinel = $(".feed-earlier", els.feedInner);
+  const from = feedChunkStart(rest.tl, rest.end);
+  const frag = renderTimeline(rest.tl.slice(from, rest.end), countUserTurns(rest.tl, from));
+  // Keep what is on screen where it is: the new part grows above it.
+  // Set, not added: the browser's own scroll anchoring may have moved it already.
+  const before = els.feed.scrollHeight, top = els.feed.scrollTop;
+  if (sentinel) sentinel.after(frag); else els.feedInner.prepend(frag);
+  els.feed.scrollTop = top + (els.feed.scrollHeight - before);
+  rest.end = from;
+  if (from === 0) { state.feedRest = null; sentinel?.remove(); }
+  return true;
 }
 function reminderLine(text) {
   return el(`<div class="reminder">${iconSvg("bell")}<span>${esc(text || T("ev.reminder"))}</span></div>`);
@@ -1053,6 +1104,8 @@ function jumpToMatch() {
       return;
     }
   }
+  // Not in the drawn part of a long chat: draw the rest and look again.
+  if (state.feedRest) { while (loadEarlier()); state.jumpTo = q; jumpToMatch(); }
 }
 async function deleteSession(id) { await fetch(`/api/sessions/${id}`, { method: "DELETE" }); if (id === state.sessionId) send({ type: "new_session" }); refreshSessions(); }
 

@@ -157,14 +157,36 @@ cp .env.example .env
 python main.py --server
 ```
 
+## Terminal (`altair`)
+
+The same agent and the same chats in a terminal. `install.ps1` puts `altair` on your PATH.
+
+```bash
+altair                          # talk in a new chat; the folder is the current directory
+altair "fix the failing test"   # the same, starting with this task
+altair -p "summarize README.md" # one task, print the answer, exit (scripts, CI)
+git diff | altair -p "review this"
+altair -c                       # continue the latest chat
+altair -r "garden"              # resume a chat by id or title words, also one started in the window
+altair --chats                  # list chats (those working in the background are marked)
+```
+
+The terminal is one more window onto the app, not a second app: when the desktop app runs, `altair`
+joins it and a chat started in one shows up live in the other; otherwise it starts the backend in the
+background and stops it on exit. Settings, model keys, skills, memory and reminders are shared.
+Ctrl+C stops the task (twice exits); a line typed while the agent works goes to it as a hint.
+`--mode manual|auto|bypass` sets the chat's approval mode, `--output-format json|stream-json` gives
+machine-readable output. Exit codes: 0 done, 1 failed or stopped, 2 needed a person (an approval or a
+question) with nobody at the terminal to answer.
+
 ## Native Windows app
 
 ```bash
 python build_app.py --zip
 ```
 
-Builds `dist/LocalAIAgent/` with `LocalAIAgent.exe` (the backend, runs without Python) and `Altair.exe`
-(the native window, built with `cargo` when it is installed), packs them into a zip and creates
+Builds `dist/LocalAIAgent/` with `LocalAIAgent.exe` (the backend, runs without Python), `Altair.exe`
+(the native window, built with `cargo` when it is installed) and `bin\altair.exe` (the terminal command), packs them into a zip and creates
 `update.json` for updates. The zip is the release asset that `install.ps1` installs.
 
 The **native window** is a thin [Tauri](https://tauri.app/) shell (`desktop/`) — frameless, our own
@@ -176,10 +198,13 @@ An installed app stores its data in the user profile (`%LOCALAPPDATA%\LocalAIAge
 chats, skills, logs. Writing next to the exe isn't allowed, and data inside the package would be lost
 on the first update.
 
-**Updates.** Put the zip and `update.json` anywhere — a website, GitHub Releases, or a network share —
-and point `UPDATE_URL` at the manifest. The app silently checks for updates on startup, and the version
-in the bottom-left corner becomes an "Install and restart" button. From source, an update is offered but
-not installed: there, `git pull` is the right way.
+**Updates.** The app checks the project's latest GitHub release on startup and installs it by itself only
+when the release's checksums carry a valid signature of the project's key (otherwise it offers the release
+page). `UPDATE_URL` can point at your own manifest instead (a website or a network share), or be `off`.
+From source, an update is offered but not installed: there, `git pull` is the right way.
+
+Linux and macOS builds come from the `Build desktop` workflow (`.github/workflows/build-desktop.yml`);
+there the built-in browser uses Chrome instead of WebView2 tabs.
 
 ## What's inside
 

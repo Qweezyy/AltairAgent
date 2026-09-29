@@ -14,6 +14,7 @@ Two rules:
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -41,6 +42,12 @@ HIDDEN = "_hidden"        # not sent at all (folded into a summary)
 DROP_CALLS = "_drop_calls"  # sent without its tool calls (their results were dropped)
 #: A user-role message that is a reminder waking the agent, not something the user wrote.
 WAKE = "_wake"
+#: The tool calls the model gets instead of the original ones (old writes without their text).
+CALLS_VIEW = "_calls_view"
+#: Arguments of old writes that are folded away: the file holds that text now, and the
+#: model reads the file if it needs it. The key is dropped, not replaced with a note, so the
+#: model has no placeholder text it could copy into a new write.
+FOLDABLE_ARGS = {"write_file": ("content",), "edit_file": ("old_text", "new_text"), "apply_patch": ("patch",)}
 #: The text that opens a message carrying images from tools (browser/vision screenshots),
 #: so they can be told apart from the user's own attachments and dropped once stale.
 TOOL_MEDIA_MARK = "[Tool screenshot]"
@@ -81,6 +88,8 @@ def model_view(message: dict[str, Any]) -> dict[str, Any] | None:
     out = {k: v for k, v in message.items() if not k.startswith("_")}
     if VIEW in message:
         out["content"] = message[VIEW]
+    if CALLS_VIEW in message and not message.get(DROP_CALLS):
+        out["tool_calls"] = message[CALLS_VIEW]
     if message.get(DROP_CALLS):
         out.pop("tool_calls", None)
         if not str(out.get("content") or "").strip():
@@ -401,9 +410,22 @@ class Session:
             ):
                 candidates.append(index)
 
+        # The writes of the same old part: their file text goes too (in the same batch, so
+        # the prompt cache breaks no more often than it does for the outputs).
+        if keep_recent <= 0:
+            cutoff = len(self.messages)
+        else:
+            cutoff = tool_indexes[len(tool_indexes) - keep_recent] if len(tool_indexes) > keep_recent else -1
+        # From the call that owns the first kept output on, everything stays whole.
+        while 0 < cutoff < len(self.messages) and not self.messages[cutoff].get("tool_calls"):
+            cutoff -= 1
+        folds = {i: f for i in range(cutoff) if (f := self._folded_calls(self.messages[i], min_chars))}
         freed = sum(len(self.messages[i]["content"]) for i in candidates)
-        if not candidates or freed < min_free_chars:
+        freed += sum(saved for _, saved in folds.values())
+        if (not candidates and not folds) or freed < min_free_chars:
             return 0, 0
+        for index, (calls, _) in folds.items():
+            self.messages[index][CALLS_VIEW] = calls
         for index in candidates:
             message = self.messages[index]
             size = len(message["content"])
@@ -414,6 +436,31 @@ class Session:
             freed -= len(message[VIEW])
         self.updated_at = time.time()
         return len(candidates), freed
+
+    @staticmethod
+    def _folded_calls(message: dict[str, Any], min_chars: int) -> tuple[list[dict[str, Any]], int] | None:
+        """The message's tool calls with the big text of writes removed, and the chars saved;
+        None when there is nothing to fold (or it is folded already)."""
+        if message.get("role") != "assistant" or CALLS_VIEW in message or not message.get("tool_calls"):
+            return None
+        saved = 0
+        calls = []
+        for call in message["tool_calls"]:
+            fn = call.get("function") or {}
+            keys = FOLDABLE_ARGS.get(fn.get("name", ""))
+            raw = fn.get("arguments") or ""
+            if keys and len(raw) >= min_chars:
+                try:
+                    args = json.loads(raw)
+                except ValueError:
+                    args = None
+                if isinstance(args, dict) and any(k in args for k in keys):
+                    slim = json.dumps({k: v for k, v in args.items() if k not in keys}, ensure_ascii=False)
+                    saved += len(raw) - len(slim)
+                    calls.append({**call, "function": {**fn, "arguments": slim}})
+                    continue
+            calls.append(call)
+        return (calls, saved) if saved > 0 else None
 
     def supersede_page_states(self, keep: int = KEEP_PAGE_STATES, min_free_chars: int = 30_000) -> tuple[int, int]:
         """Drops page snapshots and tool screenshots that later ones made stale.

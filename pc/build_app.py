@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -58,23 +59,36 @@ def running_instances() -> list[int]:
     return pids
 
 
+#: PyInstaller's --add-data separator: ";" on Windows, ":" elsewhere.
+SEP = os.pathsep
+WINDOWS = sys.platform == "win32"
+
+
+def app_icon() -> list[str]:
+    """The icon per system: .ico on Windows, .icns on macOS (when present), none on Linux."""
+    if WINDOWS:
+        return ["--icon", str(ROOT / "assets" / "icon.ico")]
+    icns = ROOT / "assets" / "icon.icns"
+    return ["--icon", str(icns)] if sys.platform == "darwin" and icns.exists() else []
+
+
 def build() -> Path:
-    """Запускает PyInstaller и возвращает папку со сборкой."""
+    """Runs PyInstaller and returns the folder of the build (Windows, Linux or macOS)."""
     command = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
         "--name", NAME,
         "--windowed",                       # без чёрного окна консоли
-        "--icon", str(ROOT / "assets" / "icon.ico"),
+        *app_icon(),
         # Данные интерфейса и навыки кладём внутрь пакета.
-        "--add-data", f"{ROOT / 'static'};static",
-        "--add-data", f"{ROOT / 'skills'};skills",
-        "--add-data", f"{ROOT / '.env.example'};.",
+        "--add-data", f"{ROOT / 'static'}{SEP}static",
+        "--add-data", f"{ROOT / 'skills'}{SEP}skills",
+        "--add-data", f"{ROOT / '.env.example'}{SEP}.",
         # Единая версия продукта: core/version.py читает VERSION из корня репо.
-        "--add-data", f"{ROOT.parent / 'VERSION'};.",
+        "--add-data", f"{ROOT.parent / 'VERSION'}{SEP}.",
         # Быстрый поиск: забандленные tgrep/ripgrep (open-source, MIT) — работают
         # без установки, приложение находит их в vendor/bin. См. core/search_backend.py.
-        "--add-data", f"{ROOT / 'vendor' / 'bin'};vendor/bin",
+        "--add-data", f"{ROOT / 'vendor' / 'bin'}{SEP}vendor/bin",
         # PyInstaller не видит эти импорты: они подтягиваются динамически.
         "--hidden-import", "uvicorn.logging",
         "--hidden-import", "uvicorn.loops.auto",
@@ -97,7 +111,7 @@ def build() -> Path:
         "--collect-all", "duckdb",
         # Интерактивный терминал: winpty тащит conpty.dll и winpty-agent.exe —
         # без --collect-all PyInstaller соберёт только .py и терминал не стартует.
-        "--collect-all", "winpty",
+        *(["--collect-all", "winpty"] if WINDOWS else ["--collect-all", "ptyprocess"]),
         # Проверка типов: pyright тащит свой JS-дистрибутив (dist/) и качает Node
         # в кэш при первом запуске. Без --collect-all в exe не попадёт langserver.
         "--collect-all", "pyright",
@@ -114,6 +128,36 @@ def build() -> Path:
     ]
     subprocess.run(command, check=True)
     return DIST / NAME
+
+
+CLI_NAME = "altair"
+
+
+def build_cli(folder: Path) -> Path:
+    """The terminal command `altair`: a small console exe next to the backend.
+
+    One file on purpose: it is only a client (a socket to the backend, rich for the output), so
+    it stays small and starts fast, and it does not mix its files into the backend's _internal.
+    It starts LocalAIAgent.exe (one folder up) when no backend is running.
+    """
+    work = ROOT / "build" / "altair_cli"
+    out = DIST / "altair_cli"
+    subprocess.run([
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--console",
+        "--name", CLI_NAME, "--workpath", str(work), "--distpath", str(out), "--specpath", str(work),
+        *app_icon(),
+        # rich loads its unicode tables by name; websockets picks its client lazily.
+        "--collect-submodules", "rich", "--collect-submodules", "websockets",
+        "--exclude-module", "tkinter", "--exclude-module", "numpy", "--exclude-module", "playwright",
+        str(ROOT / "altair_cli.py"),
+    ], check=True)
+    exe = out / (f"{CLI_NAME}.exe" if sys.platform == "win32" else CLI_NAME)
+    # In bin/: Windows does not tell altair.exe from the window's Altair.exe in one folder, and
+    # only bin/ goes on PATH, so the other exes stay off it.
+    target = folder / "bin" / exe.name
+    target.parent.mkdir(exist_ok=True)
+    shutil.copy2(exe, target)
+    return target
 
 
 SHELL_DIR = ROOT / "desktop" / "src-tauri"
@@ -200,6 +244,7 @@ def main() -> int:
 
     folder = build()
     print(f"\nГотово: {folder}")
+    print(f"CLI: {build_cli(folder)}")
 
     if not args.no_shell:
         shell = build_shell()
