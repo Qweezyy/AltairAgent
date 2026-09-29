@@ -72,6 +72,28 @@ def install_no_window_default() -> None:
     subprocess.Popen._no_window_patched = True  # type: ignore[attr-defined]
 
 
+def install_devnull_stdin_default() -> None:
+    """Children that do not set their stdin get DEVNULL instead of the backend's own.
+
+    Launched by the desktop shell, the backend's stdin is the shell's pipe (closing it asks
+    for a graceful exit), and a thread sits reading it. On Windows a windowed process then
+    hangs any child that inherits that stdin: `git` for the command snapshots never started
+    and execute_command waited until its timeout. No tool reads the backend's stdin, so a
+    child without its own stdin gets nothing to read.
+    """
+    if getattr(subprocess.Popen, "_devnull_stdin_patched", False):
+        return
+    original_init = subprocess.Popen.__init__
+
+    def patched_init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if len(args) < 4 and kwargs.get("stdin") is None:  # stdin is Popen's 4th argument
+            kwargs["stdin"] = subprocess.DEVNULL
+        original_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = patched_init  # type: ignore[method-assign]
+    subprocess.Popen._devnull_stdin_patched = True  # type: ignore[attr-defined]
+
+
 @dataclass(slots=True)
 class ProcResult:
     returncode: int
@@ -146,10 +168,18 @@ async def _run_async(
 
 
 def _kill(proc: asyncio.subprocess.Process) -> None:
+    """Stops the command and everything it started: a shell's child (python, node, a build)
+    otherwise keeps running after the stop button or the timeout, invisible to the user."""
+    if os.name == "nt" and proc.returncode is None:
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True,
+                           timeout=10, check=False, stdin=subprocess.DEVNULL, **no_window_kwargs())
+        except (OSError, subprocess.TimeoutExpired):
+            get_logger("proc").warning("taskkill of %s failed", proc.pid, exc_info=True)
     try:
         proc.kill()
-    except (ProcessLookupError, OSError):  # pragma: no cover
-        pass
+    except (ProcessLookupError, OSError):
+        return  # already gone (taskkill took it)
 
 
 def _run_sync(

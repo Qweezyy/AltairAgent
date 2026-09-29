@@ -114,6 +114,10 @@ def _stop_when_stdin_closes() -> None:
             return
         _graceful_exit("The shell asked to close")
 
+    # A child inheriting this busy stdin hangs on Windows: children get their own (DEVNULL).
+    from core.utils.proc import install_devnull_stdin_default
+
+    install_devnull_stdin_default()
     threading.Thread(target=watch, name="stdin-watch", daemon=True).start()
 
 

@@ -417,6 +417,16 @@ function roundFinishTool(call_id, name, args, ok, output) {
 function finishRound() {
   const round = state.round; if (!round || round._done) { state.round = null; return; }
   round._done = true;
+  // A tool that never finished (the run was stopped or failed): it stopped with the run, so
+  // its spinner and live timer must not keep saying it is at work.
+  for (const row of round._rows.values()) {
+    if (row.classList.contains("ok") || row.classList.contains("fail")) continue;
+    if (row._timer) { clearInterval(row._timer); row._timer = null; }
+    $(".tr-elapsed", row)?.remove();
+    row.classList.add("fail", "stopped");
+    $(".tr-status", row).innerHTML = iconSvg("stop", "icon icon-sm");
+    $(".tr-status", row).setAttribute("data-tip", T("tool.stopped"));
+  }
   // Итоговая строка: перечисление того, что сделано (без мс, без вывода).
   const labels = round._tools.map((t) => t.label.replace(/<[^>]+>/g, "")).filter(Boolean);
   const summary = labels.join(" · ");

@@ -38,6 +38,11 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   Existing memory is moved over on first start.
 
 ### Fixed
+- In the desktop app `execute_command` hung before running anything (even `Write-Output`): the
+  backend's stdin is now the shell's pipe, and on Windows a child inheriting it hung. Children now
+  get their own empty stdin.
+- The stop button ended only a command's PowerShell: what the command had started kept running.
+  Now the whole process tree stops, and tool rows still spinning when a run stops are marked stopped.
 - The agent's browser screenshots of a tab opened while the browser panel was closed came back as a
   single pixel (the tab had no size); hidden tabs now keep a real size.
 - Switching chats while the agent worked wrote the rest of its run into the chat on screen, and

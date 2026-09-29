@@ -167,7 +167,8 @@ def test_chat_is_stored_as_new_chat_before_the_title_is_ready(monkeypatch, setti
         ws.send_json({"type": "run", "task": "сделай что-нибудь"})
         _collect(ws, {"run.finished"})
         listed = tc.get("/api/sessions").json()["sessions"]
-        assert listed and listed[0]["title"] == "Новый диалог"
+        # Seldom flaky under full-suite load: the message shows what the list held then.
+        assert listed and listed[0]["title"] == "Новый диалог", listed
         gate.set()
         title = next(e for e in _collect(ws, {"session.title"}) if e["type"] == "session.title")
         assert title["title"] == "Длинное раздумье"
