@@ -15,6 +15,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **Themes and fonts.** Five themes (Black, Dark, Graphite, Light, White) or the system's, and a choice
+  of bundled fonts (Onest by default, Manrope, Golos Text, Inter, IBM Plex Sans or the system font) in
+  Settings → Appearance.
+- **Your profile.** The row of buttons at the bottom of the chat list is one button with your avatar and
+  name; it opens the settings (theme and updates moved there, "Recently deleted" to the ⋯ menu). Set any
+  name and picture; the agent calls you by that name.
+- A round of tools that ran the same step several times says it once: "Ran a command 3 times".
+- The built-in quick commands follow the interface language (`/tests` and `/тесты` both work).
 - **Terminal: `altair`.** The same agent and chats in a terminal: an interactive mode, one-shot tasks for
   scripts and CI (`-p`, the task from stdin, `--output-format json|stream-json`, exit codes 0/1/2),
   continuing the latest chat (`-c`) or any chat by id or title (`-r`), also one started in the window.

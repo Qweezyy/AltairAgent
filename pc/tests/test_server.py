@@ -1004,8 +1004,10 @@ def test_preset_without_name_is_rejected(client):
 
 
 def test_command_endpoints(client):
-    listed = client.get("/api/commands").json()["commands"]
+    listed = client.get("/api/commands?lang=ru").json()["commands"]
     assert {c["name"] for c in listed} >= {"тесты", "ревью", "объясни"}
+    english = client.get("/api/commands?lang=en").json()["commands"]
+    assert {c["name"] for c in english} >= {"tests", "review", "explain"}
 
     saved = client.post("/api/commands", json={
         "name": "чеклист", "template": "Составь чеклист для {{ввод}}", "description": "чеклист",

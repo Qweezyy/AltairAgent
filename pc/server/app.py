@@ -37,6 +37,7 @@ from core.mcp.manager import MCPManager, parse_pasted_config
 from core.memory import MemoryStore
 from core.models_catalog import ModelCatalog
 from core.presets import Preset, PresetStore
+from core.profile import ProfileStore
 from core.research.browser import close_browser
 from core.settings import get_settings
 from core.skills.manager import MAX_IMPORT_BYTES, SkillManager
@@ -460,6 +461,41 @@ def create_app() -> FastAPI:
         saved, errors = await save_uploads(files, app.state.settings.data_dir)
         return {"paths": saved, "errors": errors}
 
+    # --- The user's profile: the name the agent calls them by, and an avatar.
+
+    @app.get("/api/profile")
+    async def get_profile() -> dict:
+        return await asyncio.to_thread(ProfileStore(app.state.settings.data_dir).read)
+
+    @app.post("/api/profile")
+    async def save_profile(payload: dict, request: Request) -> dict:
+        _local_only(request)
+        store = ProfileStore(app.state.settings.data_dir)
+        name = await asyncio.to_thread(store.set_name, str(payload.get("name") or ""))
+        return {"ok": True, "name": name}
+
+    @app.post("/api/profile/avatar")
+    async def save_avatar(payload: dict, request: Request) -> dict:
+        _local_only(request)
+        try:
+            await asyncio.to_thread(ProfileStore(app.state.settings.data_dir).set_avatar, str(payload.get("data") or ""))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    @app.delete("/api/profile/avatar")
+    async def delete_avatar(request: Request) -> dict:
+        _local_only(request)
+        await asyncio.to_thread(ProfileStore(app.state.settings.data_dir).clear_avatar)
+        return {"ok": True}
+
+    @app.get("/api/profile/avatar", response_model=None)
+    async def avatar_file() -> FileResponse | JSONResponse:
+        path = ProfileStore(app.state.settings.data_dir).avatar_path()
+        if path is None:
+            return JSONResponse({"error": "no avatar"}, status_code=404)
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
     @app.get("/api/memory")
     async def get_memory() -> dict:
         """Что агент запомнил — для прозрачности: пользователь видит и правит."""
@@ -480,9 +516,10 @@ def create_app() -> FastAPI:
         return {"ok": store.forget(fact_id)}
 
     @app.get("/api/commands")
-    async def get_commands() -> dict:
+    async def get_commands(lang: str = "") -> dict:
+        """The quick commands; the built-in ones in the interface's language."""
         store = CommandStore(app.state.settings.data_dir)
-        return {"commands": [asdict(c) for c in store.all()]}
+        return {"commands": [asdict(c) for c in store.all(lang if lang in ("en", "ru") else None)]}
 
     @app.post("/api/commands")
     async def save_command(payload: dict) -> dict:

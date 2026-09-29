@@ -429,7 +429,7 @@ function finishRound() {
   }
   // Итоговая строка: перечисление того, что сделано (без мс, без вывода).
   const labels = round._tools.map((t) => t.label.replace(/<[^>]+>/g, "")).filter(Boolean);
-  const summary = labels.join(" · ");
+  const summary = summarizeLabels(labels);
   typeText($(".tools-title", round), summary || T("tool.actions"));
   // Folds into its summary line even if it was opened while running (a click opens it again).
   round.dataset.open = "0"; $(".tools-body", round).hidden = true;
@@ -450,7 +450,20 @@ function historyAddRow(round, e) {
   $(".tools-body", round).appendChild(row);
   round._labels.push(L.label.replace(/<[^>]+>/g, ""));
 }
-function finalizeHistoryRound(round) { if (round) $(".tools-title", round).textContent = round._labels.join(" · ") || T("tool.actions"); }
+function finalizeHistoryRound(round) { if (round) $(".tools-title", round).textContent = summarizeLabels(round._labels) || T("tool.actions"); }
+// One round's steps in one line: the same step done several times is said once with a count
+// ("Ran a command 3 times"), wherever in the round the repeats were; the order of first use stays.
+function summarizeLabels(labels) {
+  const counts = new Map();
+  for (const l of labels) counts.set(l, (counts.get(l) || 0) + 1);
+  return [...counts].map(([label, n]) => (n > 1 ? `${label} ${timesWord(n)}` : label)).join(" · ");
+}
+function timesWord(n) {
+  if ((window.I18N?.lang?.() || "en") !== "ru") return T("tool.times", { n });
+  const d = n % 10, h = n % 100;
+  const word = d === 1 && h !== 11 ? "раз" : d >= 2 && d <= 4 && (h < 12 || h > 14) ? "раза" : "раз";
+  return `${n} ${word}`;
+}
 
 // Тело вывода конкретного инструмента (команда/запрос сверху, затем результат).
 function toolOutputHtml(name, args, output) {
@@ -1682,7 +1695,7 @@ async function loadModels() {
 }
 
 // ------------------------------------------------------------------ слэш-команды
-async function loadCommands() { try { state.commands = (await (await fetch("/api/commands")).json()).commands || []; } catch {} }
+async function loadCommands() { try { state.commands = (await (await fetch(`/api/commands?lang=${window.I18N?.lang?.() || "en"}`)).json()).commands || []; } catch {} }
 // Единый popup композера: слэш-команды (в начале) и @-упоминания файлов (по каретке).
 function updateCmdPopup() {
   const val = els.input.value;
@@ -1839,6 +1852,7 @@ async function openPalette() {
     { icon: "git", label: T("top.diff"), hint: T("h.panel"), run: () => togglePane("diff") },
     { icon: "globe", label: T("top.browser"), hint: T("h.panel"), run: () => togglePane("browser") },
     { icon: document.documentElement.dataset.theme === "dark" ? "sun" : "moon", label: T("pal.toggleTheme"), hint: T("h.appearance"), run: () => applyTheme(effectiveDark() ? "light" : "dark") },
+    { icon: "undo", label: T("nav.trash"), hint: T("h.action"), run: () => openTrash() },
   ].filter(Boolean);
   // Динамика: чаты и слэш-команды.
   let sessions = [];
@@ -2162,6 +2176,9 @@ function loadAppIcon() { if (appIconSupported()) { const v = currentAppIcon(); i
 
 // ------------------------------------------------------------------ модалки: настройки/память/команды/секреты
 const SETTINGS_NAV = [
+  { gkey: "set.g.account", items: [
+    { id: "profile", icon: "user", tkey: "set.i.profile" },
+  ] },
   { gkey: "set.g.settings", items: [
     { id: "models", icon: "cpu", tkey: "set.i.models" },
     { id: "agent", icon: "spark", tkey: "set.i.agent" },
@@ -2187,6 +2204,7 @@ const SETTINGS_NAV = [
     { id: "appearance", icon: "sun", tkey: "set.i.appearance" },
   ] },
   { gkey: "set.g.platform", items: [
+    { id: "updates", icon: "download", tkey: "set.i.updates" },
     { id: "about", icon: "settings", tkey: "set.i.about" },
   ] },
 ];
@@ -2280,7 +2298,8 @@ function renderSettingsSection(sec, main, s) {
     };
     render();
   } else if (sec === "appearance") {
-    const cur = document.documentElement.dataset.theme || "system";
+    const cur = LS.get(THEME_KEY, "") || "system";
+    const curFont = LS.get(FONT_KEY, "") || "onest";
     const accentHue = LS.get("accent_hue", "");
     const dark = effectiveDark();
     const bgStyles = dark ? [["nebula", T("appear.bgNebula")], ["amoled", T("appear.bgAmoled")]] : [["dawn", T("appear.bgDawn")], ["aurora", T("appear.bgAurora")]];
@@ -2289,7 +2308,8 @@ function renderSettingsSection(sec, main, s) {
     const curIcon = currentAppIcon();
     main.innerHTML = `<div class="settings-section"><h2>${esc(T("appear.title"))}</h2>
       <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.language"))}</div><div class="sr-desc">${esc(T("appear.languageDesc"))}</div></div><div class="sr-control"><div class="theme-seg" id="lang-seg">${[["en", "English"], ["ru", "Русский"]].map(([v, t]) => `<button data-lang="${v}" class="${curLang === v ? "on" : ""}">${esc(t)}</button>`).join("")}</div></div></div>
-      <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.theme"))}</div><div class="sr-desc">${esc(T("appear.themeDesc"))}</div></div><div class="sr-control"><div class="theme-seg" id="theme-seg">${[["light", T("appear.light")], ["dark", T("appear.dark")], ["system", T("appear.system")]].map(([v, t]) => `<button data-t="${v}" class="${cur === v ? "on" : ""}">${esc(t)}</button>`).join("")}</div></div></div>
+      <div class="setting-block"><div class="sr-title">${esc(T("appear.theme"))}</div><div class="sr-desc">${esc(T("appear.themeDesc"))}</div><div class="theme-cards" id="theme-cards">${THEMES.map((th) => `<button class="theme-card ${cur === th.id ? "on" : ""}" data-t="${th.id}" type="button"><span class="tc-preview" style="--p-bg:${th.bg};--p-rail:${th.rail};--p-text:${th.text}"><span class="tc-rail"></span><span class="tc-lines"><i></i><i></i><i></i></span></span><span class="tc-name">${esc(T("theme." + th.id))}</span></button>`).join("")}</div></div>
+      <div class="setting-block"><div class="sr-title">${esc(T("appear.font"))}</div><div class="sr-desc">${esc(T("appear.fontDesc"))}</div><div class="font-list" id="font-list">${FONTS.map((f) => `<button class="font-item ${curFont === f.id ? "on" : ""}" data-font="${f.id}" type="button" style="font-family:${f.css}"><span class="fi-name">${esc(f.name)}</span><span class="fi-sample">${esc(T("appear.fontSample"))}</span></button>`).join("")}</div></div>
       <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.accent"))}</div><div class="sr-desc">${esc(T("appear.accentDesc"))}</div></div><div class="sr-control"><div class="swatches" id="swatches">${ACCENTS.map((a) => `<div class="swatch ${String(a.hue ?? "") === accentHue ? "on" : ""}" data-hue="${a.hue ?? ""}" title="${esc(T(a.key))}" style="background:${a.hue == null ? "hsl(15 56% 57%)" : `hsl(${a.hue} 62% 55%)`}"></div>`).join("")}</div></div></div>
       <div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.bg"))}</div><div class="sr-desc">${esc(dark ? T("appear.bgDescDark") : T("appear.bgDescLight"))}</div></div><div class="sr-control"><div class="theme-seg" id="cosmos-seg">${bgStyles.map(([v, t]) => `<button data-bg="${v}" class="${curBg === v ? "on" : ""}">${esc(t)}</button>`).join("")}</div></div></div>
       ${appIconSupported() ? `<div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("appear.icon"))}</div><div class="sr-desc">${esc(T("appear.iconDesc"))}</div></div><div class="sr-control"><div class="icon-swatches" id="icon-swatches">${APP_ICONS.map((v) => `<button class="icon-swatch ${v === curIcon ? "on" : ""}" data-icon="${v}" title="${esc(T("appIcon." + v))}"><img src="/static/icons/variants/${v}.png?v=60" alt="${esc(v)}" /></button>`).join("")}</div></div></div>` : ""}
@@ -2299,7 +2319,8 @@ function renderSettingsSection(sec, main, s) {
       window.I18N?.setLang(b.dataset.lang);   // сохранит + переведёт статику + событие
       openSettings("appearance");             // переоткрываем окно целиком в новом языке
     }));
-    $$("#theme-seg button", main).forEach((b) => b.addEventListener("click", () => { applyTheme(b.dataset.t === "system" ? "" : b.dataset.t); renderSettingsSection("appearance", main, s); }));
+    $$("#theme-cards .theme-card", main).forEach((b) => b.addEventListener("click", () => { applyTheme(b.dataset.t === "system" ? "" : b.dataset.t); renderSettingsSection("appearance", main, s); }));
+    $$("#font-list .font-item", main).forEach((b) => b.addEventListener("click", () => { applyFont(b.dataset.font); $$("#font-list .font-item", main).forEach((x) => x.classList.toggle("on", x === b)); }));
     $$("#swatches .swatch", main).forEach((sw) => sw.addEventListener("click", () => { applyAccent(sw.dataset.hue === "" ? null : +sw.dataset.hue); $$("#swatches .swatch", main).forEach((x) => x.classList.toggle("on", x === sw)); }));
     $$("#cosmos-seg button", main).forEach((b) => b.addEventListener("click", () => { window.Cosmos?.setStyle(b.dataset.bg); $$("#cosmos-seg button", main).forEach((x) => x.classList.toggle("on", x === b)); }));
     $$("#icon-swatches .icon-swatch", main).forEach((b) => b.addEventListener("click", () => { setAppIcon(b.dataset.icon); $$("#icon-swatches .icon-swatch", main).forEach((x) => x.classList.toggle("on", x === b)); }));
@@ -2421,10 +2442,71 @@ function renderSettingsSection(sec, main, s) {
     });
   } else if (sec === "pair") {
     renderPairSection(main);
+  } else if (sec === "profile") {
+    renderProfileSection(main);
+  } else if (sec === "updates") {
+    const d = state.updateInfo || {};
+    main.innerHTML = `<div class="settings-section"><h2>${esc(T("upd.title"))}</h2><div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("abt.version"))} ${esc(state.version || "")}</div><div class="sr-desc">${esc(d.available ? T("upd.newVersion", { version: d.version || "" }) : T("upd.upToDate"))}</div></div><div class="sr-control"><button class="btn ${d.available ? "btn-primary" : "btn-outline"}" id="upd-open">${esc(d.available ? T("upd.install") : T("abt.checkUpd"))}</button></div></div></div>`;
+    $("#upd-open", main).addEventListener("click", async () => { if (!d.available) await checkUpdate(); openUpdate(); });
   } else if (sec === "about") {
     main.innerHTML = `<div class="settings-section"><h2>${esc(T("abt.title"))}</h2><div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("abt.version"))}</div><div class="sr-desc">${esc(state.version || "")}</div></div><div class="sr-control"><button class="btn btn-outline" id="ab-upd">${esc(T("abt.checkUpd"))}</button></div></div><div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("abt.configFile"))}</div><div class="sr-desc mono" style="overflow-wrap:anywhere">${esc(s.config_path || "")}</div></div></div><div class="setting-row"><div class="sr-main"><div class="sr-title">${esc(T("abt.tools"))}</div><div class="sr-desc">${state.tools.length}</div></div></div></div>`;
     $("#ab-upd", main).addEventListener("click", openUpdate);
   }
+}
+// ------------------------------------------------------------------ profile
+async function loadProfile() {
+  try { state.profile = await (await fetch("/api/profile")).json(); } catch { state.profile = { name: "" }; }
+  renderProfileButton();
+}
+function initials(name) {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "?";
+}
+function avatarHtml(p) {
+  if (p && p.avatar) return `<img src="/api/profile/avatar?v=${p.avatar_v || 0}" alt="" />`;
+  return p && p.name ? `<span>${esc(initials(p.name))}</span>` : iconSvg("user", "icon");
+}
+function renderProfileButton() {
+  const p = state.profile || {};
+  const av = $("#profile-avatar"); if (av) av.innerHTML = avatarHtml(p);
+  const nm = $("#profile-name"); if (nm) nm.textContent = p.name || T("profile.you");
+}
+function renderProfileSection(main) {
+  const p = state.profile || {};
+  main.innerHTML = `<div class="settings-section"><h2>${esc(T("profile.title"))}</h2><p class="sr-desc" style="margin-bottom:16px">${esc(T("profile.desc"))}</p>
+    <div class="profile-edit"><span class="avatar avatar-lg" id="pf-avatar">${avatarHtml(p)}</span>
+      <div class="pf-actions"><button class="btn btn-outline" id="pf-pick">${esc(T("profile.pick"))}</button>${p.avatar ? `<button class="btn" id="pf-clear">${esc(T("profile.clear"))}</button>` : ""}<input type="file" id="pf-file" accept="image/png,image/jpeg,image/webp" hidden /></div></div>
+    <div class="form-row"><label class="form-label">${esc(T("profile.name"))}</label><input class="field" id="pf-name" maxlength="40" value="${escAttr(p.name || "")}" placeholder="${escAttr(T("profile.namePh"))}" /><span class="form-help">${esc(T("profile.nameHelp"))}</span></div>
+    <button class="btn btn-primary" id="pf-save">${esc(T("common.save"))}</button></div>`;
+  $("#pf-pick", main).addEventListener("click", () => $("#pf-file", main).click());
+  $("#pf-file", main).addEventListener("change", async (e) => {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    try {
+      const data = await squareImage(file, 256);
+      const r = await (await fetch("/api/profile/avatar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data }) })).json();
+      if (!r.ok) { toast(r.error || T("t.error"), "error"); return; }
+      await loadProfile(); renderProfileSection(main);
+    } catch { toast(T("t.error"), "error"); }
+  });
+  $("#pf-clear", main)?.addEventListener("click", async () => { await fetch("/api/profile/avatar", { method: "DELETE" }); await loadProfile(); renderProfileSection(main); });
+  $("#pf-save", main).addEventListener("click", async () => {
+    const r = await (await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#pf-name", main).value }) })).json();
+    if (r.ok) { toast(T("t.saved")); await loadProfile(); renderProfileSection(main); } else toast(r.error || T("t.error"), "error");
+  });
+}
+// The avatar is cropped to a square and shrunk in the window, so the file sent is small.
+function squareImage(file, size) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => {
+      const side = Math.min(img.width, img.height); const c = document.createElement("canvas");
+      c.width = c.height = size;
+      c.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+      URL.revokeObjectURL(url); resolve(c.toDataURL("image/png"));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image")); };
+    img.src = url;
+  });
 }
 async function renderMemorySection(main) {
   main.innerHTML = `<div class="settings-section"><h2>${esc(T("mem.title"))}</h2><p class="sr-desc" style="margin-bottom:12px">${T("mem.desc")}</p><div id="mem-list" class="dim">${esc(T("mem.loading"))}</div></div>`;
@@ -2439,7 +2521,7 @@ async function renderMemorySection(main) {
 }
 async function renderCommandsSection(main) {
   main.innerHTML = `<div class="settings-section"><h2>${esc(T("cmd.title"))}</h2><p class="sr-desc" style="margin-bottom:12px">${T("cmd.desc")}</p><div id="cmd-list"></div><div class="divider" style="margin:14px 0"></div><div class="form-row"><label class="form-label">${esc(T("cmd.new"))}</label><input class="field" id="cmd-name" placeholder="${escAttr(T("cmd.namePh"))}" /><input class="field" id="cmd-desc" placeholder="${escAttr(T("cmd.descPh"))}" /><textarea class="field" id="cmd-tpl" rows="3" placeholder="${escAttr(T("cmd.tplPh"))}"></textarea></div><button class="btn btn-primary" id="cmd-save">${esc(T("cmd.add"))}</button></div>`;
-  const renderList = async () => { const list = (await (await fetch("/api/commands")).json()).commands || []; $("#cmd-list", main).innerHTML = list.map((c) => `<div class="list-row"><div class="grow"><div class="lr-title mono">/${esc(c.name)}</div><div class="lr-sub">${esc(c.description || "")}</div></div><button class="btn-icon small" data-del="${escAttr(c.name)}" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</button></div>`).join("") || `<div class="dim">${esc(T("cmd.none"))}</div>`; $$("[data-del]", main).forEach((b) => b.addEventListener("click", async () => { await fetch(`/api/commands/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" }); renderList(); loadCommands(); })); };
+  const renderList = async () => { const list = (await (await fetch(`/api/commands?lang=${window.I18N?.lang?.() || "en"}`)).json()).commands || []; $("#cmd-list", main).innerHTML = list.map((c) => `<div class="list-row"><div class="grow"><div class="lr-title mono">/${esc(c.name)}</div><div class="lr-sub">${esc(c.description || "")}</div></div><button class="btn-icon small" data-del="${escAttr(c.name)}" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</button></div>`).join("") || `<div class="dim">${esc(T("cmd.none"))}</div>`; $$("[data-del]", main).forEach((b) => b.addEventListener("click", async () => { await fetch(`/api/commands/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" }); renderList(); loadCommands(); })); };
   renderList();
   $("#cmd-save", main).addEventListener("click", async () => { const name = $("#cmd-name", main).value.trim(); const template = $("#cmd-tpl", main).value.trim(); if (!name || !template) { toast(T("cmd.needNameTpl"), "error"); return; } const d = await (await fetch("/api/commands", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description: $("#cmd-desc", main).value.trim(), template }) })).json(); if (d.ok) { $("#cmd-name", main).value = $("#cmd-desc", main).value = $("#cmd-tpl", main).value = ""; renderList(); loadCommands(); } else toast(d.error || T("t.error"), "error"); });
 }
@@ -2547,7 +2629,7 @@ async function openWorkspaceMenu(anchor) {
 
 // ------------------------------------------------------------------ обновления
 async function checkUpdate() {
-  try { const d = await (await fetch("/api/update/check")).json(); state.updateInfo = d; if (d.available) $("#btn-update").classList.add("has-update"); } catch {}
+  try { const d = await (await fetch("/api/update/check")).json(); state.updateInfo = d; const dot = $("#upd-dot"); if (dot) dot.hidden = !d.available; } catch {}
 }
 function openUpdate() {
   const d = state.updateInfo || {};
@@ -2615,10 +2697,38 @@ function autoGrow() {
 // ------------------------------------------------------------------ тема
 const THEME_KEY = "agent_theme";
 function effectiveDark() { const t = document.documentElement.dataset.theme; if (t === "dark") return true; if (t === "light") return false; return !(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches); }
+// A theme = a scheme (dark / light: everything that draws follows it) and, for some, a palette
+// variant on top of it (app-fonts.css). "" = follow the system.
+const THEMES = [
+  { id: "system", bg: "linear-gradient(135deg, hsl(240 15% 5%) 50%, hsl(48 22% 96%) 50%)", rail: "transparent", text: "hsl(44 12% 66%)" },
+  { id: "black", scheme: "dark", palette: "black", bg: "#000", rail: "hsl(0 0% 6%)", text: "hsl(40 5% 66%)" },
+  { id: "dark", scheme: "dark", bg: "hsl(240 15% 5%)", rail: "hsl(240 18% 3%)", text: "hsl(44 12% 66%)" },
+  { id: "graphite", scheme: "dark", palette: "graphite", bg: "hsl(220 6% 13%)", rail: "hsl(220 7% 10.5%)", text: "hsl(220 6% 68%)" },
+  { id: "light", scheme: "light", bg: "hsl(48 22% 96%)", rail: "hsl(48 20% 93.5%)", text: "hsl(40 7% 38%)" },
+  { id: "snow", scheme: "light", palette: "snow", bg: "#fff", rail: "hsl(220 14% 97%)", text: "hsl(220 8% 38%)" },
+];
+const FONT_KEY = "agent_font";
+const FONTS = [
+  { id: "onest", name: "Onest", css: "'Onest', sans-serif" },
+  { id: "manrope", name: "Manrope", css: "'Manrope', sans-serif" },
+  { id: "golos", name: "Golos Text", css: "'Golos Text', sans-serif" },
+  { id: "inter", name: "Inter", css: "'Inter', sans-serif" },
+  { id: "plex", name: "IBM Plex Sans", css: "'IBM Plex Sans', sans-serif" },
+  { id: "system", name: "System", css: "system-ui, 'Segoe UI', sans-serif" },
+];
+function applyFont(id) {
+  if (!id || id === "onest") { delete document.documentElement.dataset.font; LS.set(FONT_KEY, ""); }
+  else { document.documentElement.dataset.font = id; LS.set(FONT_KEY, id); }
+  window.AgentTerminal?.applyTheme?.();
+}
 function applyTheme(theme) {
-  if (!theme || theme === "system") { delete document.documentElement.dataset.theme; LS.set(THEME_KEY, ""); }
-  else { document.documentElement.dataset.theme = theme; LS.set(THEME_KEY, theme); }
-  const btn = $("#btn-theme"); if (btn) btn.innerHTML = iconSvg(effectiveDark() ? "sun" : "moon", "icon icon-sm");
+  const th = THEMES.find((x) => x.id === theme && x.scheme);
+  const root = document.documentElement;
+  if (!th) { delete root.dataset.theme; delete root.dataset.palette; LS.set(THEME_KEY, ""); }
+  else {
+    root.dataset.theme = th.scheme; LS.set(THEME_KEY, th.id);
+    if (th.palette) root.dataset.palette = th.palette; else delete root.dataset.palette;
+  }
   window.AgentTerminal?.applyTheme?.();
   // Фон приветствия следует за темой: тёмный космос ↔ светлое небо.
   window.Cosmos?.applyTheme?.(effectiveDark());
@@ -2693,7 +2803,7 @@ function init() {
   // Онбордингу и части модулей нужны глобальные ссылки (в classic-скрипте const
   // не попадает в window).
   window.send = send; window.state = state;
-  window.addEventListener("i18n:changed", (e) => send({ type: "ui_lang", lang: e.detail?.lang || "en" }));
+  window.addEventListener("i18n:changed", (e) => { send({ type: "ui_lang", lang: e.detail?.lang || "en" }); loadCommands(); });
   window.I18N?.apply(document);
   // Звёздочку-бренд в рельсе заменяем на маскота Альти (статичный, без анимации).
   const brandMark = $(".brand-mark");
@@ -2764,13 +2874,8 @@ function init() {
     ...state.modes.map((m, i) => ({ text: modeLabel(m, "title"), desc: modeLabel(m, "hint"), num: i + 1, chosen: m.id === state.mode, onClick: () => send({ type: "set_mode", mode: m.id }) })),
   ], true));
   $("#btn-new").addEventListener("click", () => send({ type: "new_session" }));
-  $("#btn-settings").addEventListener("click", openSettings);
-  $("#btn-memory").addEventListener("click", () => openSettings("memory"));
-  $("#btn-commands").addEventListener("click", () => openSettings("commands"));
-  $("#btn-secrets").addEventListener("click", () => openSettings("secrets"));
-  $("#btn-trash").addEventListener("click", openTrash);
-  $("#btn-update").addEventListener("click", openUpdate);
-  $("#btn-theme").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+  $("#btn-profile").addEventListener("click", () => openSettings("profile"));
+  loadProfile();
   // Переключатели панелей (терминал / изменения / браузер) + меню «Ещё».
   $$(".dock-tgl").forEach((b) => b.addEventListener("click", () => togglePane(b.dataset.pane)));
   $("#btn-more").addEventListener("click", (e) => openMenu(e.currentTarget, [
@@ -2779,6 +2884,8 @@ function init() {
     { label: T("menu.dialog") },
     { text: T("menu.exportChat"), onClick: () => openExport($("#btn-more")) },
     { text: T("menu.clearChat"), onClick: async () => { if (await confirmDialog({ message: T("cf.clearChat"), danger: true })) { send({ type: "reset" }); showWelcome(); } } },
+    { label: T("menu.chats") },
+    { text: T("nav.trash"), onClick: () => openTrash() },
   ], false));
   $("#btn-terminal-restart")?.addEventListener("click", () => window.AgentTerminal?.onTabShown());
   initFilesTree();

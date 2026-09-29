@@ -797,9 +797,11 @@ class AgentRunner:
         # Memory = the indexes of the global notes (about the user, all chats) and of this
         # workspace's notes; the notes themselves are read on demand (memory_read).
         from core.folder_memory import FolderMemory
+        from core.profile import ProfileStore
         from core.reminders import ReminderStore
 
-        parts = [self.memory.prompt_section(), FolderMemory(self.settings.workspace).prompt_section()]
+        parts = [ProfileStore(self.settings.data_dir).prompt_section(), self.memory.prompt_section(),
+                 FolderMemory(self.settings.workspace).prompt_section()]
         # Сработавшие/активные напоминания этого чата — чтобы модель знала контекст
         # срабатывания и что она уже запланировала. После показа помечаем доставленными.
         reminder_section = ReminderStore(self.settings.data_dir).prompt_section(self.session.id)

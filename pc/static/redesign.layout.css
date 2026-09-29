@@ -1236,3 +1236,44 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 /* The top of a long chat drawn in parts: the earlier part loads on reaching it. */
 .feed-earlier { display: block; margin: 0 auto var(--sp-4); padding: var(--sp-2) var(--sp-4); border: 1px dashed var(--border); border-radius: var(--r-md); background: none; color: var(--text-3); font-size: var(--fs-xs); cursor: pointer; }
 .feed-earlier:hover { color: var(--text-1); }
+
+/* ------------------------------------------------------------------ profile button (rail foot) */
+.profile-btn {
+  position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2); border-radius: var(--r-md); color: var(--text-1); text-align: left;
+  transition: background var(--dur-1) var(--ease);
+}
+.profile-btn:hover { background: var(--surface-2); }
+.profile-name { flex: 1; min-width: 0; font-size: var(--fs-base); font-weight: 500; }
+.profile-gear { color: var(--text-3); opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.profile-btn:hover .profile-gear, .profile-btn:focus-visible .profile-gear { opacity: 1; }
+.avatar {
+  flex: none; width: 32px; height: 32px; border-radius: 50%; overflow: hidden;
+  display: inline-grid; place-items: center; background: var(--star-gold); color: var(--accent-contrast);
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0.02em;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-lg { width: 72px; height: 72px; font-size: 24px; }
+.upd-dot { position: absolute; left: 32px; top: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--rail); }
+.profile-edit { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-5); }
+.pf-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* ------------------------------------------------------------------ appearance: themes and fonts */
+.setting-block { padding: var(--sp-4) 0; border-bottom: 1px solid var(--border); }
+.setting-block .sr-desc { margin-bottom: var(--sp-3); }
+.theme-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: var(--sp-3); }
+.theme-card { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); color: var(--text-2); font-size: var(--fs-sm); }
+.theme-card:hover { border-color: var(--border-strong); }
+.theme-card.on { border-color: var(--accent); color: var(--text-1); box-shadow: 0 0 0 1px var(--accent); }
+.tc-preview { position: relative; display: flex; height: 58px; border-radius: var(--r-sm); overflow: hidden; background: var(--p-bg); border: 1px solid color-mix(in srgb, var(--p-text) 18%, transparent); }
+.tc-rail { width: 26%; background: var(--p-rail); }
+.tc-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 10px 8px; }
+.tc-lines i { display: block; height: 5px; border-radius: 3px; background: var(--p-text); opacity: 0.55; }
+.tc-lines i:nth-child(2) { width: 70%; background: var(--accent); opacity: 0.9; }
+.tc-lines i:nth-child(3) { width: 45%; }
+.font-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-2); }
+.font-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); text-align: left; }
+.font-item:hover { border-color: var(--border-strong); }
+.font-item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.fi-name { font-size: var(--fs-md); font-weight: 600; color: var(--text-1); }
+.fi-sample { font-size: var(--fs-sm); color: var(--text-2); }

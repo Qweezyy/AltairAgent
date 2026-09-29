@@ -7,11 +7,33 @@ import pytest
 from core.commands import Command, CommandStore
 
 
-def test_defaults_seeded(settings):
+def test_defaults_seeded_and_speak_the_interface_language(settings):
     store = CommandStore(settings.data_dir)
-    names = {c.name for c in store.all()}
-    assert {"тесты", "ревью", "объясни", "рефактор"} <= names
-    assert all(c.builtin for c in store.all())
+    assert {"tests", "review", "explain", "refactor"} <= {c.name for c in store.all("en")}
+    assert {"тесты", "ревью", "объясни", "рефактор"} <= {c.name for c in store.all("ru")}
+    assert all(c.builtin and c.key for c in store.all())
+    explain_en = next(c for c in store.all("en") if c.key == "explain")
+    assert explain_en.description == "Explain simply and in detail"
+    assert explain_en.expand("recursion").endswith("with examples: recursion")
+
+
+def test_a_builtin_answers_to_both_of_its_names(settings):
+    store = CommandStore(settings.data_dir)
+    assert store.get("тесты").key == store.get("tests").key == "tests"
+    assert store.get("tests", "ru").name == "тесты"
+    assert store.delete("ревью") and store.get("review") is None
+
+
+def test_builtins_stored_before_keys_are_recognised(settings):
+    import json
+
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    old = {"commands": [{"name": "тесты", "template": "старый", "description": "", "builtin": True},
+                        {"name": "мой", "template": "свой", "description": "", "builtin": False}]}
+    (settings.data_dir / "commands.json").write_text(json.dumps(old, ensure_ascii=False), encoding="utf-8")
+    store = CommandStore(settings.data_dir)
+    names = [c.name for c in store.all("en")]
+    assert names == ["tests", "мой"]                   # the user's own command stays as written
 
 
 def test_expand_with_placeholder():
@@ -29,9 +51,9 @@ def test_expand_without_placeholder_appends_argument():
 
 def test_save_validates_name(settings):
     store = CommandStore(settings.data_dir)
-    with pytest.raises(ValueError, match="Имя команды"):
+    with pytest.raises(ValueError, match="name"):
         store.save(Command(name="с пробелом", template="x"))
-    with pytest.raises(ValueError, match="шаблон"):
+    with pytest.raises(ValueError, match="template"):
         store.save(Command(name="пусто", template="   "))
 
 
