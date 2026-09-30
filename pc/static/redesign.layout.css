@@ -21,6 +21,13 @@
   border-right: 1px solid var(--border);
   overflow: hidden;
 }
+.rail { position: relative; }
+/* The rail's width, dragged by its right edge (double click: back to the default). */
+.rail-resize { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; cursor: col-resize; z-index: 6; }
+.rail-resize:hover, .rail-resize.dragging { background: var(--accent-soft); }
+.app[data-rail="collapsed"] .rail-resize { display: none; }
+body.rail-dragging { cursor: col-resize; user-select: none; }
+body.rail-dragging .app { transition: none; }
 .rail-head {
   display: flex;
   align-items: center;
@@ -1023,6 +1030,7 @@ body.solo .pane { flex: 1 1 100%; }
   .app { grid-template-columns: 0 1fr; }
   .rail { position: absolute; top: 0; bottom: 0; left: 0; width: var(--rail-w); z-index: var(--z-rail); transform: translateX(-100%); transition: transform var(--dur-2) var(--ease); }
   .app[data-rail="open"] .rail { transform: translateX(0); box-shadow: var(--shadow-pop); }
+  .rail-resize { display: none; }
   .panel { width: 100%; }
   :root { --chat-col: 100%; }
   .feed-inner, .composer-inner { padding-left: var(--sp-4); padding-right: var(--sp-4); }

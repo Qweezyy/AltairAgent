@@ -19,6 +19,8 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   text optically centred in every control, spring motion, and the accent used on purpose: primary
   actions, focus, the selected chat and settings section, what is running. Nothing blurs over the
   moving sky any more. Settings → Appearance → Interface style → Classic brings back the look from before.
+- **A resizable chat rail.** Drag its right edge like the panes on the right; the width is
+  remembered, a double click brings back the default.
 - **Alti, the mascot, around the app.** In empty lists and settings pages (asleep), next to the
   running status (thinking), on errors (sad) and on cards that need you (asking), with a blink,
   a breath and a small hop; still when the system asks for reduced motion.

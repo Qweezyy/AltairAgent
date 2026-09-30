@@ -147,9 +147,8 @@ textarea.field { height: auto; padding: 11px 14px; line-height: 1.5; }
 .md blockquote { border-left: 2px solid var(--hair-strong); padding: 2px 14px; color: var(--text-2); }
 .md table { border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 1px var(--hair); }
 
-/* A round of tools: a quiet plate. */
-.tools { margin: 2px 0; padding: 7px 14px; border-radius: 14px; background: color-mix(in srgb, var(--core) 60%, transparent); box-shadow: inset 0 0 0 1px var(--hair); }
-.tools-head, .tool-row-head { padding: 6px 0; font-size: var(--fs-sm); color: var(--text-2); transition: color var(--dur-1) var(--spring); }
+/* A round of tools: one quiet line, as in the classic look. */
+.tools-head, .tool-row-head { padding: 3px 0; font-size: var(--fs-sm); transition: color var(--dur-1) var(--spring); }
 .tools-head:hover, .tool-row-head:hover { color: var(--text-1); }
 .tool-row.ok .tr-status { color: var(--success); }
 .tr-status .spin { color: var(--accent); }

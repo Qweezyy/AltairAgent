@@ -2758,6 +2758,7 @@ function applyTheme(theme) {
 }
 
 // ------------------------------------------------------------------ панель-ресайз
+const RAIL_MIN = 200, RAIL_MAX = 520;
 function initPanelResize() {
   // Горизонтальный размер дока.
   const h = $("#dock-resize");
@@ -2769,6 +2770,30 @@ function initPanelResize() {
     const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); LS.set("local_ai_work_width", els.dock.offsetWidth); };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
   });
+
+  // The rail's width: dragged by its right edge, remembered, double click restores the default.
+  const rh = $("#rail-resize");
+  const RAIL_KEY = "agent_rail_w";
+  const setRail = (w) => {
+    if (w) document.documentElement.style.setProperty("--rail-w", w + "px");
+    else document.documentElement.style.removeProperty("--rail-w");
+  };
+  const savedRail = +LS.get(RAIL_KEY, 0);
+  if (savedRail) setRail(Math.min(Math.max(RAIL_MIN, savedRail), RAIL_MAX));
+  if (rh) {
+    rh.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); const start = e.clientX; const w0 = $("#rail").offsetWidth; rh.setPointerCapture(e.pointerId);
+      rh.classList.add("dragging"); document.body.classList.add("rail-dragging");
+      const move = (ev) => setRail(Math.round(Math.min(Math.max(RAIL_MIN, w0 + (ev.clientX - start)), RAIL_MAX)));
+      const up = () => {
+        document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+        rh.classList.remove("dragging"); document.body.classList.remove("rail-dragging");
+        LS.set(RAIL_KEY, $("#rail").offsetWidth);
+      };
+      document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    });
+    rh.addEventListener("dblclick", () => { setRail(0); LS.set(RAIL_KEY, ""); });
+  }
 
   // Вертикальный размер каждой панели (тянем верхний край: растёт эта, ужимается соседняя сверху).
   $$(".pane-vresize").forEach((handle) => {
