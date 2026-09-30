@@ -259,7 +259,7 @@
     <string name="status_thinking">Думаю…</string>
     <string name="status_processing">Обрабатываю: %1$s</string>
     <string name="status_checking">Проверяю…</string>
-    <string name="status_no_key">**У модели ещё не задан API-ключ**, поэтому ответить не могу.\n\nКак исправить:\n1. Открой меню ☰ (слева вверху) и внизу нажми круглую кнопку профиля рядом с **Новый чат** — откроются настройки.\n2. Перейди в **Модели** и открой активную модель.\n3. Вставь API-ключ провайдера и нажми **Сохранить**.\n4. Отправь сообщение ещё раз.\n\nКлюч хранится на телефоне в зашифрованном виде. Локальной модели (Ollama, LM Studio) ключ может быть не нужен — тогда впиши любую заглушку, например `local`.</string>
+    <string name="status_no_key">**У модели ещё не задан API-ключ**, поэтому ответить не могу.\n\nКак исправить:\n1. Открой меню ☰ (слева вверху) и в самом низу нажми на свой профиль — откроются настройки.\n2. Перейди в **Модели** и открой активную модель.\n3. Вставь API-ключ провайдера и нажми **Сохранить**.\n4. Отправь сообщение ещё раз.\n\nКлюч хранится на телефоне в зашифрованном виде. Локальной модели (Ollama, LM Studio) ключ может быть не нужен — тогда впиши любую заглушку, например `local`.</string>
     <string name="error_prefix">Ошибка: %1$s</string>
     <string name="status_reconnecting">Переподключение %1$d/%2$d…</string>
     <string name="status_tool">Инструмент: %1$s</string>
@@ -328,4 +328,14 @@
     <string name="bridge_hint_refused">ПК отклонил подключение: Altair на ПК не запущен или слушает только сам компьютер. Включи доступ для телефона в приложении на ПК и перезапусти его.</string>
     <string name="bridge_hint_unknown_host">Имя ПК не найдено. Укажи его IP-адрес (или адрес в Tailscale).</string>
     <string name="settings_version">Altair %1$s</string>
+    <string name="starter_web">Найди в интернете и сделай сводку</string>
+    <string name="starter_math">Реши задачу по шагам</string>
+    <string name="starter_python">Напиши и запусти Python-скрипт</string>
+    <string name="starter_pc">Поручи задачу моему ПК</string>
+    <string name="starter_plan">Составь план проекта по шагам</string>
+    <string name="nav_section_chats">Чаты</string>
+    <string name="nav_section_space">Пространство</string>
+    <string name="drawer_profile_hint">Настройки</string>
+    <string name="theme_snow">Снег</string>
+    <string name="theme_graphite">Графит</string>
 </resources>

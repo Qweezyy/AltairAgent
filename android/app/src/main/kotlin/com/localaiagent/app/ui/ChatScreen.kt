@@ -5,6 +5,17 @@
 
 package com.localaiagent.app.ui
 
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.ui.unit.em
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Calculate
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import com.localaiagent.app.ui.theme.plate
 import kotlinx.coroutines.flow.first
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -249,6 +260,8 @@ fun ChatScreen(
     var showChatSearch by remember { mutableStateOf(false) }
     var showSecrets by remember { mutableStateOf(false) }
     var showPlugins by remember { mutableStateOf(false) }
+    // A starter tapped on the welcome screen: its text goes into the input, like on the PC.
+    var prefill by remember { mutableStateOf<String?>(null) }
     var showBoard by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -341,9 +354,9 @@ fun ChatScreen(
                     if (empty) {
                         if (searching && searchQuery.isNotBlank()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(stringResource(R.string.nothing_found), color = MaterialTheme.colorScheme.outline)
+                                AltiEmpty(stringResource(R.string.nothing_found))
                             }
-                        } else WelcomeState(Modifier.fillMaxSize())
+                        } else WelcomeState(Modifier.fillMaxSize(), onStarter = { prefill = it })
                     } else {
                         LazyColumn(
                             state = listState,
@@ -422,6 +435,8 @@ fun ChatScreen(
                     onPickFile = onPickFileUri,
                     onCancel = onCancelRun,
                     onSteer = onSteer,
+                    prefill = prefill,
+                    onPrefillUsed = { prefill = null },
                 )
             }
             // Плавающие кнопки поверх безграничного чата — без шапки.
@@ -635,11 +650,7 @@ private fun ChatMenuScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 12.dp))
             if (items.isEmpty()) {
-                SettingsGroup {
-                    Text(stringResource(R.string.files_media_empty),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp))
-                }
+                AltiEmpty(stringResource(R.string.files_media_empty), Modifier.fillMaxWidth())
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(4),
@@ -729,6 +740,11 @@ private fun ChatSearchDialog(
 
 // ---------------------------------------------------------------- drawer
 
+/**
+ * The menu, laid out like the PC rail (premium.css): the Altair mark, a "New chat" plate with the
+ * accent icon, quiet rows with thin icons, uppercase section labels, the open chat drawn as a plate,
+ * and the profile at the bottom (it opens Settings).
+ */
 @Composable
 private fun DrawerContent(
     state: ChatUiState,
@@ -741,102 +757,133 @@ private fun DrawerContent(
     onOpenBoard: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
+    val alt = com.localaiagent.app.ui.theme.LocalAltair.current
     ModalDrawerSheet(
         modifier = Modifier.fillMaxWidth(0.86f),
-        drawerContainerColor = MaterialTheme.colorScheme.background,
+        drawerContainerColor = alt.rail,
         drawerTonalElevation = 0.dp,
+        drawerShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
     ) {
-        Column(Modifier.fillMaxHeight().statusBarsPadding().padding(horizontal = 8.dp)) {
-            // Шапка: имя/название + круглая кнопка поиска (как в референсе).
+        Column(Modifier.fillMaxHeight().statusBarsPadding().navigationBarsPadding().padding(horizontal = 12.dp)) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 6.dp),
+                Modifier.fillMaxWidth().padding(start = 6.dp, top = 10.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    state.nickname.ifBlank { "Altair" },
-                    style = MaterialTheme.typography.titleLarge, maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
-                DrawerCircleButton(Icons.Rounded.Search, stringResource(R.string.nav_search), onOpenSearch)
+                AltiMascot(size = 30.dp, satellites = false)
+                Spacer(Modifier.width(8.dp))
+                Text("Altair", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                IconButton(onClick = onOpenSearch) {
+                    Icon(Icons.Rounded.Search, stringResource(R.string.nav_search), Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
 
-            // Навигация по реальным разделам приложения.
-            NavigationDrawerItem(
-                label = { Text(stringResource(R.string.nav_library)) }, icon = { Icon(Icons.Rounded.PhotoLibrary, null) },
-                selected = false, onClick = onOpenLibrary,
-                badge = { if (state.libraryItems.isNotEmpty()) Text("${state.libraryItems.size}") },
-            )
-            NavigationDrawerItem(
-                label = { Text(stringResource(R.string.nav_board)) }, icon = { Icon(Icons.Rounded.Dashboard, null) },
-                selected = false, onClick = onOpenBoard,
-                badge = { if (state.board.isNotEmpty()) Text("${state.board.size}") },
-            )
-            NavigationDrawerItem(
-                label = { Text(stringResource(R.string.nav_secrets)) }, icon = { Icon(Icons.Rounded.Key, null) },
-                selected = false, onClick = onOpenSecrets,
-                badge = { if (state.secrets.isNotEmpty()) Text("${state.secrets.size}") },
-            )
-            NavigationDrawerItem(
-                label = { Text(stringResource(R.string.nav_plugins)) }, icon = { Icon(Icons.Rounded.Extension, null) },
-                selected = false, onClick = onOpenPlugins,
-                badge = {
-                    val n = state.mcpServers.size + state.skills.size
-                    if (n > 0) Text("$n")
-                },
-            )
+            // "New chat": a plate with the accent icon (PC .rail-new).
+            Row(
+                Modifier
+                    .padding(horizontal = 6.dp, vertical = 6.dp)
+                    .fillMaxWidth()
+                    .plate(12.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onNewChat)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Add, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Text(stringResource(R.string.nav_new_chat), style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+            }
 
-            Text(
-                stringResource(R.string.nav_recent), style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp),
-            )
+            RailLabel(stringResource(R.string.nav_section_space))
+            RailRow(Icons.Outlined.PhotoLibrary, stringResource(R.string.nav_library), badge = state.libraryItems.size, onClick = onOpenLibrary)
+            RailRow(Icons.Outlined.Dashboard, stringResource(R.string.nav_board), badge = state.board.size, onClick = onOpenBoard)
+            RailRow(Icons.Outlined.Key, stringResource(R.string.nav_secrets), badge = state.secrets.size, onClick = onOpenSecrets)
+            RailRow(Icons.Outlined.Extension, stringResource(R.string.nav_plugins), badge = state.mcpServers.size + state.skills.size, onClick = onOpenPlugins)
+
+            RailLabel(stringResource(R.string.nav_section_chats))
             LazyColumn(Modifier.weight(1f)) {
-                items(state.chats) { c ->
-                    NavigationDrawerItem(
-                        label = { Text(c.title, maxLines = 1) },
-                        selected = c.id == state.currentChatId,
-                        onClick = { onSwitchChat(c.id) },
+                items(state.chats, key = { it.id }) { c ->
+                    RailRow(
+                        Icons.Outlined.ChatBubbleOutline, c.title,
+                        active = c.id == state.currentChatId, onClick = { onSwitchChat(c.id) },
                     )
                 }
             }
 
-            // Нижняя панель: пилюля «Чат» (новый чат) + аватар-инициалы (настройки).
+            // Profile at the bottom (PC .profile-btn): the avatar in the accent gradient, the name.
+            Box(Modifier.fillMaxWidth().height(1.dp).background(alt.hair))
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onOpenSettings)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f).clickable(onClick = onNewChat),
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .border(1.dp, alt.hair, CircleShape)
+                        .padding(3.dp)
+                        .clip(CircleShape)
+                        .background(com.localaiagent.app.ui.theme.accentGradient()),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Row(
-                        Modifier.padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Rounded.EditNote, null, tint = MaterialTheme.colorScheme.onPrimary)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(R.string.nav_new_chat), color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                        )
-                    }
+                    Text(drawerInitials(state.nickname), style = MaterialTheme.typography.labelLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimary)
                 }
-                Spacer(Modifier.width(10.dp))
-                Surface(
-                    shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.size(46.dp).clickable(onClick = onOpenSettings),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            drawerInitials(state.nickname),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(state.nickname.ifBlank { "Altair" }, style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, maxLines = 1)
+                    Text(stringResource(R.string.drawer_profile_hint), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
                 }
+                Icon(Icons.Outlined.Settings, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+    }
+}
+
+/** Uppercase section label of the rail (PC .rail-section-label). */
+@Composable
+private fun RailLabel(text: String) {
+    Text(
+        text.uppercase(), style = MaterialTheme.typography.labelSmall,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+        letterSpacing = 0.1.em, color = MaterialTheme.colorScheme.outline,
+        modifier = Modifier.padding(start = 12.dp, top = 16.dp, bottom = 6.dp),
+    )
+}
+
+/** A rail row: a thin icon and a label; the open chat is a plate with the accent icon. */
+@Composable
+private fun RailRow(icon: ImageVector, label: String, active: Boolean = false, badge: Int = 0, onClick: () -> Unit) {
+    val alt = com.localaiagent.app.ui.theme.LocalAltair.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp, vertical = 1.dp)
+            .then(
+                if (active) Modifier.background(alt.core, RoundedCornerShape(10.dp)).border(1.dp, alt.hair, RoundedCornerShape(10.dp))
+                else Modifier,
+            )
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(19.dp),
+            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+            color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f))
+        if (badge > 0) {
+            Text("$badge", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -935,14 +982,17 @@ private fun MessageBubble(
             }
         }
         // Пользователь — акцентный пузырь (цвет выбирает юзер), справа.
+        // The user's message: a neutral plate on the right, as on the PC (not an accent fill).
         msg.fromUser -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            val alt = com.localaiagent.app.ui.theme.LocalAltair.current
             Surface(
-                color = MaterialTheme.colorScheme.primary,
-                shape = RoundedCornerShape(Dims.rBubble, Dims.rBubble, Dims.sm, Dims.rBubble),
-                modifier = Modifier.fillMaxWidth(0.85f).wrapContentWidth(Alignment.End),
+                color = alt.core,
+                shape = com.localaiagent.app.ui.theme.PremiumRadii.bubble,
+                border = BorderStroke(1.dp, alt.hair),
+                modifier = Modifier.fillMaxWidth(0.82f).wrapContentWidth(Alignment.End),
             ) {
-                Text(msg.text, Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
+                Text(msg.text, Modifier.padding(horizontal = 18.dp, vertical = 13.dp),
+                    color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
             }
         }
         // Ассистент — во весь экран, без рамок, крупным текстом.
@@ -1061,9 +1111,9 @@ private fun ActionIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
 private fun QuickReplyChip(text: String, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(50),
-        color = Color.Transparent,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.clickable(onClick = onClick),
+        color = com.localaiagent.app.ui.theme.LocalAltair.current.core,
+        border = BorderStroke(1.dp, com.localaiagent.app.ui.theme.LocalAltair.current.hair),
+        modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick),
     ) {
         Row(
             Modifier.padding(start = 10.dp, end = 14.dp, top = 7.dp, bottom = 7.dp),
@@ -1509,7 +1559,7 @@ private fun ThinkingIndicator(status: String) {
         Modifier.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StarPulse()
+        AltiMascot(size = 26.dp, satellites = false, mood = AltiMood.Think)
         if (status.isNotBlank()) {
             Spacer(Modifier.width(8.dp))
             Text(
@@ -1530,131 +1580,76 @@ private fun msgContentType(msg: ChatMessage): String = when {
     else -> "assistant"
 }
 
-// ---------------------------------------------------------------- mascot "Alti"
-
-/** Alti's star outline (the cubic Béziers from mascot.js, 24×24 grid); center (cx, cy), R to a tip. */
-private fun altiPath(cx: Float, cy: Float, R: Float): Path {
-    val s = R / 11.4f
-    fun px(x: Float) = cx + (x - 12f) * s
-    fun py(y: Float) = cy + (y - 12f) * s
-    return Path().apply {
-        moveTo(px(12f), py(0.6f))
-        cubicTo(px(13.2f), py(7.7f), px(16.3f), py(10.8f), px(23.4f), py(12f))
-        cubicTo(px(16.3f), py(13.2f), px(13.2f), py(16.3f), px(12f), py(23.4f))
-        cubicTo(px(10.8f), py(16.3f), px(7.7f), py(13.2f), px(0.6f), py(12f))
-        cubicTo(px(7.7f), py(10.8f), px(10.8f), py(7.7f), px(12f), py(0.6f))
-        close()
-    }
-}
-
-/** The star body: a volumetric radial gradient, shading at the bottom, gloss and a rim (mascot.js spec). */
-private fun DrawScope.drawAltiBody(cx: Float, cy: Float, R: Float) {
-    val path = altiPath(cx, cy, R)
-    drawPath(
-        path,
-        Brush.radialGradient(
-            0f to Color(0xFFFFF6DA), 0.42f to Color(0xFFFFD37A), 0.80f to Color(0xFFF1A93C), 1f to Color(0xFFD6811E),
-            center = Offset(cx - 0.28f * R, cy - 0.40f * R), radius = 1.7f * R,
-        ),
-    )
-    // darker toward the bottom for volume
-    drawPath(
-        path,
-        Brush.verticalGradient(0f to Color.Transparent, 0.55f to Color.Transparent, 1f to Color(0x6B5A2D08), startY = cy - R, endY = cy + R),
-    )
-    // glossy highlight at the upper left, inside the outline
-    clipPath(path) {
-        drawCircle(
-            Brush.radialGradient(listOf(Color.White.copy(alpha = 0.5f), Color.Transparent),
-                center = Offset(cx - 0.30f * R, cy - 0.45f * R), radius = 0.95f * R),
-            radius = 0.95f * R, center = Offset(cx - 0.30f * R, cy - 0.45f * R),
-        )
-    }
-    // rim outline
-    drawPath(path, Brush.verticalGradient(listOf(Color(0xFFFFE9A8), Color(0xFFC9761A)), startY = cy - R, endY = cy + R),
-        style = Stroke(width = R * 0.05f), alpha = 0.55f)
-}
-
-/**
- * Alti: the main star, two satellites (the three bodies) and a minimal face, animated like on the PC
- * (redesign.layout.css): the core floats with a slight sway, its contact shadow shrinks as it rises,
- * the satellites bob on their own rhythms, and the whole mascot pops in on appearance.
- */
-@Composable
-private fun AltiMascot(size: Dp, satellites: Boolean = true) {
-    val t = rememberInfiniteTransition(label = "alti")
-    val ease = androidx.compose.animation.core.CubicBezierEasing(0.45f, 0f, 0.55f, 1f)
-    fun spec(ms: Int) = infiniteRepeatable<Float>(tween(ms / 2, easing = ease), RepeatMode.Reverse)
-    val float by t.animateFloat(0f, 1f, spec(4500), label = "float")
-    val bobA by t.animateFloat(0f, 1f, spec(5500), label = "bobA")
-    val bobB by t.animateFloat(0f, 1f, spec(6800), label = "bobB")
-    val glow by t.animateFloat(0.12f, 0.20f, infiniteRepeatable(tween(2200), RepeatMode.Reverse), label = "gl")
-    val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, tween(600, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f))) }
-
-    Canvas(Modifier.size(size).graphicsLayer {
-        alpha = appear.value
-        val sc = 0.82f + 0.18f * appear.value
-        scaleX = sc
-        scaleY = sc
-    }) {
-        val w = this.size.width
-        val cx = w / 2f
-        val baseCy = w / 2f
-        val R = w * 0.33f
-        val s = R / 11.4f
-        // Rise by 5% of the star with a ±1.5° sway, as in the PC keyframes.
-        val lift = -0.05f * (24f * s) * float
-        val sway = -1.5f + 3f * float
-        val cy = baseCy + lift
-
-        // contact shadow: narrower and fainter while the star is up
-        val shW = 6.2f * s * (1f - 0.14f * float)
-        drawOval(
-            Color.Black.copy(alpha = 0.28f - 0.10f * float),
-            topLeft = Offset(cx - shW, baseCy + 10.4f * s - 1.15f * s), size = Size(shW * 2, 2.3f * s),
-        )
-        drawCircle(
-            Brush.radialGradient(listOf(Brand.glow.copy(alpha = glow), Color.Transparent), center = Offset(cx, cy), radius = R * 2f),
-            radius = R * 2f, center = Offset(cx, cy),
-        )
-        if (satellites) {
-            val aY = -0.08f * (0.4f * 24f * s) * bobA
-            drawAltiBody(cx + (20.6f - 12f) * s, baseCy + (4.4f - 12f) * s + aY, R * 0.40f * (1f + 0.07f * bobA))
-            val bY = 0.08f * (0.28f * 24f * s) * bobB
-            drawAltiBody(cx + (3.6f - 12f) * s, baseCy + (19.2f - 12f) * s + bY, R * 0.28f * (1f - 0.08f * bobB))
-        }
-        rotate(sway, pivot = Offset(cx, cy)) {
-            drawAltiBody(cx, cy, R)
-            val eye = Color(0xFF241608)
-            val ew = 1.5f * s
-            val eh = 3.0f * s
-            val er = 0.75f * s
-            val ey = cy + (12.4f - 12f) * s
-            val ex1 = cx + (9.7f - 12f) * s
-            val ex2 = cx + (14.3f - 12f) * s
-            drawRoundRect(eye, topLeft = Offset(ex1 - ew / 2, ey - eh / 2), size = Size(ew, eh), cornerRadius = CornerRadius(er, er))
-            drawRoundRect(eye, topLeft = Offset(ex2 - ew / 2, ey - eh / 2), size = Size(ew, eh), cornerRadius = CornerRadius(er, er))
-            drawCircle(Color.White.copy(alpha = 0.9f), radius = 0.42f * s, center = Offset(ex1 + 0.45f * s, ey - eh / 2 + 0.55f * s))
-            drawCircle(Color.White.copy(alpha = 0.9f), radius = 0.42f * s, center = Offset(ex2 + 0.45f * s, ey - eh / 2 + 0.55f * s))
-        }
-    }
-}
+/** A starter on the welcome screen: an icon and a prompt that fills the input (PC `.starter`). */
+private data class Starter(val icon: ImageVector, val text: Int)
 
 @Composable
-private fun WelcomeState(modifier: Modifier = Modifier) {
+private fun WelcomeState(modifier: Modifier = Modifier, onStarter: (String) -> Unit = {}) {
+    val starters = buildList {
+        add(Starter(Icons.Outlined.Language, R.string.starter_web))
+        add(Starter(Icons.Outlined.Calculate, R.string.starter_math))
+        add(Starter(Icons.Outlined.Code, R.string.starter_python))
+        add(
+            if (PcBridgeFacade.SUPPORTED) Starter(Icons.Outlined.Computer, R.string.starter_pc)
+            else Starter(Icons.Outlined.Description, R.string.starter_plan),
+        )
+    }
     Box(modifier, contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            AltiMascot(size = 118.dp)
-            Text(stringResource(R.string.welcome_title), style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 12.dp))
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            AltiMascot(size = 108.dp)
+            Text(
+                stringResource(R.string.welcome_title), style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 10.dp),
+            )
             Text(
                 if (PcBridgeFacade.SUPPORTED) stringResource(R.string.welcome_subtitle_bridge)
                 else stringResource(R.string.welcome_subtitle),
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, start = 24.dp, end = 24.dp),
+                style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp, bottom = 22.dp),
             )
+            starters.forEachIndexed { i, st ->
+                val text = stringResource(st.text)
+                StarterCard(st.icon, text, delayMs = 60 * i) { onStarter(text) }
+                Spacer(Modifier.height(14.dp))
+            }
         }
+    }
+}
+
+/** A plate that rises in with a small stagger and presses in on tap (PC `.starter`, `p-rise`). */
+@Composable
+private fun StarterCard(icon: ImageVector, text: String, delayMs: Int, onClick: () -> Unit) {
+    val rise = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(delayMs.toLong())
+        rise.animateTo(1f, tween(640, easing = androidx.compose.animation.core.CubicBezierEasing(0.16f, 1f, 0.3f, 1f)))
+    }
+    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val press by animateFloatAsState(if (pressed) 0.985f else 1f, tween(280, easing = com.localaiagent.app.ui.theme.SpringEasing), label = "press")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = rise.value
+                translationY = (1f - rise.value) * 10.dp.toPx()
+                scaleX = press
+                scaleY = press
+            }
+            // Slightly see-through, so the sky shows (PC: core at 86 %).
+            .plate(16.dp, fill = com.localaiagent.app.ui.theme.LocalAltair.current.core.copy(alpha = 0.86f))
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 17.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(14.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -1733,8 +1728,18 @@ private fun InputBar(
     onCamera: (Bitmap) -> Unit,
     onPickImage: (android.net.Uri) -> Unit,
     onPickFile: (android.net.Uri) -> Unit,
+    prefill: String? = null,
+    onPrefillUsed: () -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
+    val inputFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(prefill) {
+        if (prefill != null) {
+            input = prefill
+            onPrefillUsed()
+            runCatching { inputFocus.requestFocus() }
+        }
+    }
     var attachSheet by remember { mutableStateOf(false) }
     var drawing by remember { mutableStateOf(false) }
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -1755,12 +1760,15 @@ private fun InputBar(
         )
     }
 
-    // Поднимаем строку ровно на высоту клавиатуры (ime), а без клавиатуры — держим над
-    // навигационной панелью. union берёт максимум по стороне → без двойного смещения.
+    // Lift the bar exactly by the keyboard height (ime), and above the navigation bar without it;
+    // union takes the larger inset per side, so there is no double offset.
+    val inputInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val inputFocused by inputInteraction.collectIsFocusedAsState()
     Column(
         Modifier
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            // Room for the plate's outer ring (drawn outside its bounds).
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         if (pendingImagePath != null) {
             Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1788,13 +1796,10 @@ private fun InputBar(
                 Text(stringResource(R.string.steer_hint), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
             }
         }
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            shape = RoundedCornerShape(26.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        // The composer is a plate in its tray, as on the PC; on focus the ring takes the accent.
+        Box(Modifier.fillMaxWidth().plate(com.localaiagent.app.ui.theme.PremiumRadii.lg, focused = inputFocused)) {
             Row(
-                Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box {
@@ -1820,7 +1825,9 @@ private fun InputBar(
                 TextField(
                     value = input,
                     onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).focusRequester(inputFocus),
+                    interactionSource = inputInteraction,
+                    textStyle = MaterialTheme.typography.bodyLarge,
                     placeholder = { Text(stringResource(R.string.ask_placeholder), color = MaterialTheme.colorScheme.outline) },
                     maxLines = 6,
                     colors = TextFieldDefaults.colors(
@@ -1829,7 +1836,7 @@ private fun InputBar(
                         disabledContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
-                        cursorColor = MaterialTheme.colorScheme.primary, // мигающая палочка — акцент
+                        cursorColor = MaterialTheme.colorScheme.primary, // the caret is the accent
                     ),
                 )
                 Box(Modifier.padding(end = 2.dp), contentAlignment = Alignment.Center) {
@@ -1842,30 +1849,46 @@ private fun InputBar(
                         )
                     }
                     val canSend = (input.isNotBlank() || pendingImagePath != null || pendingFileName != null) && !running
-                    // #2 «Стиринг на лету»: во время стрима текст в поле → подкрутить направление.
+                    // Steering on the fly: text typed during a run adjusts its direction.
                     val canSteer = running && input.isNotBlank()
                     val active = canSend || canSteer || running
-                    val sendScale by animateFloatAsState(if (active) 1f else 0.9f, label = "send")
-                    // #Фаза2: при отправке кнопка «выстреливает» золотыми искрами (комета/бурст).
+                    // The send key as on the PC: a rounded square in the accent gradient, pressed in on
+                    // tap; red while it stops a run; dimmed when there is nothing to send.
+                    val pressSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val pressed by pressSource.collectIsPressedAsState()
+                    val sendScale by animateFloatAsState(
+                        if (pressed) 0.92f else 1f,
+                        tween(280, easing = com.localaiagent.app.ui.theme.SpringEasing), label = "send",
+                    )
+                    val stopping = running && !canSteer
+                    // A burst of gold sparks on send.
                     var sendBurst by remember { mutableStateOf(0) }
-                    Box(contentAlignment = Alignment.Center) {
-                        FilledIconButton(
-                            onClick = {
-                                if (canSteer) { onSteer(input); input = "" }
-                                else if (running) onCancel()
-                                else if (canSend) { onSend(input); input = ""; sendBurst++ }
-                            },
-                            enabled = active,
-                            modifier = Modifier.graphicsLayer { scaleX = sendScale; scaleY = sendScale },
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(4.dp)) {
+                        val onAccent = MaterialTheme.colorScheme.onPrimary
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .graphicsLayer { scaleX = sendScale; scaleY = sendScale; alpha = if (active) 1f else 0.35f }
+                                .clip(RoundedCornerShape(12.dp))
+                                .then(
+                                    if (stopping) Modifier.background(MaterialTheme.colorScheme.error)
+                                    else Modifier.background(com.localaiagent.app.ui.theme.accentGradient()),
+                                )
+                                .border(1.dp, Color.White.copy(alpha = if (stopping) 0f else 0.18f), RoundedCornerShape(12.dp))
+                                .clickable(
+                                    interactionSource = pressSource, indication = null, enabled = active,
+                                ) {
+                                    if (canSteer) { onSteer(input); input = "" }
+                                    else if (running) onCancel()
+                                    else if (canSend) { onSend(input); input = ""; sendBurst++ }
+                                },
+                            contentAlignment = Alignment.Center,
                         ) {
+                            val tint = if (stopping) Color.White else onAccent
                             when {
-                                canSteer -> Icon(Icons.AutoMirrored.Rounded.AltRoute, stringResource(R.string.steer_action))
-                                running -> Icon(Icons.Rounded.Stop, stringResource(R.string.stop))
-                                else -> Icon(Icons.Rounded.ArrowUpward, stringResource(R.string.send))
+                                canSteer -> Icon(Icons.AutoMirrored.Rounded.AltRoute, stringResource(R.string.steer_action), tint = tint, modifier = Modifier.size(20.dp))
+                                running -> Icon(Icons.Rounded.Stop, stringResource(R.string.stop), tint = tint, modifier = Modifier.size(20.dp))
+                                else -> Icon(Icons.Rounded.ArrowUpward, stringResource(R.string.send), tint = tint, modifier = Modifier.size(20.dp))
                             }
                         }
                         StarBurst(sendBurst, Modifier.matchParentSize())
@@ -1920,6 +1943,8 @@ private fun SettingsScreen(
                     "light" -> stringResource(R.string.theme_light)
                     "dark" -> stringResource(R.string.theme_dark)
                     "black" -> stringResource(R.string.theme_black)
+                    "snow" -> stringResource(R.string.theme_snow)
+                    "graphite" -> stringResource(R.string.theme_graphite)
                     else -> stringResource(R.string.theme_system)
                 }
                 val activeTitle = state.models.firstOrNull { it.id == state.activeModelId }?.title
@@ -2007,7 +2032,9 @@ private fun AppearanceScreen(
                 val themes = listOf(
                     "system" to stringResource(R.string.theme_system),
                     "light" to stringResource(R.string.theme_light),
+                    "snow" to stringResource(R.string.theme_snow),
                     "dark" to stringResource(R.string.theme_dark),
+                    "graphite" to stringResource(R.string.theme_graphite),
                     "black" to stringResource(R.string.theme_black),
                 )
                 themes.forEach { (mode, label) ->

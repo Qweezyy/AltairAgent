@@ -326,8 +326,7 @@ fun BoardSheet(
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
             Spacer(Modifier.size(12.dp))
             if (items.isEmpty()) {
-                Text(stringResource(R.string.board_empty), color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(vertical = 24.dp))
+                AltiEmpty(stringResource(R.string.board_empty), Modifier.fillMaxWidth())
             } else {
                 Column(Modifier.verticalScroll(rememberScrollState()).fillMaxWidth().heightIn(max = 420.dp)) {
                     items.forEachIndexed { i, snippet ->

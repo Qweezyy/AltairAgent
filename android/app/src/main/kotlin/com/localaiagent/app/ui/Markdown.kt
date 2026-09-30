@@ -1,5 +1,6 @@
 package com.localaiagent.app.ui
 
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.res.stringResource
 import com.localaiagent.app.R
 
@@ -61,7 +62,7 @@ fun MarkdownText(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.onBackground,
 ) {
-    val codeColor = MaterialTheme.colorScheme.primary
+    val codeColor = color
     val linkColor = MaterialTheme.colorScheme.primary
     // Тяжёлый разбор кэшируем: пересчитывается только при смене текста или цветов темы.
     val nodes = remember(text, color, codeColor, linkColor) {
@@ -80,7 +81,7 @@ private fun RenderNode(node: MdNode, color: Color) {
     // проза → bodyLarge, цитата → bodyMedium, заголовки → headlineSmall/titleLarge/titleMedium.
     val typo = MaterialTheme.typography
     when (node) {
-        is MdNode.Code -> CodeBlock(node.content)
+        is MdNode.Code -> CodeBlock(node.content, node.lang)
         is MdNode.Blank -> Spacer(Modifier.height(6.dp))
         is MdNode.Quote -> Row(Modifier.padding(vertical = 2.dp)) {
             androidx.compose.foundation.layout.Box(
@@ -180,37 +181,43 @@ private fun InlineImage(url: String, caption: String) {
 }
 
 @Composable
-private fun CodeBlock(code: String) {
+private fun CodeBlock(code: String, lang: String = "") {
     val clipboard = LocalClipboardManager.current
     val body = code.trimEnd('\n')
-    Surface(
-        // surfaceContainerHigh заметно контрастнее фона (на тёмной теме surface почти
-        // сливался с фоном страницы).
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    val alt = com.localaiagent.app.ui.theme.LocalAltair.current
+    // As on the PC: a quiet header (language + copy) over a core plate, both on a hairline.
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp)
+            .border(1.dp, alt.hair, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp)),
     ) {
-        Box(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                .padding(start = 12.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                body,
-                modifier = Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(start = 12.dp, end = 40.dp, top = 8.dp, bottom = 8.dp),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface,
+                lang.ifBlank { "code" }, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f),
             )
-            // Кнопка копирования кода — частый запрос в кодинге/учёбе.
-            IconButton(
-                onClick = { clipboard.setText(AnnotatedString(body)) },
-                modifier = Modifier.align(Alignment.TopEnd).size(32.dp),
-            ) {
+            IconButton(onClick = { clipboard.setText(AnnotatedString(body)) }, modifier = Modifier.size(34.dp)) {
                 Icon(
                     Icons.Rounded.ContentCopy, stringResource(R.string.copy_code),
                     Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(alt.hair))
+        Text(
+            body,
+            modifier = Modifier.fillMaxWidth().background(alt.core)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            fontFamily = com.localaiagent.app.ui.theme.AppMono,
+            fontSize = 13.sp,
+            lineHeight = 20.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
@@ -218,7 +225,7 @@ private fun CodeBlock(code: String) {
 
 /** Готовый к рендеру узел markdown (разобран заранее, без композиции). */
 private sealed interface MdNode {
-    data class Code(val content: String) : MdNode
+    data class Code(val content: String, val lang: String = "") : MdNode
     object Blank : MdNode
     data class Quote(val text: AnnotatedString) : MdNode
     data class Header(val level: Int, val text: AnnotatedString) : MdNode
@@ -234,7 +241,7 @@ private sealed interface MdSegment {
     data class Img(val url: String, val caption: String) : MdSegment
 }
 
-private data class Block(val isCode: Boolean, val content: String)
+private data class Block(val isCode: Boolean, val content: String, val lang: String = "")
 
 // Regex-ы скомпилированы один раз (были — на каждую строку при каждой рекомпозиции).
 private val IMG_RE = Regex("!\\[([^\\]]*)\\]\\(([^)]+)\\)")
@@ -254,7 +261,7 @@ private fun parseMarkdown(
     val nodes = mutableListOf<MdNode>()
     for (block in splitByFences(text)) {
         if (block.isCode) {
-            nodes += MdNode.Code(block.content)
+            nodes += MdNode.Code(block.content, block.lang)
             continue
         }
         val lines = block.content.split("\n")
@@ -336,12 +343,15 @@ private fun splitByFences(text: String): List<Block> {
     val lines = text.split("\n")
     val buf = StringBuilder()
     var inCode = false
+    var lang = ""
     fun flush(isCode: Boolean) {
-        if (buf.isNotEmpty()) { blocks += Block(isCode, buf.toString()); buf.clear() }
+        if (buf.isNotEmpty()) { blocks += Block(isCode, buf.toString(), if (isCode) lang else ""); buf.clear() }
     }
     for (line in lines) {
         if (line.trimStart().startsWith("```")) {
             flush(inCode)
+            // The fence's info string ("```bash") names the language shown in the code header.
+            if (!inCode) lang = line.trimStart().removePrefix("```").trim().substringBefore(' ')
             inCode = !inCode
             continue
         }
@@ -373,7 +383,8 @@ private fun parseInline(text: String, codeColor: Color, linkColor: Color): Annot
                 rest.startsWith("`") -> {
                     val end = text.indexOf("`", i + 1)
                     if (end > 0) {
-                        withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = codeColor)) {
+                        // Inline code as on the PC: mono on a faint pill, in the text colour.
+                        withStyle(SpanStyle(fontFamily = com.localaiagent.app.ui.theme.AppMono, fontSize = 0.9.em, background = codeColor.copy(alpha = 0.08f))) {
                             append(text.substring(i + 1, end))
                         }
                         i = end + 1

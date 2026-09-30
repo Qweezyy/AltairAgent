@@ -117,7 +117,7 @@ fun PluginsScreen(
                 LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp)) {
                     item { Hint(stringResource(R.string.plugins_mcp_hint)) }
                     if (servers.isEmpty()) {
-                        item { Hint(stringResource(R.string.plugins_no_servers)) }
+                        item { AltiEmpty(stringResource(R.string.plugins_no_servers), Modifier.fillMaxWidth()) }
                     } else {
                         items(servers, key = { "srv:" + it.name }) { s ->
                             McpServerRow(

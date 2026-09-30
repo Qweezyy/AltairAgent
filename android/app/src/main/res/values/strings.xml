@@ -260,7 +260,7 @@
     <string name="status_thinking">Thinking…</string>
     <string name="status_processing">Processing: %1$s</string>
     <string name="status_checking">Checking…</string>
-    <string name="status_no_key">**The model has no API key yet**, so I cannot answer.\n\nTo fix it:\n1. Open the menu ☰ (top left) and tap the round profile button at the bottom, next to **New chat** — that opens Settings.\n2. Go to **Models** and open the active model.\n3. Paste the provider API key and tap **Save**.\n4. Send your message again.\n\nThe key is stored encrypted on this phone. A local model (Ollama, LM Studio) may need no key: then enter any placeholder, such as `local`.</string>
+    <string name="status_no_key">**The model has no API key yet**, so I cannot answer.\n\nTo fix it:\n1. Open the menu ☰ (top left) and tap your profile at the very bottom — that opens Settings.\n2. Go to **Models** and open the active model.\n3. Paste the provider API key and tap **Save**.\n4. Send your message again.\n\nThe key is stored encrypted on this phone. A local model (Ollama, LM Studio) may need no key: then enter any placeholder, such as `local`.</string>
     <string name="error_prefix">Error: %1$s</string>
     <string name="status_reconnecting">Reconnecting %1$d/%2$d…</string>
     <string name="status_tool">Tool: %1$s</string>
@@ -329,4 +329,14 @@
     <string name="bridge_hint_refused">The PC refused the connection: Altair on the PC is not running, or it only listens to the computer itself. Enable phone access in the PC app and restart it.</string>
     <string name="bridge_hint_unknown_host">The PC name could not be found. Use its IP address (or its Tailscale address) instead.</string>
     <string name="settings_version">Altair %1$s</string>
+    <string name="starter_web">Search the web and summarize</string>
+    <string name="starter_math">Solve a problem step by step</string>
+    <string name="starter_python">Write and run a Python script</string>
+    <string name="starter_pc">Give my PC a task</string>
+    <string name="starter_plan">Draft a step-by-step project plan</string>
+    <string name="nav_section_chats">Chats</string>
+    <string name="nav_section_space">Workspace</string>
+    <string name="drawer_profile_hint">Settings</string>
+    <string name="theme_snow">Snow</string>
+    <string name="theme_graphite">Graphite</string>
 </resources>

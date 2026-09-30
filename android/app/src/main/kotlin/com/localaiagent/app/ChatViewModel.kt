@@ -243,6 +243,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val secretStore = com.localaiagent.app.data.SecretStore(app.filesDir)
     private val mcpStore = com.localaiagent.app.mcp.McpStore(app.filesDir)
     private val mcpRegistry = com.localaiagent.app.mcp.McpRegistry(mcpStore)
+
+    // Declared before init {}: startPresenceProbe() runs from init and registers callbacks that may
+    // fire at once, and Kotlin initialises properties in declaration order.
+    /** Wakes the presence loop for an immediate re-check (foreground, network change, new bridge). */
+    private val presencePoke = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private fun chatDir(): File = File(getApplication<Application>().filesDir, "chats/${current.id}").apply { mkdirs() }
 
     /** Навыки на телефоне (имя+описание) для экрана «Плагины». */
@@ -324,14 +330,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (PcBridgeFacade.SUPPORTED) startPresenceProbe()
     }
 
-    /** Wakes the presence loop for an immediate re-check (foreground, network change, new bridge). */
-    private val presencePoke = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
 
     fun pokePresence() {
         presencePoke.trySend(Unit)
     }
 
-    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
     /**
      * Live PC presence for the chip next to the menu. A plain timer was not enough: after one failed

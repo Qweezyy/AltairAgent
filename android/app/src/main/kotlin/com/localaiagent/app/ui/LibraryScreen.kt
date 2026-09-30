@@ -75,8 +75,7 @@ fun LibraryScreen(items: List<LibraryItem>, onClose: () -> Unit) {
                 Row(header = stringResource(R.string.lib_title), onClose = onClose)
                 if (items.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.lib_empty),
-                            color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(24.dp))
+                        AltiEmpty(stringResource(R.string.lib_empty))
                     }
                 } else {
                     LazyVerticalGrid(

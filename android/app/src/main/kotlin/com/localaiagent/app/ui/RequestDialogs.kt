@@ -166,7 +166,8 @@ fun MemorySuggestDialog(
 fun ApprovalDialog(req: com.localaiagent.app.ApprovalRequest, onDecision: (String) -> Unit) {
     AlertDialog(
         onDismissRequest = { onDecision("deny") },
-        icon = { Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.primary) },
+        // Alti asks, like on the PC cards that need the user.
+        icon = { AltiMascot(size = 52.dp, satellites = false, mood = AltiMood.Help) },
         title = { Text(stringResource(R.string.approve_title)) },
         text = {
             Column {
@@ -252,10 +253,7 @@ fun SecretsScreen(
                     IconButton(onClick = { adding = true }) { Icon(Icons.Rounded.Add, stringResource(R.string.action_add)) }
                 }
                 if (secrets.isEmpty()) {
-                    Text(
-                        stringResource(R.string.secrets_empty),
-                        color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(20.dp),
-                    )
+                    AltiEmpty(stringResource(R.string.secrets_empty), Modifier.fillMaxWidth())
                 } else {
                     LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                         items(secrets) { s -> SecretRow(s, onRemove, onSetAvailability) }

@@ -31,6 +31,12 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 - **Your profile.** The row of buttons at the bottom of the chat list is one button with your avatar and
   name; it opens the settings (theme and updates moved there, "Recently deleted" to the ⋯ menu). Set any
   name and picture; the agent calls you by that name.
+- **Android: the premium look of the PC app.** Geist and JetBrains Mono bundled, the PC themes
+  (Black, Dark, Graphite, Light, Snow), plates with a hairline and an outer tray for the composer,
+  cards and settings, a neutral bubble for your messages, a gradient send key, code blocks with a
+  language header, and the menu laid out like the PC chat rail with your profile at the bottom.
+  The welcome screen gets starters that fill the input, and Alti lives around the app: asleep in
+  empty places, thinking next to the running status, asking on approval cards, blinking when idle.
 - A round of tools that ran the same step several times says it once: "Ran a command 3 times".
 - The built-in quick commands follow the interface language (`/tests` and `/тесты` both work).
 - **Terminal: `altair`.** The same agent and chats in a terminal: an interactive mode, one-shot tasks for
@@ -67,6 +73,8 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   Existing memory is moved over on first start.
 
 ### Fixed
+- Android: the app no longer crashes on start when the network changes while the PC bridge is
+  set up (the presence check ran before its channel existed).
 - In the desktop app `execute_command` hung before running anything (even `Write-Output`): the
   backend's stdin is now the shell's pipe, and on Windows a child inheriting it hung. Children now
   get their own empty stdin.

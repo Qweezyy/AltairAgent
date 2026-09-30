@@ -2,6 +2,8 @@
 
 package com.localaiagent.app.ui
 
+import androidx.compose.ui.draw.clip
+import com.localaiagent.app.ui.theme.plate
 import androidx.compose.ui.res.stringResource
 import com.localaiagent.app.R
 
@@ -87,26 +89,31 @@ fun SettingsScroll(pad: PaddingValues, content: @Composable ColumnScope.() -> Un
     )
 }
 
-/** Сгруппированный блок настроек: заголовок + карточка-поверхность (как в iOS Settings). */
+/**
+ * A group of settings: an uppercase label over a plate, like the PC settings cards (premium.css
+ * `.prov-card`). The plate's ring is drawn outside, hence the small side inset.
+ */
 @Composable
 fun SettingsGroup(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
     if (title != null) {
         Text(
-            title, style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = Dims.md, top = Dims.sm, bottom = Dims.xs),
+            title.uppercase(), style = MaterialTheme.typography.labelSmall,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            letterSpacing = androidx.compose.ui.unit.TextUnit(0.1f, androidx.compose.ui.unit.TextUnitType.Em),
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(start = Dims.md, top = Dims.md, bottom = Dims.xs),
         )
     }
-    Surface(
-        shape = RoundedCornerShape(Dims.rCard),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(vertical = Dims.xs), content = content)
-    }
+    Column(
+        Modifier.padding(horizontal = 4.dp).fillMaxWidth()
+            .plate(Dims.rCard)
+            .clip(RoundedCornerShape(Dims.rCard))
+            .padding(vertical = Dims.xs),
+        content = content,
+    )
 }
 
-/** Строка-переход в подраздел (иконка · заголовок · подпись · шеврон). */
+/** A row that opens a subsection: icon · title · subtitle · chevron. */
 @Composable
 fun SettingRow(icon: ImageVector, title: String, subtitle: String? = null, onClick: () -> Unit) {
     Row(
@@ -114,7 +121,7 @@ fun SettingRow(icon: ImageVector, title: String, subtitle: String? = null, onCli
             .padding(horizontal = Dims.lg, vertical = Dims.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(Dims.lg))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
