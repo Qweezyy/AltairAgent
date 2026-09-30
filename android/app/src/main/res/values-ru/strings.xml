@@ -76,7 +76,7 @@
     <!-- Мост к ПК -->
     <string name="bridge_intro">Свяжи телефон с ПК-агентом, чтобы делегировать задачи разработки.</string>
     <string name="bridge_quick">Быстро</string>
-    <string name="bridge_quick_hint">На ПК откройте «Связать телефон» — появится QR и ссылка. Отсканируйте QR любой камерой (Altair откроется и настроится сам) или вставьте ссылку сюда.</string>
+    <string name="bridge_quick_hint">На ПК открой «Связать телефон» — появятся QR и ссылка. Нажми «Сканировать QR-код с ПК» ниже или вставь ссылку сюда.</string>
     <string name="bridge_link_label">Ссылка связывания (altair://pair…)</string>
     <string name="bridge_from_clipboard">Из буфера</string>
     <string name="bridge_connect">Подключить</string>

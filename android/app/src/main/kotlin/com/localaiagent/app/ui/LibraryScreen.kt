@@ -69,8 +69,8 @@ import java.io.File
 @Composable
 fun LibraryScreen(items: List<LibraryItem>, onClose: () -> Unit) {
     var selected by remember { mutableStateOf<LibraryItem?>(null) }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    FullScreenDialog(onDismissRequest = onClose) {
+        run {
             Column(Modifier.fillMaxSize()) {
                 Row(header = stringResource(R.string.lib_title), onClose = onClose)
                 if (items.isEmpty()) {
@@ -142,8 +142,8 @@ private fun isTable(name: String) = name.substringAfterLast('.', "").lowercase()
 /** Полноэкранный просмотрщик одного вложения (переиспользуется в чате и библиотеке). */
 @Composable
 fun AttachmentViewer(item: LibraryItem, onClose: () -> Unit) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    FullScreenDialog(onDismissRequest = onClose) {
+        run {
             Column(Modifier.fillMaxSize()) {
                 androidx.compose.foundation.layout.Row(
                     Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically,

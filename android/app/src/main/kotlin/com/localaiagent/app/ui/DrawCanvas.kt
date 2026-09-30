@@ -71,9 +71,9 @@ fun DrawCanvas(onDone: (Bitmap) -> Unit, onDismiss: () -> Unit) {
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val strokeWidthPx = 10f
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    FullScreenDialog(onDismissRequest = onDismiss) {
+        run {
+            Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, stringResource(R.string.action_close)) }
                     Text(stringResource(R.string.attach_draw), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))

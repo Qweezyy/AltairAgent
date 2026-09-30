@@ -2,6 +2,15 @@
 
 package com.localaiagent.app.ui
 
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.clip
 import com.localaiagent.app.ui.theme.plate
 import androidx.compose.ui.res.stringResource
@@ -48,6 +57,70 @@ import com.localaiagent.app.ui.theme.Dims
  * Полноэкранное окно (вместо «острова»-диалога): фон приложения на весь экран,
  * прозрачная верхняя панель с заголовком и кнопкой «назад».
  */
+/**
+ * A screen shown over the chat that covers the whole display, system bars included. A plain full-width
+ * Dialog stops at the status and navigation bars, so strips of the chat showed above and below it;
+ * here the dialog window is edge-to-edge with transparent bars, the background runs under them, and
+ * [content] gets the bar insets as padding ([padBars] = false for a Scaffold, which pads itself).
+ */
+@Composable
+fun FullScreenDialog(onDismissRequest: () -> Unit, padBars: Boolean = true, content: @Composable () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        val view = androidx.compose.ui.platform.LocalView.current
+        val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        androidx.compose.runtime.SideEffect {
+            val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window ?: return@SideEffect
+            window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            window.setDimAmount(0f)
+            // Draw under the status bar and the camera cutout too, not only under the navigation bar.
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = if (android.os.Build.VERSION.SDK_INT >= 30)
+                        android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    else android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            // Without these the dialog's decor still pads its top by the status bar height.
+            window.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            )
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            // With NO_LIMITS, MATCH_PARENT stops above the navigation bar: size the window to the
+            // whole display explicitly and pin it to the top.
+            val fullHeight = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                window.windowManager.currentWindowMetrics.bounds.height()
+            } else {
+                @Suppress("DEPRECATION")
+                android.util.DisplayMetrics().also { window.windowManager.defaultDisplay.getRealMetrics(it) }.heightPixels
+            }
+            window.setGravity(android.view.Gravity.TOP)
+            window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, fullHeight)
+            @Suppress("DEPRECATION")
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+            androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            if (padBars) {
+                Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) { content() }
+            } else {
+                content()
+            }
+        }
+    }
+}
+
 @Composable
 fun FullScreenScaffold(
     title: String,
@@ -55,8 +128,9 @@ fun FullScreenScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    Dialog(onDismissRequest = onBack, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    FullScreenDialog(onDismissRequest = onBack, padBars = false) {
+        // The Scaffold pads the system bars; the keyboard is added on top of the navigation bar.
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars))) {
             Scaffold(
                 containerColor = Color.Transparent,
                 topBar = {

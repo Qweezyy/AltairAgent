@@ -77,7 +77,7 @@
     <!-- PC bridge -->
     <string name="bridge_intro">Link your phone with the PC agent to delegate development tasks.</string>
     <string name="bridge_quick">Quick</string>
-    <string name="bridge_quick_hint">On the PC open “Link phone” — a QR and a link appear. Scan the QR with any camera (Altair opens and sets itself up) or paste the link here.</string>
+    <string name="bridge_quick_hint">On the PC open “Link phone” — a QR and a link appear. Tap “Scan QR code from PC” below, or paste the link here.</string>
     <string name="bridge_link_label">Pairing link (altair://pair…)</string>
     <string name="bridge_from_clipboard">Paste</string>
     <string name="bridge_connect">Connect</string>
