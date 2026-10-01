@@ -55,8 +55,11 @@ Ok "Found $($rel.tag_name)."
 
 # The release ships a portable .zip (backend + Altair window). A setup installer
 # is used only if a release provides one and no app .zip is present.
-$zip   = $assets | Where-Object { $_.name -match '(?i)(altair|localaiagent).*\.zip$' } | Select-Object -First 1
-if (-not $zip) { $zip = $assets | Where-Object { $_.name -match '(?i)\.zip$' } | Select-Object -First 1 }
+# Since 0.2.0 a release carries one zip per system; never pick the Linux or macOS one.
+$winZips = @($assets | Where-Object { $_.name -match '(?i)\.zip$' -and $_.name -notmatch '(?i)(linux|macos|darwin)' })
+$zip   = $winZips | Where-Object { $_.name -match '(?i)windows.*\.zip$' } | Select-Object -First 1
+if (-not $zip) { $zip = $winZips | Where-Object { $_.name -match '(?i)(altair|localaiagent).*\.zip$' } | Select-Object -First 1 }
+if (-not $zip) { $zip = $winZips | Select-Object -First 1 }
 $setup = $null
 if (-not $zip) {
     $setup = $assets | Where-Object { $_.name -match '(?i)(setup|installer).*\.exe$' -or $_.name -match '(?i)\.msi$' } | Select-Object -First 1
