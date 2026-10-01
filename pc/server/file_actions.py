@@ -8,6 +8,7 @@ Windows-first; other platforms get a sensible default-open fallback.
 
 from __future__ import annotations
 
+import ntpath
 import os
 import shlex
 import subprocess
@@ -82,7 +83,8 @@ def _clean_display(name: str) -> str:
 
 def _pretty_basename(exe: str) -> str:
     """Clean, recognizable name from an exe path: ``Code.exe`` → ``Code``."""
-    base = os.path.basename(exe or "")
+    # Registry paths are Windows paths: split them the Windows way on any system.
+    base = ntpath.basename(exe or "")
     return base[:-4] if base.lower().endswith(".exe") else base
 
 

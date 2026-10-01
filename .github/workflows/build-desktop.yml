@@ -54,8 +54,8 @@ jobs:
           pip install -r requirements.txt pyinstaller
 
       - name: Tests
-        # Windows is the tested system; on Linux/macOS the first runs show what is left to port.
-        continue-on-error: ${{ runner.os != 'Windows' }}
+        # Windows and Linux pass the whole suite; macOS has not been run yet, so it only reports.
+        continue-on-error: ${{ runner.os == 'macOS' }}
         run: python -m pytest -q -p no:cacheprovider
 
       - name: Build

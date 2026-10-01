@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml"><img src="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Лицензия: Apache-2.0"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.3%20alpha-orange.svg" alt="Версия 0.1.3 alpha"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.2.0%20alpha-orange.svg" alt="Версия 0.2.0 alpha"></a>
 </p>
 
 <p align="center">
@@ -86,7 +86,8 @@
   одной сети. Обходной путь: объединить их в одну сеть [Tailscale](https://tailscale.com/) и указать
   Tailscale-адрес ПК.
 - История чатов между телефоном и ПК пока не синхронизируется (спецификация готова, это следующий шаг).
-- ПК-агент пока только под Windows; сборка для Windows не подписана (SmartScreen может предупредить).
+- ПК-агент работает на Windows и Linux; сборку для macOS делает CI, но на настоящем Mac она ещё не
+  проверялась. Сборки не подписаны (SmartScreen или Gatekeeper могут предупредить).
 
 > ⚠️ **Ранняя версия — используйте на свой страх и риск.** Altair на очень ранней стадии разработки и
 > во многом написан с помощью [Claude Code](https://claude.com/claude-code). Он мало обкатан на реальных
@@ -126,6 +127,18 @@ irm https://raw.githubusercontent.com/Qweezyy/AltairAgent/main/install.ps1 | iex
 
 > Сборка пока не подписана, поэтому Windows SmartScreen может предупредить при первом запуске
 > («Подробнее» → «Выполнить в любом случае»). Всегда можно запустить из исходников (см. ниже).
+
+## Установка на Linux и macOS
+
+Скачайте `Altair-<версия>-linux-x64.zip` или `Altair-<версия>-macos-arm64.zip` из
+[последнего релиза](https://github.com/Qweezyy/AltairAgent/releases/latest), распакуйте куда угодно и
+запустите `LocalAIAgent/Altair` (окно); `LocalAIAgent/bin/altair` — команда для терминала, добавьте эту
+папку в `PATH`, чтобы вызывать её отовсюду. Дальше приложение обновляется само.
+
+- **Linux:** окну нужен WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` в Debian/Ubuntu, `webkit2gtk4.1` в Fedora).
+  Браузер агента — ваш Chrome или Chromium (ставится отдельно), его видно в панели браузера. Быстрый
+  поиск использует `ripgrep`, если он установлен.
+- **macOS (Apple Silicon):** сборка не подписана Apple — в первый раз правый клик → «Открыть».
 
 ## Установка на Android
 
@@ -207,8 +220,9 @@ Tauri, если она собрана.
 можно указать свой манифест (сайт или сетевая папка) или `off`. При запуске из исходников обновление
 предлагается, но не ставится: там правильный путь — `git pull`.
 
-Сборки для Linux и macOS делает workflow `Build desktop` (`.github/workflows/build-desktop.yml`); там
-встроенный браузер работает через Chrome вместо вкладок WebView2.
+Сборки для Linux и macOS делает workflow `Build desktop` (`.github/workflows/build-desktop.yml`,
+вручную или по тегу версии), и `python build_app.py --zip` там работает так же. Вместо нативных вкладок
+браузера (WebView2) там Chrome агента: он работает без окна, а страница транслируется в панель браузера.
 
 ## Что внутри
 

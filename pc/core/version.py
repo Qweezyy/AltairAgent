@@ -23,6 +23,10 @@ def _read_version() -> str:
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
         candidates += [exe_dir / "VERSION", exe_dir / "_internal" / "VERSION"]
+        # The one-file terminal command (bin/altair) unpacks its own copy here.
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "VERSION")
     for path in candidates:
         try:
             if path.is_file():

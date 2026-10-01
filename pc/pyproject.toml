@@ -1,6 +1,6 @@
 [project]
 name = "local-ai-agent"
-version = "0.1.3"
+version = "0.2.0"
 description = "Локальный автономный ИИ-агент с инструментами, навыками и MCP"
 requires-python = ">=3.10"
 

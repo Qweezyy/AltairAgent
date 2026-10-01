@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+## [0.2.0] — 2026-10-01
+
+Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in a terminal.
+
 ### Added
 - **A premium look.** Larger type and controls, surfaces set like plates in a tray, thin icons,
   text optically centred in every control, spring motion, and the accent used on purpose: primary
@@ -49,7 +53,11 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   `write_file` / `edit_file` / `apply_patch` calls leaves the model's view (the file holds it; the chat
   keeps everything).
 - **Linux and macOS builds** from CI (`Build desktop` workflow): the backend, the Tauri window and the
-  terminal command; the terminal panel uses a POSIX pty there.
+  terminal command in one zip per system (`…-linux-x64.zip`, `…-macos-arm64.zip`). On Linux the whole
+  test suite passes and gates the build. There the terminal panel uses a POSIX pty, search uses the
+  system's ripgrep (or the built-in search), and the agent's browser is Chrome or Chromium over CDP
+  streamed into the panel (the native browser tabs are WebView2, Windows only). The macOS build is
+  not signed by Apple: open it with right click → Open the first time.
 - **Chats work in the background.** A task keeps running when you open another chat, reload the
   window or minimize the app; the chat list marks the chats at work, and opening one shows its run
   live. Approvals and questions of a chat nobody has open wait for you, with a notice naming the chat.
@@ -63,7 +71,8 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 - **Self-update from GitHub releases.** The app checks the project's latest release by default and
   installs it by itself only when the release's checksums carry a valid signature of the project's
   key; otherwise it offers the release page. The swap waits for the app to close, keeps your own
-  files in the app folder and restarts it. `UPDATE_URL=off` turns the checks off.
+  files in the app folder and restarts it — on Windows, Linux and macOS, each taking its own
+  package. `UPDATE_URL=off` turns the checks off. 0.2.0 is the first version that updates itself.
 
 - **Memory as notes with an index.** Each thing the agent remembers is a small markdown note with a
   header (title, one-line gist, kind, created/modified dates) in a memory folder — global (about you)
@@ -92,15 +101,17 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 - Stopping the agent keeps the history whole (finished tool results, the part of the answer already
   shown), and the context ring updates live during a run.
 - Typing in long chats is instant again.
+- On Linux and macOS a backend whose window had died could live on forever, holding the port: a
+  dead window process not yet reaped still looked alive. It now also checks the process state and
+  being re-parented.
+- On Linux the search could look through the bundled Windows `tgrep.exe`/`rg.exe` (under WSL they
+  even start) and find nothing; elsewhere only native binaries are used, and the Windows ones are no
+  longer packed into the Linux and macOS builds.
 
-### Planned for 0.2.0+
-- **The desktop app on Linux and macOS**, not only Windows: the Tauri shell already runs there;
-  the Windows-only pieces get cross-platform ones (the built-in browser falls back to Chrome over
-  CDP where WebView2 tabs are not available, a `pty` terminal instead of ConPTY, system
-  `ripgrep`), packaged as AppImage/deb and dmg.
-- **Terminal (CLI) mode** on every OS: an `altair` console command that shares chats, settings,
-  models and skills with the desktop window, with an interactive mode, one-shot tasks for scripts
-  and CI (`--json`, exit codes) and resuming a desktop chat from the terminal.
+### Planned next
+- **The Journal**: one read-only record of everything the agent did, in one event format for the
+  window, the terminal and the server (moved from 0.2.0 to 0.3.0).
+- **Native packages** for Linux and macOS (AppImage/deb, dmg) instead of a zip.
 - **A server agent** ("second master"): Altair on a headless server that the desktop and the phone
   connect to, so long tasks keep running while the PC is off.
 - **iOS** for the phone agent — explored via Kotlin Multiplatform (the Android core/tools/LLM
@@ -251,7 +262,8 @@ The first public, **early-stage** release. Expect rough edges — see the discla
 - Auto-update is off until an update feed is published.
 - Python on PATH is needed for the agent's own code checks (tests/linters) in your projects.
 
-[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.0...v0.1.1

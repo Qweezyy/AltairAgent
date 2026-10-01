@@ -29,6 +29,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -318,6 +319,45 @@ def _hide_offscreen_from_taskbar() -> int:
     return changed
 
 
+def chrome_hiding_args(system: str = os.name, user_agent: str | None = None,
+                       as_root: bool = False) -> list[str]:
+    """How the fallback Chrome stays out of sight while it renders for the panel's screencast.
+    On Windows: a real window parked off-screen (and dropped from the taskbar). Linux window
+    managers and macOS pull such a window back on screen, so there it runs headless — the new
+    headless mode is the same browser and renders the same pages. It names itself
+    "HeadlessChrome" though, so it gets the user agent of the same Chrome with a window (with it
+    the client hints say plain Chromium too). Chrome refuses to start as root with its sandbox
+    (containers, servers): there, and only there, it runs without it."""
+    if system == "nt":
+        return ["--window-position=-32000,-32000", "--window-size=1400,1000",
+                "--disable-features=CalculateNativeWinOcclusion",
+                "--disable-backgrounding-occluded-windows"]
+    args = ["--headless=new", "--window-size=1400,1000"]
+    if user_agent:
+        args.append(f"--user-agent={user_agent}")
+    if as_root:
+        args.append("--no-sandbox")
+    return args
+
+
+def plain_user_agent(version_text: str, system: str = sys.platform) -> str | None:
+    """The user agent a windowed Chrome sends, from `chrome --version` ("Google Chrome 131.0.6778.85")."""
+    found = re.search(r"(\d+)\.\d+\.\d+\.\d+", version_text or "")
+    if not found:
+        return None
+    where = "Macintosh; Intel Mac OS X 10_15_7" if system == "darwin" else "X11; Linux x86_64"
+    return f"Mozilla/5.0 ({where}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{found.group(1)}.0.0.0 Safari/537.36"
+
+
+def _browser_version(exe: str) -> str:
+    try:
+        done = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("browser version unknown (%s): it keeps its headless user agent", exc)
+        return ""
+    return done.stdout
+
+
 def _read_devtools_port(port_file: Path) -> int:
     """Port Chrome wrote to DevToolsActivePort, or 0 while it is not there yet."""
     try:
@@ -525,15 +565,16 @@ class AgentBrowser:
             port = 0
         if not port:
             await asyncio.to_thread(port_file.unlink, missing_ok=True)
+            hiding = chrome_hiding_args()
+            if os.name != "nt":
+                agent = plain_user_agent(await asyncio.to_thread(_browser_version, exe))
+                hiding = chrome_hiding_args(user_agent=agent, as_root=os.geteuid() == 0)
             args = [
                 exe, f"--user-data-dir={profile}", "--remote-debugging-port=0",
                 "--no-first-run", "--no-default-browser-check",
                 # With a debugging port Chromium sets navigator.webdriver; keep it false.
                 "--disable-blink-features=AutomationControlled",
-                # A hidden window: parked off-screen, still rendering for the panel.
-                "--window-position=-32000,-32000", "--window-size=1400,1000",
-                "--disable-features=CalculateNativeWinOcclusion",
-                "--disable-backgrounding-occluded-windows",
+                *hiding,
                 "about:blank",
             ]
             from core.browser_net import get_proxy, pac_url

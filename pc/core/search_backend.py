@@ -62,9 +62,11 @@ def _find_exe(name: str) -> str | None:
     """Ищем бинарник: сначала забандленный (vendor/bin), затем в PATH."""
     d = _bundled_dir()
     if d is not None:
-        for fn in (f"{name}.exe", name):
+        # The bundled .exe files are Windows builds: elsewhere only a native binary will do
+        # (under WSL an .exe even starts, gets Linux paths and silently finds nothing).
+        for fn in (f"{name}.exe", name) if os.name == "nt" else (name,):
             p = d / fn
-            if p.is_file():
+            if p.is_file() and (os.name == "nt" or os.access(p, os.X_OK)):
                 return str(p)
     return shutil.which(name)
 

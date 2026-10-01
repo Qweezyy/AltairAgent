@@ -11,6 +11,10 @@
 //
 // The UI owns the tab strip and tells us where the panel is; we create, place, show and
 // close the controls and report what happens in them as "altair-browser" events.
+//
+// Elsewhere the tabs are not built (the agent's browser is the backend's Chrome, streamed
+// into the panel), so the WebView2 helpers below go unused there.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

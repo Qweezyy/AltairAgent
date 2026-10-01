@@ -171,3 +171,23 @@ def test_arguments():
     args = parse_args(["-c", "--mode", "auto", "--output-format", "json", "fix", "it"])
     assert args.cont and args.mode == "auto" and args.prompt == ["fix", "it"] and args.output_format == "json"
     assert isinstance(parse_args([]), argparse.Namespace)
+
+
+def test_version_flag_prints_the_product_version(capsys):
+    from core.version import __version__
+
+    with pytest.raises(SystemExit) as stop:
+        parse_args(["--version"])
+    assert stop.value.code == 0
+    assert capsys.readouterr().out.strip() == f"altair {__version__}"
+
+
+def test_the_one_file_command_carries_the_version():
+    """bin/altair is one file: without VERSION inside it reported 0.0.0."""
+    from pathlib import Path
+
+    build = (Path(__file__).resolve().parents[1] / "build_app.py").read_text(encoding="utf-8")
+    cli_build = build[build.index("def build_cli"):build.index("CLI_NAME}.exe")]
+    assert "VERSION" in cli_build
+    version_py = (Path(__file__).resolve().parents[1] / "core" / "version.py").read_text(encoding="utf-8")
+    assert "_MEIPASS" in version_py

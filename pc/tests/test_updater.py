@@ -6,10 +6,12 @@ import base64
 import functools
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
 import zipfile
+from pathlib import Path
 
 import httpx
 import pytest
@@ -185,12 +187,13 @@ def test_unpack_rejects_paths_outside_the_archive(settings, tmp_path):
 
 
 def test_unpack_returns_the_app_folder_and_checks_it_is_the_app(settings, tmp_path):
+    shell = "Altair.exe" if sys.platform == "win32" else "Altair"
     package = tmp_path / "pack.zip"
     with zipfile.ZipFile(package, "w") as bundle:
-        bundle.writestr("LocalAIAgent/Altair.exe", "x")
+        bundle.writestr(f"LocalAIAgent/{shell}", "x")
         bundle.writestr("LocalAIAgent/_internal/lib.py", "y")
     folder = Updater(settings).unpack(package)
-    assert folder.name == "LocalAIAgent" and (folder / "Altair.exe").exists()
+    assert folder.name == "LocalAIAgent" and (folder / shell).exists()
 
     junk = tmp_path / "junk.zip"
     with zipfile.ZipFile(junk, "w") as bundle:
@@ -240,3 +243,96 @@ def test_the_swap_script_waits_for_the_app_then_replaces_it(tmp_path):
     assert (install / "my-notes.txt").read_text() == "the user's own file"  # the rest is kept
     assert marker.exists(), log.read_text(encoding="utf-8", errors="replace")
     assert not new.exists()
+
+
+# ------------------------------------------------------------- Linux and macOS
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "suffix"),
+    [
+        ("win32", "AMD64", "-windows-x64.zip"),
+        ("linux", "x86_64", "-linux-x64.zip"),
+        ("linux", "aarch64", "-linux-arm64.zip"),
+        ("darwin", "arm64", "-macos-arm64.zip"),
+        ("freebsd13", "amd64", ""),
+    ],
+)
+def test_each_system_takes_its_own_package_as_the_build_names_it(system, machine, suffix):
+    assert updater_module.asset_suffix(system, machine) == suffix
+    if suffix:
+        workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "build-desktop.yml").read_text()
+        label = suffix.removeprefix("-").removesuffix(".zip")
+        if label in ("windows-x64", "linux-x64", "macos-arm64"):
+            assert f"label: {label}" in workflow
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix file modes")
+def test_unpack_keeps_the_run_permission(settings, tmp_path):
+    package = tmp_path / "pack.zip"
+    with zipfile.ZipFile(package, "w") as bundle:
+        exe = zipfile.ZipInfo("LocalAIAgent/Altair")
+        exe.external_attr = (0o100755 << 16)
+        bundle.writestr(exe, "#!/bin/sh\n")
+        bundle.writestr("LocalAIAgent/_internal/lib.py", "y")
+    folder = Updater(settings).unpack(package)
+    assert os.access(folder / "Altair", os.X_OK)
+
+
+def test_sh_quoting_survives_quotes_and_spaces():
+    assert updater_module._sh("it's a dir") == r"'it'\''s a dir'"
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+def test_the_sh_swap_script_waits_for_the_app_then_replaces_it(tmp_path):
+    install, new = tmp_path / "Alt air", tmp_path / "new"
+    (install / "_internal").mkdir(parents=True)
+    (install / "_internal" / "stale_module.py").write_text("old")
+    (install / "_internal" / "core.py").write_text("old")
+    (install / "Altair").write_text("old shell")
+    (install / "my-notes.txt").write_text("the user's own file")
+    (new / "_internal").mkdir(parents=True)
+    (new / "_internal" / "core.py").write_text("new")
+    (new / "Altair").write_text("new shell")
+    marker = tmp_path / "started.txt"
+    starter = tmp_path / "start.sh"
+    starter.write_text(f"#!/bin/sh\necho started > '{marker}'\n")
+    starter.chmod(0o755)
+
+    app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])
+    script, log = tmp_path / "swap.sh", tmp_path / "swap.log"
+    script.write_text(updater_module.build_sh_script(new, install, starter, [app.pid, 999_999], log))
+    runner = subprocess.Popen(["/bin/sh", str(script)])
+    time.sleep(1.5)
+    assert (install / "Altair").read_text() == "old shell"   # not while the app runs
+    app.wait()
+    assert runner.wait(timeout=30) == 0, log.read_text()
+    for _ in range(50):
+        if marker.exists():
+            break
+        time.sleep(0.1)
+
+    assert (install / "Altair").read_text() == "new shell"
+    assert (install / "_internal" / "core.py").read_text() == "new"
+    assert not (install / "_internal" / "stale_module.py").exists()   # _internal is mirrored
+    assert not (install / "_internal.old").exists()
+    assert (install / "my-notes.txt").read_text() == "the user's own file"  # the rest is kept
+    assert marker.exists(), log.read_text()
+    assert not new.exists()
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+def test_the_sh_swap_script_gives_up_if_the_app_never_closes(tmp_path, monkeypatch):
+    install, new = tmp_path / "Altair", tmp_path / "new"
+    (install / "_internal").mkdir(parents=True)
+    (install / "Altair").write_text("old shell")
+    (new / "Altair").mkdir(parents=True)
+    app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        text = updater_module.build_sh_script(new, install, tmp_path / "start", [app.pid], tmp_path / "log")
+        script = tmp_path / "swap.sh"
+        script.write_text(text.replace("+ 600", "+ 1"))
+        assert subprocess.run(["/bin/sh", str(script)], timeout=30).returncode == 2
+        assert (install / "Altair").read_text() == "old shell"
+    finally:
+        app.kill()

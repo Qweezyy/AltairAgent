@@ -31,6 +31,7 @@ from rich.text import Text
 from cli.backend import Backend, connect
 from cli.render import Renderer, json_line
 from cli.texts import Texts
+from core.version import __version__
 
 MODES = ("manual", "auto", "bypass")
 
@@ -43,6 +44,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("-c", "--continue", dest="cont", action="store_true", help="continue the most recent chat")
     p.add_argument("-r", "--resume", metavar="CHAT", help="resume a chat by id or by words from its title")
     p.add_argument("--chats", action="store_true", help="list the chats and exit")
+    p.add_argument("--version", action="version", version=f"altair {__version__}")
     p.add_argument("--model", help="the model for this run")
     p.add_argument("--mode", choices=MODES, help="the chat's approval mode (kept by the chat)")
     p.add_argument("--cwd", "--workspace", dest="cwd", help="the folder of a new chat (default: the current one)")

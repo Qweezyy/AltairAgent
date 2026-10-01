@@ -72,6 +72,19 @@ def app_icon() -> list[str]:
     return ["--icon", str(icns)] if sys.platform == "darwin" and icns.exists() else []
 
 
+def mcp_submodules() -> list[str]:
+    """--collect-submodules for each package of the MCP SDK except mcp.cli: that one exits the
+    process when its optional `typer` is missing, which aborts PyInstaller's import scan."""
+    try:
+        import mcp
+    except ImportError:
+        return []
+    import pkgutil
+
+    return [arg for info in pkgutil.iter_modules(mcp.__path__) if info.ispkg and info.name != "cli"
+            for arg in ("--collect-submodules", f"mcp.{info.name}")]
+
+
 def build() -> Path:
     """Runs PyInstaller and returns the folder of the build (Windows, Linux or macOS)."""
     command = [
@@ -86,9 +99,10 @@ def build() -> Path:
         "--add-data", f"{ROOT / '.env.example'}{SEP}.",
         # Единая версия продукта: core/version.py читает VERSION из корня репо.
         "--add-data", f"{ROOT.parent / 'VERSION'}{SEP}.",
-        # Быстрый поиск: забандленные tgrep/ripgrep (open-source, MIT) — работают
-        # без установки, приложение находит их в vendor/bin. См. core/search_backend.py.
-        "--add-data", f"{ROOT / 'vendor' / 'bin'}{SEP}vendor/bin",
+        # Fast search: bundled tgrep/ripgrep (open source, MIT), found in vendor/bin with
+        # nothing to install (core/search_backend.py). They are Windows builds; on Linux and
+        # macOS the system's ripgrep is used, and without it the built-in search.
+        *(["--add-data", f"{ROOT / 'vendor' / 'bin'}{SEP}vendor/bin"] if WINDOWS else []),
         # PyInstaller не видит эти импорты: они подтягиваются динамически.
         "--hidden-import", "uvicorn.logging",
         "--hidden-import", "uvicorn.loops.auto",
@@ -103,7 +117,7 @@ def build() -> Path:
         # Playwright тащит за собой драйвер, иначе headless-браузер не стартует.
         "--collect-all", "playwright",
         # Remote MCP servers: the SDK is imported inside a try block, pull all of it in.
-        "--collect-submodules", "mcp",
+        *mcp_submodules(),
         # SymPy и genanki грузятся отложенно, внутри функций.
         "--collect-all", "sympy",
         "--hidden-import", "genanki",
@@ -148,6 +162,8 @@ def build_cli(folder: Path) -> Path:
         *app_icon(),
         # rich loads its unicode tables by name; websockets picks its client lazily.
         "--collect-submodules", "rich", "--collect-submodules", "websockets",
+        # `altair --version` and the backend handshake read the product version from it.
+        "--add-data", f"{ROOT.parent / 'VERSION'}{SEP}.",
         "--exclude-module", "tkinter", "--exclude-module", "numpy", "--exclude-module", "playwright",
         str(ROOT / "altair_cli.py"),
     ], check=True)
@@ -255,8 +271,10 @@ def main() -> int:
         archive = make_package(folder)
         print(f"Пакет:   {archive}")
         print(f"Манифест: {DIST / 'update.json'}")
-        print("\nЧтобы обновления работали, выложите zip и манифест на любой хостинг")
-        print("и укажите ссылку на манифест в UPDATE_URL (.env).")
+        print("\nRelease: name the zip Altair-<version>-<system>-<arch>.zip (as the Build desktop")
+        print("workflow does), sign the release folder with `python release_sign.py <folder>` and")
+        print("upload the zips with SHA256SUMS.txt and SHA256SUMS.txt.sig to the GitHub release.")
+        print("update.json is only for UPDATE_URL pointing at your own server.")
     return 0
 
 

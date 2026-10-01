@@ -479,6 +479,24 @@ async def run_check() -> int:
 # --------------------------------------------------------------- main
 
 
+def _posix_process_alive(pid: int, our_parent: bool = False) -> bool:
+    """Whether a process is still running on Linux/macOS. `kill(pid, 0)` alone is not enough:
+    a dead process nobody has reaped yet (a zombie) still answers it, and an orphaned backend
+    would then wait forever. If it was our own parent, being re-parented also means it died."""
+    if our_parent and os.getppid() != pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        # /proc/<pid>/stat: "pid (name) S ..." — the state follows the last ')'.
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+        return stat.rsplit(")", 1)[1].split()[0] not in ("Z", "X")
+    except (OSError, IndexError):
+        return True  # no /proc (macOS): kill and the parent check above are what we have
+
+
 def _exit_with_parent(parent_pid: int) -> None:
     """Exits this backend when the process that started it goes away.
 
@@ -498,12 +516,8 @@ def _exit_with_parent(parent_pid: int) -> None:
                 return  # parent already gone or not accessible: do not guess
             ctypes.windll.kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
         else:
-            while True:
-                try:
-                    os.kill(parent_pid, 0)
-                except OSError:
-                    break
-                time.sleep(2)
+            while _posix_process_alive(parent_pid, our_parent=os.getppid() == parent_pid):
+                time.sleep(1)
         _graceful_exit(f"The shell (PID {parent_pid}) has exited")
 
     threading.Thread(target=watch, name="parent-watch", daemon=True).start()

@@ -484,3 +484,20 @@ async def test_on_a_long_page_an_action_costs_a_fraction(browser, site):
     after = await browser.act(click, ref_of(view.tree, r'button "Save"'))
     assert "Saved" in after.render()
     assert len(after.render()) < len(view.render()) / 20
+
+
+def test_fallback_chrome_hides_off_screen_on_windows_and_headless_elsewhere():
+    windows = bs.chrome_hiding_args("nt")
+    assert "--window-position=-32000,-32000" in windows and not any("headless" in a for a in windows)
+    posix = bs.chrome_hiding_args("posix")
+    assert "--headless=new" in posix and not any("window-position" in a for a in posix)
+
+
+def test_headless_chrome_gets_the_user_agent_of_a_windowed_one():
+    assert bs.plain_user_agent("Google Chrome 131.0.6778.85 \n", "linux") == (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+    assert "Macintosh" in bs.plain_user_agent("Chromium 153.0.8010.12", "darwin")
+    assert bs.plain_user_agent("", "linux") is None
+    args = bs.chrome_hiding_args("posix", user_agent="UA", as_root=True)
+    assert "--user-agent=UA" in args and "--no-sandbox" in args
+    assert "--no-sandbox" not in bs.chrome_hiding_args("posix")

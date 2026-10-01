@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml"><img src="https://github.com/Qweezyy/AltairAgent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.3%20alpha-orange.svg" alt="Version 0.1.3 alpha"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.2.0%20alpha-orange.svg" alt="Version 0.2.0 alpha"></a>
 </p>
 
 <p align="center">
@@ -84,7 +84,8 @@ modes; generative media (via your keys); frictionless onboarding of all bodies i
   everything synced over it — memory, skills, MCP servers — needs both devices on one network.
   Workaround: put both on one [Tailscale](https://tailscale.com/) network and use the PC's Tailscale address.
 - Chat history is not synced between the phone and the PC yet (specified, planned next).
-- The PC agent is Windows-only; the Windows build is not code-signed (SmartScreen may warn).
+- The PC agent runs on Windows and Linux; the macOS build is made by CI but has not been tried on a real
+  Mac yet. The builds are not code-signed (SmartScreen or Gatekeeper may warn).
 
 > ⚠️ **Early-stage software — use at your own risk.** Altair is in very early development and is built
 > largely with [Claude Code](https://claude.com/claude-code). It has had relatively little mileage on
@@ -123,6 +124,18 @@ icon in the header; on first launch a prompt bar appears (BYOK; saved to `.env` 
 
 > The build is not code-signed yet, so Windows SmartScreen may warn on first launch
 > ("More info" → "Run anyway"). You can always run from source instead (below).
+
+## Install on Linux and macOS
+
+Download `Altair-<version>-linux-x64.zip` or `Altair-<version>-macos-arm64.zip` from the
+[latest release](https://github.com/Qweezyy/AltairAgent/releases/latest), unpack it anywhere and run
+`LocalAIAgent/Altair` (the window); `LocalAIAgent/bin/altair` is the terminal command — add that
+folder to `PATH` to call it from anywhere. The app updates itself from later releases.
+
+- **Linux:** the window needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian/Ubuntu, `webkit2gtk4.1`
+  on Fedora). The agent's browser is your Chrome or Chromium (installed separately), shown in the
+  browser panel. Fast search uses `ripgrep` if it is installed.
+- **macOS (Apple Silicon):** the build is not signed by Apple — the first time, right click → Open.
 
 ## Install on Android
 
@@ -203,8 +216,10 @@ when the release's checksums carry a valid signature of the project's key (other
 page). `UPDATE_URL` can point at your own manifest instead (a website or a network share), or be `off`.
 From source, an update is offered but not installed: there, `git pull` is the right way.
 
-Linux and macOS builds come from the `Build desktop` workflow (`.github/workflows/build-desktop.yml`);
-there the built-in browser uses Chrome instead of WebView2 tabs.
+Linux and macOS builds come from the `Build desktop` workflow (`.github/workflows/build-desktop.yml`,
+by hand or on a version tag), and `python build_app.py --zip` works the same on those systems. There
+the native browser tabs (WebView2) are replaced by the agent's Chrome, run headless and streamed into
+the browser panel.
 
 ## What's inside
 

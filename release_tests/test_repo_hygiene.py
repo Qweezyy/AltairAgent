@@ -30,6 +30,25 @@ def test_version_is_semver():
     assert re.fullmatch(r"\d+\.\d+\.\d+", raw), f"VERSION не SemVer: {raw!r}"
 
 
+def test_every_hardcoded_version_matches_version_file():
+    """VERSION is the one version; these files can't read it and must say the same."""
+    version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    places = {
+        "pc/pyproject.toml": r'^version = "([^"]+)"',
+        "pc/desktop/package.json": r'^  "version": "([^"]+)"',
+        "pc/desktop/src-tauri/Cargo.toml": r'^version = "([^"]+)"',
+        "pc/desktop/src-tauri/Cargo.lock": r'^name = "app"\nversion = "([^"]+)"',
+        "README.md": r"badge/version-([0-9.]+)%20",
+        "README.ru.md": r"badge/version-([0-9.]+)%20",
+    }
+    for rel, pattern in places.items():
+        found = re.search(pattern, (REPO_ROOT / rel).read_text(encoding="utf-8"), re.M)
+        assert found, f"{rel}: the version is not where expected"
+        assert found.group(1) == version, f"{rel} says {found.group(1)}, VERSION says {version}"
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## [{version}]" in changelog, f"CHANGELOG has no section for {version}"
+
+
 def test_no_env_file_tracked():
     bad = [f for f in _tracked_files() if Path(f).name == ".env"]
     assert not bad, f".env не должен быть в репозитории: {bad}"

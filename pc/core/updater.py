@@ -3,7 +3,8 @@
 The source (`UPDATE_URL` in `.env`) is, by default, the project's GitHub releases:
 
   * `github:owner/repo` (the default when empty) — the latest release: its version is the
-    tag, the package is the release's Windows zip, and `SHA256SUMS.txt` with its signature
+    tag, the package is the release's zip for this system (`…-windows-x64.zip`,
+    `…-linux-x64.zip`, `…-macos-arm64.zip`), and `SHA256SUMS.txt` with its signature
     `SHA256SUMS.txt.sig` vouch for it. The signature is an Ed25519 signature made with the
     project's release key (kept outside the repository, see release_sign.py); the public key
     is below. An unsigned or wrongly signed release is shown, but not installed by itself;
@@ -16,7 +17,8 @@ The source (`UPDATE_URL` in `.env`) is, by default, the project's GitHub release
 
 Why the update is not unpacked over itself: the running app holds its files open and
 Windows would not let them be replaced. The new version is unpacked beside it, and a short
-script waits for the app (the window and the backend) to exit, copies it in and starts it.
+script (PowerShell on Windows, sh elsewhere) waits for the app — the window and the backend —
+to exit, copies it in and starts it.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import base64
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -57,8 +60,18 @@ RELEASE_PUBLIC_KEY = "9B4wuoow2fqWhMsQ0v+OgDTYcdr4Sq8NI5xM8bRQpcs="
 #: window to close too, since the window's exe is replaced as well.
 SHELL_PID: int | None = None
 
+def asset_suffix(system: str = sys.platform, machine: str | None = None) -> str:
+    """The end of this system's package name in a release, as the build workflow names them."""
+    name = {"win32": "windows", "linux": "linux", "darwin": "macos"}.get(system)
+    if not name:
+        return ""
+    machine = (machine if machine is not None else platform.machine()).lower()
+    arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
+    return f"-{name}-{arch}.zip"
+
+
 #: The release asset for this platform.
-_ASSET_SUFFIX = {"win32": "-windows-x64.zip"}.get(sys.platform, "")
+_ASSET_SUFFIX = asset_suffix()
 
 
 @dataclass(slots=True)
@@ -259,13 +272,19 @@ class Updater:
                 if not str(destination).startswith(str(staging.resolve())):
                     raise ValueError(f"the archive holds an unsafe path: {member}")
             bundle.extractall(staging)
+            if os.name != "nt":
+                # zipfile drops the Unix mode: without it the app and its libraries can't run.
+                for member in bundle.infolist():
+                    mode = (member.external_attr >> 16) & 0o7777
+                    if mode and not member.is_dir():
+                        os.chmod(staging / member.filename, mode)
 
         # One folder inside: that is the app's root.
         entries = list(staging.iterdir())
         root = entries[0] if len(entries) == 1 and entries[0].is_dir() else staging
-        exe = "Altair.exe" if sys.platform == "win32" else "Altair"
-        if not (root / exe).exists() and not (root / "LocalAIAgent.exe").exists():
-            raise ValueError("the package does not look like the app (no Altair.exe inside)")
+        names = ("Altair.exe", "LocalAIAgent.exe") if sys.platform == "win32" else ("Altair", "LocalAIAgent")
+        if not any((root / name).exists() for name in names):
+            raise ValueError(f"the package does not look like the app (no {names[0]} inside)")
         return root
 
     def apply(self, new_version_dir: Path) -> Path:
@@ -273,22 +292,28 @@ class Updater:
         in and starts it. The caller then closes the app (the window closes the backend)."""
         if not self.is_frozen:
             raise RuntimeError("Only the built app updates itself: from the sources, use git pull.")
-        if sys.platform != "win32":
-            raise RuntimeError("Self-update is only for Windows so far: download the new version.")
-
         install = self.install_dir
-        shell = install / "Altair.exe"
+        shell = install / ("Altair.exe" if sys.platform == "win32" else "Altair")
         start = shell if shell.exists() else Path(sys.executable)
         pids = [os.getpid()] + ([SHELL_PID] if SHELL_PID else [])
-        script = Path(tempfile.gettempdir()) / "altair_update.ps1"
         log = Path(tempfile.gettempdir()) / "altair_update.log"
-        # With a BOM: Windows PowerShell 5.1 reads a script without one in the ANSI code page.
-        script.write_text(build_script(new_version_dir, install, start, pids, log), encoding="utf-8-sig")
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        subprocess.Popen(  # noqa: S603 - our own script in the temp folder
-            script_command(script), creationflags=flags, close_fds=True,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        if sys.platform == "win32":
+            script = Path(tempfile.gettempdir()) / "altair_update.ps1"
+            # With a BOM: Windows PowerShell 5.1 reads a script without one in the ANSI code page.
+            script.write_text(build_script(new_version_dir, install, start, pids, log), encoding="utf-8-sig")
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            subprocess.Popen(  # noqa: S603 - our own script in the temp folder
+                script_command(script), creationflags=flags, close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        else:
+            script = Path(tempfile.gettempdir()) / "altair_update.sh"
+            script.write_text(build_sh_script(new_version_dir, install, start, pids, log), encoding="utf-8")
+            # Its own session: the script must outlive the app it is waiting for.
+            subprocess.Popen(  # noqa: S603 - our own script in the temp folder
+                ["/bin/sh", str(script)], start_new_session=True, close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
         logger.info("update prepared: %s → %s; the app restarts when it closes", new_version_dir, install)
         return script
 
@@ -335,6 +360,45 @@ if ($ok) {{
 if ($ok) {{ "done" | Out-File -FilePath $log -Append -Encoding utf8 }} else {{ "copy failed" | Out-File -FilePath $log -Append -Encoding utf8 }}
 Start-Process -FilePath {_ps(start)} -WorkingDirectory $dst
 if ($ok) {{ Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue; exit 0 }}
+exit 1
+"""
+
+
+def _sh(text: str | Path) -> str:
+    """A POSIX shell single-quoted literal."""
+    return "'" + str(text).replace("'", "'\\''") + "'"
+
+
+def build_sh_script(source: Path, install: Path, start: Path, pids: list[int], log: Path) -> str:
+    """The swap script for Linux and macOS, doing what the PowerShell one does: wait up to 10
+    minutes for the app's processes to exit, then mirror `_internal` (the old one is set aside
+    and put back if the copy fails), add and update the rest of the folder, start the app."""
+    pid_list = " ".join(str(int(pid)) for pid in pids)
+    return f"""#!/bin/sh
+log={_sh(log)}
+src={_sh(source)}
+dst={_sh(install)}
+echo "Altair update started $(date)" > "$log"
+deadline=$(( $(date +%s) + 600 ))
+for id in {pid_list}; do
+  while kill -0 "$id" 2>/dev/null; do
+    if [ "$(date +%s)" -gt "$deadline" ]; then
+      echo "the app did not close: the update is not applied" >> "$log"
+      exit 2
+    fi
+    sleep 0.3
+  done
+done
+rm -rf "$dst/_internal.old"
+if [ -d "$dst/_internal" ]; then mv "$dst/_internal" "$dst/_internal.old"; fi
+if cp -R "$src/." "$dst/" >> "$log" 2>&1; then
+  ok=1; rm -rf "$dst/_internal.old"; echo "done" >> "$log"
+else
+  ok=0; echo "copy failed" >> "$log"
+  if [ -d "$dst/_internal.old" ]; then rm -rf "$dst/_internal"; mv "$dst/_internal.old" "$dst/_internal"; fi
+fi
+cd "$dst" && nohup {_sh(start)} > /dev/null 2>&1 &
+if [ "$ok" = 1 ]; then rm -rf "$src"; exit 0; fi
 exit 1
 """
 
