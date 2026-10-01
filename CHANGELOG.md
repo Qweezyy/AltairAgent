@@ -14,6 +14,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+### Fixed
+- The Windows update swap now copies every file of the new version even when robocopy would call
+  it unchanged (the same size and time, or only another NTFS change time). Real updates were not
+  affected — unpacked files always carry a new time — but nothing is left to chance now.
+
 ## [0.2.0] — 2026-10-01
 
 Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in a terminal.
