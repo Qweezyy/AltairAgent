@@ -26,6 +26,10 @@ jobs:
             label: linux-x64
           - os: macos-14
             label: macos-arm64
+    env:
+      # build_app.py prints non-ASCII messages; the Windows runner console is cp1252.
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     defaults:
       run:
         working-directory: pc
