@@ -334,8 +334,14 @@ def build_script(source: Path, install: Path, start: Path, pids: list[int], log:
     minutes for every process of the app to exit — the backend and the window both hold
     files — then copies the new version in: `_internal` mirrored (no stale modules left), the
     rest of the folder only added to and updated, since the user may keep other files there.
-    Then it starts the app and cleans up. If the app never closes, nothing is touched."""
-    pid_list = ", ".join(str(int(pid)) for pid in pids) or "0"
+    Every file of the package is copied, whatever robocopy thinks of it: by default it skips a
+    file with the same size and time, and the robocopy of Windows 10 1809+ / 11 calls one whose
+    NTFS change time differs "modified" and skips that too — /IS /IT /IM include both. A skipped
+    file would leave the app half old, half new. A robocopy too old for /IM rejects the switch
+    (exit 16): then the copy runs again without it. Then the script starts the app and cleans
+    up. If the app never closes, nothing is touched."""
+    # Nothing to wait for is @(): a stand-in 0 would be the Idle process, always "running".
+    pid_list = ", ".join(str(int(pid)) for pid in pids)
     return f"""$ErrorActionPreference = 'Continue'
 $log = {_ps(log)}
 $src = {_ps(source)}
@@ -351,11 +357,16 @@ foreach ($id in @({pid_list})) {{
         Start-Sleep -Milliseconds 300
     }}
 }}
-robocopy (Join-Path $src '_internal') (Join-Path $dst '_internal') /MIR /R:5 /W:1 /NP /NJH /NJS | Out-File -FilePath $log -Append -Encoding utf8
-$ok = $LASTEXITCODE -lt 8
+function Copy-All([string[]]$what) {{
+    robocopy @what /IS /IT /IM /R:5 /W:1 /NP /NJH /NJS | Out-File -FilePath $log -Append -Encoding utf8
+    if ($LASTEXITCODE -eq 16) {{
+        robocopy @what /IS /IT /R:5 /W:1 /NP /NJH /NJS | Out-File -FilePath $log -Append -Encoding utf8
+    }}
+    return $LASTEXITCODE -lt 8
+}}
+$ok = Copy-All @((Join-Path $src '_internal'), (Join-Path $dst '_internal'), '/MIR')
 if ($ok) {{
-    robocopy $src $dst /E /XD (Join-Path $src '_internal') /R:5 /W:1 /NP /NJH /NJS | Out-File -FilePath $log -Append -Encoding utf8
-    $ok = $LASTEXITCODE -lt 8
+    $ok = Copy-All @($src, $dst, '/E', '/XD', (Join-Path $src '_internal'))
 }}
 if ($ok) {{ "done" | Out-File -FilePath $log -Append -Encoding utf8 }} else {{ "copy failed" | Out-File -FilePath $log -Append -Encoding utf8 }}
 Start-Process -FilePath {_ps(start)} -WorkingDirectory $dst

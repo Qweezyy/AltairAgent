@@ -222,6 +222,15 @@ def test_the_swap_script_waits_for_the_app_then_replaces_it(tmp_path):
     starter = tmp_path / "start.cmd"
     starter.write_text(f'@echo started> "{marker}"\r\n', encoding="utf-8")
 
+
+    # The worst case for a copy that compares metadata: each new file has the size and the time
+    # of the one it replaces. It must be copied all the same.
+    for old_file, new_file in ((install / "_internal" / "core.py", new / "_internal" / "core.py"),
+                               (install / "Altair.exe", new / "Altair.exe")):
+        assert old_file.stat().st_size == new_file.stat().st_size
+        stamp = old_file.stat().st_mtime_ns
+        os.utime(new_file, ns=(stamp, stamp))
+
     # A process of "the app" that is still running: the swap must wait for it.
     app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])
     script = tmp_path / "swap.ps1"
@@ -299,6 +308,14 @@ def test_the_sh_swap_script_waits_for_the_app_then_replaces_it(tmp_path):
     starter.write_text(f"#!/bin/sh\necho started > '{marker}'\n")
     starter.chmod(0o755)
 
+    # The worst case for a copy that compares metadata: each new file has the size and the time
+    # of the one it replaces. It must be copied all the same.
+    for old_file, new_file in ((install / "_internal" / "core.py", new / "_internal" / "core.py"),
+                               (install / "Altair", new / "Altair")):
+        assert old_file.stat().st_size == new_file.stat().st_size
+        stamp = old_file.stat().st_mtime_ns
+        os.utime(new_file, ns=(stamp, stamp))
+
     app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])
     script, log = tmp_path / "swap.sh", tmp_path / "swap.log"
     script.write_text(updater_module.build_sh_script(new, install, starter, [app.pid, 999_999], log))
@@ -336,3 +353,35 @@ def test_the_sh_swap_script_gives_up_if_the_app_never_closes(tmp_path, monkeypat
         assert (install / "Altair").read_text() == "old shell"
     finally:
         app.kill()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the swap script is for Windows")
+def test_the_swap_works_with_a_robocopy_too_old_for_im(tmp_path):
+    """A robocopy before Windows 10 1809 rejects /IM (exit 16): the copy runs again without it."""
+    install, new = tmp_path / "Altair", tmp_path / "new"
+    (install / "_internal").mkdir(parents=True)
+    (install / "Altair.exe").write_text("old shell")
+    (new / "_internal").mkdir(parents=True)
+    (new / "_internal" / "core.py").write_text("new core")
+    (new / "Altair.exe").write_text("new shell, longer")
+    fake = tmp_path / "oldbin"
+    fake.mkdir()
+    calls = tmp_path / "calls.txt"
+    (fake / "robocopy.bat").write_text(
+        "@echo off\r\n"
+        f'echo %* >> "{calls}"\r\n'
+        'echo %* | findstr /C:"/IM" >nul && exit /b 16\r\n'
+        r'"%SystemRoot%\System32\robocopy.exe" %*' "\r\n"
+        "exit /b %ERRORLEVEL%\r\n", encoding="ascii")
+    starter = tmp_path / "start.cmd"
+    starter.write_text("@exit 0\r\n", encoding="ascii")
+    script, log = tmp_path / "swap.ps1", tmp_path / "swap.log"
+    script.write_text(build_script(new, install, starter, [], log), encoding="utf-8-sig")
+    env = {**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"}
+    done = subprocess.run(script_command(script), env=env, timeout=60,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    assert done.returncode == 0, log.read_text(encoding="utf-8", errors="replace")
+    assert (install / "Altair.exe").read_text() == "new shell, longer"
+    assert (install / "_internal" / "core.py").read_text() == "new core"
+    tried = calls.read_text().splitlines()
+    assert len(tried) == 4 and "/IM" in tried[0] and "/IM" not in tried[1]
