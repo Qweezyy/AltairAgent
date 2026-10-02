@@ -116,6 +116,7 @@ class MainActivity : ComponentActivity() {
                       baseDensity.density, baseDensity.fontScale * state.uiScale,
                   ),
                   com.localaiagent.app.ui.LocalUiScale provides (state.uiScale to vm::setUiScale),
+                  com.localaiagent.app.ui.LocalAnswerSpacing provides (state.answerSpacing to vm::setAnswerSpacing),
                   com.localaiagent.app.ui.LocalRefreshPresence provides vm::refreshPresence,
               ) {
                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {

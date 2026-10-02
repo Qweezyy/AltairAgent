@@ -189,6 +189,8 @@ data class ChatUiState(
     val hapticsEnabled: Boolean = true,
     /** Text size multiplier (Settings → Appearance). */
     val uiScale: Float = 1f,
+    /** Line spacing of the model's answers (Settings → Appearance). */
+    val answerSpacing: Float = com.localaiagent.app.data.ANSWER_SPACING_DEFAULT,
     /** Доска-коллекция текущего чата: собранные сниппеты (закреплённая заметка). */
     val board: List<String> = emptyList(),
     /** Живое присутствие ПК по мосту (для плашки среды у плавающих кнопок). */
@@ -326,6 +328,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 reactionsOnUser = settings.loadReactionsOnUser(),
                 hapticsEnabled = settings.loadHaptics(),
                 uiScale = settings.loadUiScale(),
+                answerSpacing = settings.loadAnswerSpacing(),
                 appIcon = settings.loadAppIcon(),
                 language = LocaleManager.get(getApplication()),
                 mcpServers = mcpStore.load(),
@@ -573,6 +576,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun setReactionsOnUser(enabled: Boolean) {
         _ui.value = _ui.value.copy(reactionsOnUser = enabled)
         viewModelScope.launch { settings.saveReactionsOnUser(enabled) }
+    }
+
+    fun setAnswerSpacing(value: Float) {
+        _ui.value = _ui.value.copy(answerSpacing = value)
+        viewModelScope.launch { settings.saveAnswerSpacing(value) }
     }
 
     fun setUiScale(scale: Float) {

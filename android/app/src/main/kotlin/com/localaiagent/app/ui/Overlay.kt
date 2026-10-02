@@ -52,6 +52,11 @@ class OverlayEntry {
 val LocalOverlayHost = staticCompositionLocalOf<OverlayHost?> { null }
 
 /** The chosen text size and its setter, for Settings → Appearance. */
+/** Line spacing of the model's answers and its setter (Settings → Appearance). */
+val LocalAnswerSpacing = androidx.compose.runtime.compositionLocalOf<Pair<Float, (Float) -> Unit>> {
+    com.localaiagent.app.data.ANSWER_SPACING_DEFAULT to {}
+}
+
 val LocalUiScale = androidx.compose.runtime.compositionLocalOf<Pair<Float, (Float) -> Unit>> { 1f to {} }
 
 /** Re-checks the PC bridge right away (tapping the presence chip). */

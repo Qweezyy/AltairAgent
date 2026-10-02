@@ -36,6 +36,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -68,21 +71,44 @@ fun MarkdownText(
     val nodes = remember(text, color, codeColor, linkColor) {
         parseMarkdown(text, color, codeColor, linkColor)
     }
+    val spacing = LocalAnswerSpacing.current.first
     Column(modifier) {
-        for (node in nodes) RenderNode(node, color)
+        nodes.forEachIndexed { i, node ->
+            // Lines of an answer get a little air between them, scaled with the line spacing.
+            if (i > 0 && node !is MdNode.Blank && nodes[i - 1] !is MdNode.Blank) {
+                Spacer(Modifier.height((3 * spacing).dp))
+            }
+            RenderNode(node, color, spacing)
+        }
     }
 }
+
+/**
+ * A text style with its line height scaled by the answer line spacing. The first and last lines keep
+ * their full line height too (no trim), so separate lines sit exactly as far apart as wrapped ones.
+ */
+private fun TextStyle.spaced(f: Float): TextStyle =
+    if (!lineHeight.isSpecified) this
+    else copy(
+        lineHeight = lineHeight * f,
+        lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+    )
 
 // ------------------------------------------------------------- рендер узлов
 
 @Composable
-private fun RenderNode(node: MdNode, color: Color) {
-    // Все размеры/интерлиньяж — из типошкалы (Type.kt) вместо «сырых» sp:
-    // проза → bodyLarge, цитата → bodyMedium, заголовки → headlineSmall/titleLarge/titleMedium.
+private fun RenderNode(node: MdNode, color: Color, spacing: Float) {
+    // Sizes come from the type scale (Type.kt); prose line height follows the answer spacing setting.
     val typo = MaterialTheme.typography
+    val body = typo.bodyLarge.spaced(spacing)
     when (node) {
         is MdNode.Code -> CodeBlock(node.content, node.lang)
-        is MdNode.Blank -> Spacer(Modifier.height(6.dp))
+        is MdNode.Blank -> Spacer(Modifier.height((10 * spacing).dp))
+        is MdNode.Rule -> androidx.compose.material3.HorizontalDivider(
+            Modifier.padding(vertical = (10 * spacing).dp),
+            // Derived from the text colour: outlineVariant is nearly invisible on the black theme.
+            thickness = 1.dp, color = color.copy(alpha = 0.2f),
+        )
         is MdNode.Quote -> Row(Modifier.padding(vertical = 2.dp)) {
             androidx.compose.foundation.layout.Box(
                 Modifier.width(3.dp).heightIn(min = 18.dp)
@@ -94,12 +120,12 @@ private fun RenderNode(node: MdNode, color: Color) {
                 node.text,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontStyle = FontStyle.Italic,
-                style = typo.bodyMedium,
+                style = typo.bodyMedium.spaced(spacing),
             )
         }
         is MdNode.ImageLine -> Column(Modifier.fillMaxWidth()) {
             for (seg in node.segments) when (seg) {
-                is MdSegment.Text -> Text(seg.text, color = color, style = typo.bodyLarge)
+                is MdSegment.Text -> Text(seg.text, color = color, style = body)
                 is MdSegment.Img -> InlineImage(seg.url, seg.caption)
             }
         }
@@ -110,19 +136,20 @@ private fun RenderNode(node: MdNode, color: Color) {
             style = when (node.level) {
                 1 -> typo.headlineSmall
                 2 -> typo.titleLarge
-                else -> typo.titleMedium
+                3 -> typo.titleMedium
+                else -> typo.titleSmall
             },
-            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+            modifier = Modifier.padding(top = (10 * spacing).dp, bottom = (2 * spacing).dp),
         )
-        is MdNode.Bullet -> Row(Modifier.padding(start = 4.dp, top = 1.dp)) {
-            Text("•  ", color = color, style = typo.bodyLarge)
-            Text(node.text, color = color, style = typo.bodyLarge)
+        is MdNode.Bullet -> Row(Modifier.padding(start = (4 + 16 * node.depth).dp)) {
+            Text(if (node.depth == 0) "•  " else "◦  ", color = color, style = body)
+            Text(node.text, color = color, style = body)
         }
-        is MdNode.Numbered -> Row(Modifier.padding(start = 4.dp, top = 1.dp)) {
-            Text("${node.num}.  ", color = color, style = typo.bodyLarge)
-            Text(node.text, color = color, style = typo.bodyLarge)
+        is MdNode.Numbered -> Row(Modifier.padding(start = 4.dp)) {
+            Text("${node.num}.  ", color = color, style = body)
+            Text(node.text, color = color, style = body)
         }
-        is MdNode.Para -> Text(node.text, color = color, style = typo.bodyLarge)
+        is MdNode.Para -> Text(node.text, color = color, style = body)
         is MdNode.Table -> TableBlock(node, color)
     }
 }
@@ -223,20 +250,22 @@ private fun CodeBlock(code: String, lang: String = "") {
 
 // ------------------------------------------------------------- модель разбора
 
-/** Готовый к рендеру узел markdown (разобран заранее, без композиции). */
-private sealed interface MdNode {
+/** A markdown node ready to render (parsed up front, outside composition). */
+internal sealed interface MdNode {
     data class Code(val content: String, val lang: String = "") : MdNode
     object Blank : MdNode
+    /** A thematic break: ---, *** or ___ on a line of its own. */
+    object Rule : MdNode
     data class Quote(val text: AnnotatedString) : MdNode
     data class Header(val level: Int, val text: AnnotatedString) : MdNode
-    data class Bullet(val text: AnnotatedString) : MdNode
+    data class Bullet(val text: AnnotatedString, val depth: Int = 0) : MdNode
     data class Numbered(val num: String, val text: AnnotatedString) : MdNode
     data class Para(val text: AnnotatedString) : MdNode
     data class ImageLine(val segments: List<MdSegment>) : MdNode
     data class Table(val header: List<AnnotatedString>, val rows: List<List<AnnotatedString>>) : MdNode
 }
 
-private sealed interface MdSegment {
+internal sealed interface MdSegment {
     data class Text(val text: AnnotatedString) : MdSegment
     data class Img(val url: String, val caption: String) : MdSegment
 }
@@ -245,14 +274,22 @@ private data class Block(val isCode: Boolean, val content: String, val lang: Str
 
 // Regex-ы скомпилированы один раз (были — на каждую строку при каждой рекомпозиции).
 private val IMG_RE = Regex("!\\[([^\\]]*)\\]\\(([^)]+)\\)")
-private val HEADER_RE = Regex("^(#{1,4})\\s+(.*)")
-private val BULLET_RE = Regex("^\\s*[-*]\\s+(.*)")
+// ATX headings as in CommonMark: up to three spaces, 1-6 hashes, then a space or the end of the line.
+private val HEADER_RE = Regex("^ {0,3}(#{1,6})(?:[ \\t]+(.*?))?[ \\t]*$")
+// The optional closing run of hashes ("## Title ##"), which must follow a space.
+private val HEADER_CLOSE_RE = Regex("(?:^|[ \\t]+)#+[ \\t]*$")
+// A thematic break: three or more -, * or _ (spaces between allowed), nothing else.
+private val RULE_RE = Regex("^ {0,3}([-*_])(?:[ \\t]*\\1){2,}[ \\t]*$")
+// A setext "===" underline turns the paragraph line above into a level-1 heading. A "---" under text
+// stays a rule: models use it as a section separator far more often than as an underline.
+private val SETEXT_RE = Regex("^ {0,3}=+[ \\t]*$")
+private val BULLET_RE = Regex("^(\\s*)[-*+]\\s+(.*)")
 private val NUMBERED_RE = Regex("^\\s*(\\d+)\\.\\s+(.*)")
 private val QUOTE_RE = Regex("^\\s*>\\s?(.*)")
 private val LINK_RE = Regex("^\\[([^\\]]+)\\]\\(([^)]+)\\)")
 
-/** Полный разбор текста в список готовых узлов — вызывается один раз в remember. */
-private fun parseMarkdown(
+/** Parses the whole text into ready nodes; called once per text inside remember. */
+internal fun parseMarkdown(
     text: String,
     color: Color,
     codeColor: Color,
@@ -285,7 +322,14 @@ private fun parseMarkdown(
                     rows = rows.map { pad(it).map { c -> parseInline(c, codeColor, linkColor) } },
                 )
             } else {
-                nodes += parseLine(line, color, codeColor, linkColor); i++
+                val setext = SETEXT_RE.find(line)
+                val prev = nodes.lastOrNull()
+                if (setext != null && prev is MdNode.Para) {
+                    nodes[nodes.lastIndex] = MdNode.Header(1, prev.text)
+                } else {
+                    nodes += parseLine(line, color, codeColor, linkColor)
+                }
+                i++
             }
         }
     }
@@ -305,6 +349,8 @@ private fun splitTableRow(line: String): List<String> =
 
 private fun parseLine(line: String, color: Color, codeColor: Color, linkColor: Color): MdNode {
     if (line.isBlank()) return MdNode.Blank
+    // Checked before bullets: "* * *" and "- - -" are rules, not list items.
+    if (RULE_RE.matches(line)) return MdNode.Rule
     val header = HEADER_RE.find(line)
     val bullet = BULLET_RE.find(line)
     val numbered = NUMBERED_RE.find(line)
@@ -324,11 +370,15 @@ private fun parseLine(line: String, color: Color, codeColor: Color, linkColor: C
             if (tail.isNotBlank()) segments += MdSegment.Text(parseInline(tail, codeColor, linkColor))
             MdNode.ImageLine(segments)
         }
-        header != null -> MdNode.Header(
-            header.groupValues[1].length,
-            parseInline(header.groupValues[2], codeColor, linkColor),
+        // A bare "###" is an empty heading: it shows as a little space, never as hashes.
+        header != null -> header.groupValues[2].replace(HEADER_CLOSE_RE, "").trim().let { title ->
+            if (title.isEmpty()) MdNode.Blank
+            else MdNode.Header(header.groupValues[1].length, parseInline(title, codeColor, linkColor))
+        }
+        bullet != null -> MdNode.Bullet(
+            parseInline(bullet.groupValues[2], codeColor, linkColor),
+            depth = (bullet.groupValues[1].replace("\t", "    ").length / 2).coerceAtMost(3),
         )
-        bullet != null -> MdNode.Bullet(parseInline(bullet.groupValues[1], codeColor, linkColor))
         numbered != null -> MdNode.Numbered(
             numbered.groupValues[1],
             parseInline(numbered.groupValues[2], codeColor, linkColor),

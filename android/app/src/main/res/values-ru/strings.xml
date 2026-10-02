@@ -348,4 +348,7 @@
     <string name="show_less">Свернуть</string>
     <string name="continue_answer">Продолжить ответ</string>
     <string name="answer_interrupted">Ответ прервался: %1$s</string>
+    <string name="answer_spacing">Интервал в ответах</string>
+    <string name="answer_spacing_hint">Насколько свободно набраны ответы модели</string>
+    <string name="answer_spacing_sample">Так выглядит ответ.\nВторая строка того же абзаца.\n\n- пункт списка\n- ещё один</string>
 </resources>

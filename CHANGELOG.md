@@ -45,6 +45,11 @@ Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in 
 - Android: pinch, pan and double-tap zoom for photos and videos in the full-screen viewer (up to 6x).
 - Android: long user messages fold after about eight lines, with "Show more" / "Show less". The model's
   answers are always shown in full.
+- Android: answers are set airier, and Settings → Appearance has an "Answer line spacing" slider with a
+  live sample.
+- Android: answer markup understands rules (`---` of any length, `***`, `___`), all six heading levels
+  (with closing hashes), `===` underlined titles, `+` bullets and nested lists; a bare `###` no longer shows
+  as hashes.
 - Android: editing a sent message can remove or replace its photo, video or file before sending it again.
 - Android: Settings → Appearance → Text size (70–200 %) for the whole app.
 - **A premium look.** Larger type and controls, surfaces set like plates in a tray, thin icons,

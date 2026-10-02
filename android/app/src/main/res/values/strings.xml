@@ -349,4 +349,7 @@
     <string name="show_less">Show less</string>
     <string name="continue_answer">Continue the answer</string>
     <string name="answer_interrupted">The answer was interrupted: %1$s</string>
+    <string name="answer_spacing">Answer line spacing</string>
+    <string name="answer_spacing_hint">How airy the model\'s answers are</string>
+    <string name="answer_spacing_sample">This is how an answer reads.\nA second line of the same paragraph.\n\n- a list item\n- another one</string>
 </resources>

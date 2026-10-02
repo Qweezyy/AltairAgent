@@ -2139,6 +2139,28 @@ private fun AppearanceScreen(
                     )
                 }
             }
+            // Answer line spacing: a live slider over a sample answer.
+            SettingsGroup(stringResource(R.string.answer_spacing)) {
+                val (spacing, setSpacing) = LocalAnswerSpacing.current
+                var draft by remember(spacing) { mutableStateOf(spacing) }
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.answer_spacing_hint), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        Text("${(draft * 100).toInt()}%", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                    androidx.compose.material3.Slider(
+                        value = draft,
+                        onValueChange = { draft = Math.round(it * 20) / 20f },
+                        onValueChangeFinished = { setSpacing(draft) },
+                        valueRange = com.localaiagent.app.data.ANSWER_SPACING_MIN..com.localaiagent.app.data.ANSWER_SPACING_MAX,
+                    )
+                    androidx.compose.runtime.CompositionLocalProvider(LocalAnswerSpacing provides (draft to setSpacing)) {
+                        MarkdownText(stringResource(R.string.answer_spacing_sample), Modifier.fillMaxWidth())
+                    }
+                }
+            }
             SettingsGroup(stringResource(R.string.lang_group)) {
                 val langs = listOf(
                     "system" to stringResource(R.string.lang_system),

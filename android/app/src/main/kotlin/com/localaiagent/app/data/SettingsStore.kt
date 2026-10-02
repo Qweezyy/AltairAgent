@@ -34,6 +34,7 @@ class SettingsStore(private val context: Context) {
         val haptics = booleanPreferencesKey("haptics_enabled")
         val uiScale = androidx.datastore.preferences.core.floatPreferencesKey("ui_scale")
         val appIcon = stringPreferencesKey("app_icon")
+        val answerSpacing = androidx.datastore.preferences.core.floatPreferencesKey("answer_spacing")
     }
 
     /** Re-encrypts credentials that older builds stored in plaintext. Idempotent; call once at start. */
@@ -67,6 +68,15 @@ class SettingsStore(private val context: Context) {
 
     suspend fun saveUiScale(scale: Float) {
         context.dataStore.edit { it[Keys.uiScale] = scale.coerceIn(UI_SCALE_MIN, UI_SCALE_MAX) }
+    }
+
+    /** Line spacing of the model's answers (Settings → Appearance), 1.0 = the base type scale. */
+    suspend fun loadAnswerSpacing(): Float =
+        (context.dataStore.data.first()[Keys.answerSpacing] ?: ANSWER_SPACING_DEFAULT)
+            .coerceIn(ANSWER_SPACING_MIN, ANSWER_SPACING_MAX)
+
+    suspend fun saveAnswerSpacing(value: Float) {
+        context.dataStore.edit { it[Keys.answerSpacing] = value.coerceIn(ANSWER_SPACING_MIN, ANSWER_SPACING_MAX) }
     }
 
     suspend fun loadHaptics(): Boolean =
@@ -185,3 +195,7 @@ class SettingsStore(private val context: Context) {
 
 const val UI_SCALE_MIN = 0.7f
 const val UI_SCALE_MAX = 2.0f
+const val ANSWER_SPACING_MIN = 0.8f
+const val ANSWER_SPACING_MAX = 2.0f
+/** A little airier than the bare type scale: answers are long reads. */
+const val ANSWER_SPACING_DEFAULT = 1.15f
