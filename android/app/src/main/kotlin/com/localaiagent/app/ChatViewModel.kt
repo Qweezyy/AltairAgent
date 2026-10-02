@@ -174,6 +174,8 @@ data class ChatUiState(
     val reactionsOnUser: Boolean = false,
     /** Тактильный «язык» агента (вибро на события); по умолчанию вкл. */
     val hapticsEnabled: Boolean = true,
+    /** Text size multiplier (Settings → Appearance). */
+    val uiScale: Float = 1f,
     /** Доска-коллекция текущего чата: собранные сниппеты (закреплённая заметка). */
     val board: List<String> = emptyList(),
     /** Живое присутствие ПК по мосту (для плашки среды у плавающих кнопок). */
@@ -310,6 +312,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 secrets = secretStore.load(),
                 reactionsOnUser = settings.loadReactionsOnUser(),
                 hapticsEnabled = settings.loadHaptics(),
+                uiScale = settings.loadUiScale(),
                 appIcon = settings.loadAppIcon(),
                 language = LocaleManager.get(getApplication()),
                 mcpServers = mcpStore.load(),
@@ -364,14 +367,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (!cfg.enabled) {
                     setPresenceIfNotBusy(PcPresence.OFFLINE)
                 } else if (App.isForeground) {
-                    // testConnection: null = связь есть; строка = ошибка. Таймаут/исключение
-                    // маскируем непустой строкой, чтобы не принять их за успех.
-                    val result = withContext(Dispatchers.IO) {
-                        kotlinx.coroutines.withTimeoutOrNull(PRESENCE_TIMEOUT_MS) {
-                            runCatching { PcBridgeFacade.testConnection(cfg) }.getOrElse { "err" }
-                        } ?: "timeout"
+                    val online = withContext(Dispatchers.IO) {
+                        com.localaiagent.app.bridge.PresenceProbe.isOnline(PRESENCE_TIMEOUT_MS) {
+                            PcBridgeFacade.testConnection(cfg)
+                        }
                     }
-                    setPresenceIfNotBusy(if (result == null) PcPresence.ONLINE else PcPresence.OFFLINE)
+                    setPresenceIfNotBusy(if (online) PcPresence.ONLINE else PcPresence.OFFLINE)
                 }
                 val wait = if (_ui.value.pcPresence == PcPresence.OFFLINE) PRESENCE_OFFLINE_INTERVAL_MS else PRESENCE_INTERVAL_MS
                 kotlinx.coroutines.withTimeoutOrNull(wait) { presencePoke.receive() }
@@ -561,6 +562,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { settings.saveReactionsOnUser(enabled) }
     }
 
+    fun setUiScale(scale: Float) {
+        _ui.value = _ui.value.copy(uiScale = scale)
+        viewModelScope.launch { settings.saveUiScale(scale) }
+    }
+
+    /** Re-checks the PC right away (the user tapped the presence chip). */
+    fun refreshPresence() = pokePresence()
+
     fun setHaptics(enabled: Boolean) {
         _ui.value = _ui.value.copy(hapticsEnabled = enabled)
         viewModelScope.launch { settings.saveHaptics(enabled) }
@@ -648,49 +657,101 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     // -------------------------------------------- взаимодействие с сообщениями
 
     /** Видимые сообщения → история для модели (пустые/картиночные пузыри ассистента пропускаем). */
-    private fun toHistory(prefix: List<ChatMessage>): List<Message> = prefix.mapNotNull { cm ->
-        val body = cm.text.trim()
-        when {
-            cm.fromUser -> Message(
-                Role.USER,
-                body.ifBlank { cm.attachName?.let { "[attachment: $it]" } ?: "[image]" },
-            )
-            body.isNotBlank() -> {
-                val react = cm.reaction?.let { "\n[The user reacted: $it]" } ?: ""
-                Message(Role.ASSISTANT, body + react)
+    /**
+     * The visible conversation as model history (after a rewind, an edit or a branch). Every photo
+     * the user sent goes back to the model as an image, so nothing the conversation relied on is
+     * lost; files are pointed to by their path in the chat folder.
+     */
+    private fun toHistory(prefix: List<ChatMessage>, chatFolder: File = chatDir()): List<Message> {
+        val withImage = prefix.indices.filter { prefix[it].fromUser && prefix[it].imageUrl != null }.toSet()
+        return prefix.mapIndexedNotNull { i, cm ->
+            val body = cm.text.trim()
+            when {
+                cm.fromUser -> {
+                    val file = cm.attachPath?.takeIf { cm.attachKind != "image" }?.let { path ->
+                        val rel = File(path).relativeToOrNull(chatFolder)?.invariantSeparatorsPath ?: path
+                        "[The user attached a file: $rel]"
+                    }
+                    val text = listOfNotNull(body.ifBlank { null }, file).joinToString("\n\n")
+                        .ifBlank { if (cm.imageUrl != null) "[image]" else "[attachment]" }
+                    val parts = if (i in withImage) listOfNotNull(cm.imageUrl?.let { imagePart(it) }) else emptyList()
+                    Message(Role.USER, text, parts = parts)
+                }
+                body.isNotBlank() -> {
+                    val react = cm.reaction?.let { "\n[The user reacted: $it]" } ?: ""
+                    Message(Role.ASSISTANT, body + react)
+                }
+                else -> null
             }
-            else -> null
         }
     }
 
-    /** Перезапуск диалога от пользовательского сообщения #userIndex; carryVersions/Replies — прежние версии ответа. */
+    /**
+     * Re-runs the conversation from the user's message #userIndex (edit, regenerate, steer). Its photo
+     * goes to the model again and its file is pointed to again, so a rewind never loses what was
+     * attached. [override] replaces the message itself (an edit that removed or replaced the
+     * attachment); carryVersions/Replies are the earlier versions of the answer.
+     */
     private fun rerunFromUser(
         userIndex: Int, newText: String,
         carryVersions: List<String> = emptyList(), carryReplies: List<String> = emptyList(),
         extraInstruction: String = "",
+        override: ChatMessage? = null,
     ) {
         val msgs = _ui.value.messages
         if (_ui.value.running || userIndex !in msgs.indices || !msgs[userIndex].fromUser) return
+        val base = (override ?: msgs[userIndex]).copy(text = newText.trim())
         // A bare attachment shows no text; re-running it uses the same default prompt as sending it.
-        val text = newText.trim().ifEmpty {
+        val text = base.text.ifEmpty {
             when {
-                msgs[userIndex].imageUrl != null -> "What is in this image? Describe it."
-                msgs[userIndex].attachPath != null -> "Study the attached file and briefly tell what is in it."
+                base.imageUrl != null -> "What is in this image? Describe it."
+                base.attachPath != null -> "Study the attached file and briefly tell what is in it."
                 else -> ""
             }
         }
         if (text.isEmpty()) return
         val prefix = msgs.subList(0, userIndex).toList()
         session.loadHistory(toHistory(prefix))
-        val userMsg = msgs[userIndex].copy(text = newText.trim())
-        setMessages(prefix + userMsg + ChatMessage(false, "", versions = carryVersions, versionReplies = carryReplies))
+        setMessages(prefix + base + ChatMessage(false, "", versions = carryVersions, versionReplies = carryReplies))
         var agentTask = text
-        userMsg.attachName?.let { name ->
-            if (userMsg.attachKind != "image")
-                agentTask += "\n\n[A file was attached earlier: attachments/$name — read it with read_file/read_table if needed.]"
+        if (base.attachPath != null && base.attachName != null && base.attachKind != "image") {
+            val rel = File(base.attachPath).relativeToOrNull(chatDir())?.invariantSeparatorsPath ?: "attachments/${base.attachName}"
+            agentTask += "\n\n[The user attached a file: $rel — read it with read_file or read_table.]"
         }
         if (extraInstruction.isNotBlank()) agentTask += "\n\n[$extraInstruction]"
-        launchAgent(agentTask, emptyList(), text.take(40))
+        val parts = base.imageUrl?.let { imagePart(it) }?.let { listOf(it) } ?: emptyList()
+        launchAgent(agentTask, parts, text.take(40))
+    }
+
+    /** A local photo as a model input (data URI), or null if the file is gone. */
+    private fun imagePart(path: String): Part.Image? {
+        if (path.startsWith("http")) return Part.Image(path)
+        val f = File(path)
+        if (!f.isFile) return null
+        val mime = when (f.extension.lowercase()) {
+            "png" -> "image/png"; "webp" -> "image/webp"; "gif" -> "image/gif"; else -> "image/jpeg"
+        }
+        return Part.Image("data:$mime;base64," + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP))
+    }
+
+    /** How an edit changes the message's attachment. */
+    sealed interface AttachEdit {
+        data object Keep : AttachEdit
+        data object Remove : AttachEdit
+        data class Replace(val uri: Uri) : AttachEdit
+    }
+
+    /** Copies a picked file into this chat's attachments folder under a unique name. */
+    private fun saveToChat(uri: Uri): File? {
+        val app = getApplication<Application>()
+        val name = (queryDisplayName(app, uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file")
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val dir = File(chatDir(), "attachments").apply { mkdirs() }
+        var dest = File(dir, name)
+        var n = 2
+        while (dest.exists()) { dest = File(dir, "${name.substringBeforeLast('.')}-$n.${name.substringAfterLast('.', "bin")}"); n++ }
+        val ok = app.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { input.copyTo(it) }; true } ?: false
+        return dest.takeIf { ok }
     }
 
     /** Ремикс ответа ИИ: переделать в другом стиле/размере (короче/длиннее/проще/формальнее). */
@@ -720,7 +781,26 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Изменить своё сообщение → ответ ИИ переделывается (версии не копим — это новый вопрос). */
-    fun editUserMessage(index: Int, newText: String) = rerunFromUser(index, newText)
+    /** Edits the user's message #index: new text and, optionally, its attachment removed or replaced. */
+    fun editUserMessage(index: Int, newText: String, attach: AttachEdit = AttachEdit.Keep) {
+        val msg = _ui.value.messages.getOrNull(index) ?: return
+        if (attach == AttachEdit.Keep) { rerunFromUser(index, newText); return }
+        viewModelScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                val cleared = msg.copy(imageUrl = null, attachPath = null, attachName = null, attachKind = null)
+                when (attach) {
+                    is AttachEdit.Replace -> {
+                        val file = runCatching { saveToChat(attach.uri) }.getOrNull() ?: return@withContext null
+                        val kind = kindOfName(file.name)
+                        if (kind == "image") cleared.copy(imageUrl = file.absolutePath)
+                        else cleared.copy(attachPath = file.absolutePath, attachName = file.name, attachKind = kind)
+                    }
+                    else -> cleared
+                }
+            } ?: return@launch
+            rerunFromUser(index, newText, override = updated)
+        }
+    }
 
     /** Перегенерировать ответ ИИ #index — старый ответ сохраняется как версия (стрелки ‹ ›). */
     fun regenerateAt(index: Int) {
@@ -747,15 +827,31 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val msgs = _ui.value.messages
         if (_ui.value.running || index !in msgs.indices) return
         // Берём префикс до #index включительно, убираем хвостовой пустой пузырь.
-        val kept = msgs.subList(0, index + 1).filter { it.text.isNotBlank() || it.imageUrl != null }
         val fresh = Chat(randomId())
+        // Attachments move with the conversation: copied into the new chat's folder, so its files
+        // still open and the agent can read them by their chat-relative paths.
+        val freshDir = File(getApplication<Application>().filesDir, "chats/${fresh.id}").apply { mkdirs() }
+        val kept = msgs.subList(0, index + 1)
+            .filter { it.text.isNotBlank() || it.imageUrl != null || it.attachPath != null || it.html != null }
+            .map { m -> copyAttachments(m, freshDir) }
         fresh.messages = kept
-        fresh.session.loadHistory(toHistory(kept))
+        fresh.session.loadHistory(toHistory(kept, freshDir))
         chats.add(0, fresh)
         current = fresh
         _ui.value = _ui.value.copy(messages = kept, status = "", contextTokens = 0)
         refreshChats()
         persist(fresh)
+    }
+
+    private fun copyAttachments(m: ChatMessage, dir: File): ChatMessage {
+        fun copy(path: String?): String? {
+            if (path == null || path.startsWith("http")) return path
+            val src = File(path)
+            if (!src.isFile) return path
+            val dest = File(File(dir, "attachments").apply { mkdirs() }, src.name)
+            return runCatching { src.copyTo(dest, overwrite = true).absolutePath }.getOrDefault(path)
+        }
+        return m.copy(imageUrl = copy(m.imageUrl), attachPath = copy(m.attachPath))
     }
 
     /** Прикрепить цитату (выделенный фрагмент) к следующему вопросу. */
@@ -1102,8 +1198,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val bytes = ByteArrayOutputStream().use { out ->
                     bmp.compress(Bitmap.CompressFormat.JPEG, 85, out); out.toByteArray()
                 }
-                val dir = File(getApplication<Application>().cacheDir, "attach").apply { mkdirs() }
-                val file = File(dir, "cam_${bytes.size}.jpg").apply { writeBytes(bytes) }
+                val dir = File(chatDir(), "attachments").apply { mkdirs() }
+                val file = File(dir, "photo_${System.currentTimeMillis()}.jpg").apply { writeBytes(bytes) }
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 pendingImageDataUri = "data:image/jpeg;base64,$b64"
                 _ui.value = _ui.value.copy(pendingImagePath = file.absolutePath)
@@ -1118,8 +1214,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val app = getApplication<Application>()
                 val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
                 val mime = app.contentResolver.getType(uri) ?: "image/jpeg"
-                val dir = File(app.cacheDir, "attach").apply { mkdirs() }
-                val file = File(dir, "img_${bytes.size}.jpg").apply { writeBytes(bytes) }
+                // In the chat folder, under a unique name: the cache may be wiped by the system and
+                // size-based names collided, which lost photos on a later rewind.
+                val ext = when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
+                val dir = File(chatDir(), "attachments").apply { mkdirs() }
+                val file = File(dir, "image_${System.currentTimeMillis()}.$ext").apply { writeBytes(bytes) }
                 pendingImageDataUri = "data:$mime;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
                 pendingFilePath = null
                 _ui.value = _ui.value.copy(pendingImagePath = file.absolutePath, pendingFileName = null)

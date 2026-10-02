@@ -1,5 +1,6 @@
 package com.localaiagent.app
 
+import androidx.compose.foundation.layout.fillMaxSize
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -96,8 +97,8 @@ class MainActivity : ComponentActivity() {
             // статус-/нав-бара под текущую тему, чтобы они были видны на фоне приложения.
             val view = androidx.compose.ui.platform.LocalView.current
             val dark = when (state.themeMode) {
-                "dark", "black" -> true
-                "light" -> false
+                "light", "snow" -> false
+                "dark", "black", "graphite" -> true
                 else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
             androidx.compose.runtime.LaunchedEffect(dark) {
@@ -106,6 +107,18 @@ class MainActivity : ComponentActivity() {
                 controller.isAppearanceLightNavigationBars = !dark
             }
             LocalAIAgentTheme(prefs = ThemePrefs(state.themeMode, state.accent)) {
+              val overlays = androidx.compose.runtime.remember { com.localaiagent.app.ui.OverlayHost() }
+              val baseDensity = androidx.compose.ui.platform.LocalDensity.current
+              androidx.compose.runtime.CompositionLocalProvider(
+                  com.localaiagent.app.ui.LocalOverlayHost provides overlays,
+                  // Text size from Settings scales every sp in the app on top of the system setting.
+                  androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(
+                      baseDensity.density, baseDensity.fontScale * state.uiScale,
+                  ),
+                  com.localaiagent.app.ui.LocalUiScale provides (state.uiScale to vm::setUiScale),
+                  com.localaiagent.app.ui.LocalRefreshPresence provides vm::refreshPresence,
+              ) {
+               androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
                 ChatScreen(
                     state = state,
                     onSend = vm::send,
@@ -175,6 +188,10 @@ class MainActivity : ComponentActivity() {
                     bridgeSyncSupported = vm.bridgeSyncSupported,
                     onKeyPromptShown = vm::consumeKeyPrompt,
                 )
+                // Full-screen pages (settings, plugins, library…) above the chat, in this window.
+                com.localaiagent.app.ui.OverlayLayer(overlays)
+               }
+              }
             }
         }
     }

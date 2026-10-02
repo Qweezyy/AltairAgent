@@ -58,75 +58,21 @@ import com.localaiagent.app.ui.theme.Dims
  * прозрачная верхняя панель с заголовком и кнопкой «назад».
  */
 /**
- * A screen shown over the chat that covers the whole display, system bars included. A plain full-width
- * Dialog stops at the status and navigation bars, so strips of the chat showed above and below it;
- * here the dialog window is edge-to-edge with transparent bars, the background runs under them, and
- * [content] gets the bar insets as padding ([padBars] = false for a Scaffold, which pads itself).
+ * A page over the chat that covers the whole display. It is drawn in the activity window through
+ * [LocalOverlayHost] (see Overlay.kt) rather than in a Dialog window, because Dialog windows stop short
+ * of the navigation bar on some phones whatever flags they get. [padBars] = false for a Scaffold,
+ * which pads the bars itself.
  */
 @Composable
 fun FullScreenDialog(onDismissRequest: () -> Unit, padBars: Boolean = true, content: @Composable () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismissRequest,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
-        val view = androidx.compose.ui.platform.LocalView.current
-        val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-        androidx.compose.runtime.SideEffect {
-            val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window ?: return@SideEffect
-            window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
-            window.setDimAmount(0f)
-            // Draw under the status bar and the camera cutout too, not only under the navigation bar.
-            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
-            if (android.os.Build.VERSION.SDK_INT >= 28) {
-                window.attributes = window.attributes.apply {
-                    layoutInDisplayCutoutMode = if (android.os.Build.VERSION.SDK_INT >= 30)
-                        android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                    else android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                }
-            }
-            // Without these the dialog's decor still pads its top by the status bar height.
-            window.addFlags(
-                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            )
-            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            // With NO_LIMITS, MATCH_PARENT stops above the navigation bar: size the window to the
-            // whole display explicitly and pin it to the top.
-            if (android.os.Build.VERSION.SDK_INT >= 30) {
-                // Dialog windows fit the system bars by default; some OEM builds (MIUI/HyperOS) then
-                // shrink the frame above the navigation bar whatever the flags say.
-                window.attributes = window.attributes.apply {
-                    fitInsetsTypes = 0
-                    fitInsetsSides = 0
-                    isFitInsetsIgnoringVisibility = true
-                }
-            }
-            val fullHeight = if (android.os.Build.VERSION.SDK_INT >= 30) {
-                window.windowManager.maximumWindowMetrics.bounds.height()
-            } else {
-                @Suppress("DEPRECATION")
-                android.util.DisplayMetrics().also { window.windowManager.defaultDisplay.getRealMetrics(it) }.heightPixels
-            }
-            window.setGravity(android.view.Gravity.TOP)
-            window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, fullHeight)
-            @Suppress("DEPRECATION")
-            window.statusBarColor = android.graphics.Color.TRANSPARENT
-            @Suppress("DEPRECATION")
-            window.navigationBarColor = android.graphics.Color.TRANSPARENT
-            if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
-            androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !dark
-                isAppearanceLightNavigationBars = !dark
-            }
-        }
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            if (padBars) {
-                Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) { content() }
-            } else {
-                content()
-            }
-        }
+    val host = LocalOverlayHost.current
+    if (host != null) {
+        OverlayPage(host, onDismissRequest, padBars, content)
+        return
+    }
+    // No host (previews): a plain full-width dialog.
+    Dialog(onDismissRequest = onDismissRequest, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { content() }
     }
 }
 

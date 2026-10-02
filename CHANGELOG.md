@@ -15,6 +15,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Fixed
+- Android: full-screen pages (settings, plugins, library, the vault, the canvas) are drawn in the app window
+  instead of Dialog windows, so they cover the whole display on every phone.
+- Android: the PC chip turns "online" again — a successful check was read as a timeout. Tapping the chip
+  re-checks at once.
+- Android: rewinding, editing or branching keeps attachments: photos go to the model again, files move with
+  a branched chat, and photos are stored in the chat folder instead of the cache.
+- Android: Alti next to the running status is sized to the screen.
 - Android: an answer is no longer printed twice when the connection drops mid-stream and the request is
   retried.
 - Android: quick replies are recognised in the forms models really send and no longer carry over into a
@@ -29,6 +36,8 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in a terminal.
 
 ### Added
+- Android: editing a sent message can remove or replace its photo, video or file before sending it again.
+- Android: Settings → Appearance → Text size (70–200 %) for the whole app.
 - **A premium look.** Larger type and controls, surfaces set like plates in a tray, thin icons,
   text optically centred in every control, spring motion, and the accent used on purpose: primary
   actions, focus, the selected chat and settings section, what is running. Nothing blurs over the

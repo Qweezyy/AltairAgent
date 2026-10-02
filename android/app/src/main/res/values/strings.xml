@@ -340,4 +340,9 @@
     <string name="theme_snow">Snow</string>
     <string name="theme_graphite">Graphite</string>
     <string name="scroll_to_bottom">Scroll to the latest message</string>
+    <string name="attach_replace">Replace</string>
+    <string name="attach_remove">Remove</string>
+    <string name="attach_add">Attach a file</string>
+    <string name="ui_scale">Text size</string>
+    <string name="ui_scale_hint">Applies to the whole app</string>
 </resources>

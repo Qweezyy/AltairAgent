@@ -339,4 +339,9 @@
     <string name="theme_snow">Снег</string>
     <string name="theme_graphite">Графит</string>
     <string name="scroll_to_bottom">К последнему сообщению</string>
+    <string name="attach_replace">Заменить</string>
+    <string name="attach_remove">Убрать</string>
+    <string name="attach_add">Прикрепить файл</string>
+    <string name="ui_scale">Размер текста</string>
+    <string name="ui_scale_hint">Действует во всём приложении</string>
 </resources>

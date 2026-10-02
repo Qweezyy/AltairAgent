@@ -221,7 +221,7 @@ fun ChatScreen(
     onSaveChatMemory: (String) -> Unit = {},
     chatItemsProvider: () -> List<LibraryItem> = { emptyList() },
     searchProvider: (String) -> List<com.localaiagent.app.ChatSearchHit> = { emptyList() },
-    onEditMessage: (Int, String) -> Unit = { _, _ -> },
+    onEditMessage: (Int, String, com.localaiagent.app.ChatViewModel.AttachEdit) -> Unit = { _, _, _ -> },
     onRegenerate: (Int) -> Unit = {},
     onRevert: (Int) -> Unit = {},
     onBranch: (Int) -> Unit = {},
@@ -575,9 +575,13 @@ fun ChatScreen(
     editingFor?.let { idx ->
         val msg = state.messages.getOrNull(idx)
         if (msg == null) { editingFor = null; return@let }
+        val attachment = (msg.imageUrl ?: msg.attachPath)?.let { path ->
+            LibraryItem(path, msg.attachName ?: path.substringAfterLast('/'), if (msg.imageUrl != null) "image" else (msg.attachKind ?: "file"))
+        }
         EditMessageDialog(
             initial = msg.text,
-            onConfirm = { newText -> onEditMessage(idx, newText); editingFor = null },
+            attachment = attachment,
+            onConfirm = { newText, edit -> onEditMessage(idx, newText, edit); editingFor = null },
             onDismiss = { editingFor = null },
         )
     }
@@ -1422,10 +1426,12 @@ private fun PcPresenceChip(presence: com.localaiagent.app.PcPresence) {
         com.localaiagent.app.PcPresence.BUSY -> Semantic.warning to stringResource(R.string.pc_busy)
         com.localaiagent.app.PcPresence.OFFLINE -> MaterialTheme.colorScheme.outline to stringResource(R.string.pc_offline)
     }
+    // Tapping the chip checks the PC again right away.
+    val refresh = LocalRefreshPresence.current
     Surface(
         shape = RoundedCornerShape(50),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-        modifier = Modifier.padding(2.dp),
+        modifier = Modifier.padding(2.dp).clip(RoundedCornerShape(50)).clickable { refresh() },
     ) {
         Row(
             Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -1618,7 +1624,10 @@ private fun ThinkingIndicator(status: String) {
         Modifier.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AltiMascot(size = 26.dp, satellites = false, mood = AltiMood.Think)
+        // Sized to the phone: ~11 % of the screen width (40-60 dp), so Alti reads as a character
+        // next to the status instead of a speck.
+        val width = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+        AltiMascot(size = (width * 0.11f).coerceIn(40f, 60f).dp, satellites = true, mood = AltiMood.Think)
         if (status.isNotBlank()) {
             Spacer(Modifier.width(8.dp))
             Text(
@@ -2106,6 +2115,25 @@ private fun AppearanceScreen(
                         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                         if (sel) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
                     }
+                }
+            }
+            // Text size: a live slider with a sample line, applied to the whole app.
+            SettingsGroup(stringResource(R.string.ui_scale)) {
+                val (scale, setScale) = LocalUiScale.current
+                var draft by remember(scale) { mutableStateOf(scale) }
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.ui_scale_hint), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        Text("${(draft * 100).toInt()}%", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                    androidx.compose.material3.Slider(
+                        value = draft,
+                        onValueChange = { draft = (it * 20).toInt() / 20f },
+                        onValueChangeFinished = { setScale(draft) },
+                        valueRange = com.localaiagent.app.data.UI_SCALE_MIN..com.localaiagent.app.data.UI_SCALE_MAX,
+                    )
                 }
             }
             SettingsGroup(stringResource(R.string.lang_group)) {

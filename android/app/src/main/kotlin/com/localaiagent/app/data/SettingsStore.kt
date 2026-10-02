@@ -32,6 +32,7 @@ class SettingsStore(private val context: Context) {
         val nickname = stringPreferencesKey("user_nickname")
         val reactionsOnUser = booleanPreferencesKey("reactions_on_user")
         val haptics = booleanPreferencesKey("haptics_enabled")
+        val uiScale = androidx.datastore.preferences.core.floatPreferencesKey("ui_scale")
         val appIcon = stringPreferencesKey("app_icon")
     }
 
@@ -58,6 +59,14 @@ class SettingsStore(private val context: Context) {
 
     suspend fun saveReactionsOnUser(enabled: Boolean) {
         context.dataStore.edit { it[Keys.reactionsOnUser] = enabled }
+    }
+
+    /** Text size multiplier chosen in Settings → Appearance (1.0 = default). */
+    suspend fun loadUiScale(): Float =
+        (context.dataStore.data.first()[Keys.uiScale] ?: 1f).coerceIn(UI_SCALE_MIN, UI_SCALE_MAX)
+
+    suspend fun saveUiScale(scale: Float) {
+        context.dataStore.edit { it[Keys.uiScale] = scale.coerceIn(UI_SCALE_MIN, UI_SCALE_MAX) }
     }
 
     suspend fun loadHaptics(): Boolean =
@@ -172,3 +181,7 @@ class SettingsStore(private val context: Context) {
         }
     }
 }
+
+
+const val UI_SCALE_MIN = 0.7f
+const val UI_SCALE_MAX = 2.0f

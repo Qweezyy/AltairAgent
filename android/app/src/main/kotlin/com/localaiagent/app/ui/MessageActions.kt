@@ -2,6 +2,9 @@
 
 package com.localaiagent.app.ui
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.res.stringResource
 import com.localaiagent.app.R
 
@@ -153,20 +156,73 @@ private fun ActionRow(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 /** Диалог правки своего сообщения. */
+/**
+ * Editing a sent message: the text and its attachment. The photo, video or file can be removed or
+ * replaced with another one; the message is then sent again with what is shown here.
+ */
 @Composable
-fun EditMessageDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+fun EditMessageDialog(
+    initial: String,
+    attachment: com.localaiagent.app.LibraryItem? = null,
+    onConfirm: (String, com.localaiagent.app.ChatViewModel.AttachEdit) -> Unit,
+    onDismiss: () -> Unit,
+) {
     var value by remember { mutableStateOf(TextFieldValue(initial)) }
+    var edit by remember { mutableStateOf<com.localaiagent.app.ChatViewModel.AttachEdit>(com.localaiagent.app.ChatViewModel.AttachEdit.Keep) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) edit = com.localaiagent.app.ChatViewModel.AttachEdit.Replace(uri) }
+    // What the message will carry after the edit, for the preview.
+    val shown: Triple<String, String, String>? = when (val e = edit) {
+        is com.localaiagent.app.ChatViewModel.AttachEdit.Replace -> {
+            val mime = ctx.contentResolver.getType(e.uri).orEmpty()
+            val kind = when { mime.startsWith("image/") -> "image"; mime.startsWith("video/") -> "video"; mime.startsWith("audio/") -> "audio"; else -> "file" }
+            Triple(e.uri.toString(), e.uri.lastPathSegment?.substringAfterLast('/') ?: "file", kind)
+        }
+        com.localaiagent.app.ChatViewModel.AttachEdit.Remove -> null
+        else -> attachment?.let { Triple(it.path, it.name, it.kind) }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.edit_title)) },
         text = {
-            OutlinedTextField(
-                value = value, onValueChange = { value = it },
-                modifier = Modifier.fillMaxWidth(), minLines = 2,
-            )
+            Column {
+                if (shown != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val (path, name, kind) = shown
+                        if (isVisualKind(kind)) {
+                            Box(Modifier.size(width = 84.dp, height = 104.dp).clip(RoundedCornerShape(14.dp))) {
+                                coil.compose.AsyncImage(
+                                    model = if (path.startsWith("content:")) android.net.Uri.parse(path) else java.io.File(path),
+                                    contentDescription = name, modifier = Modifier.matchParentSize(),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                )
+                            }
+                        } else {
+                            Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 2,
+                                modifier = Modifier.widthIn(max = 140.dp))
+                        }
+                        Spacer(Modifier.size(12.dp))
+                        Column {
+                            TextButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text(stringResource(R.string.attach_replace)) }
+                            TextButton(onClick = { edit = com.localaiagent.app.ChatViewModel.AttachEdit.Remove }) {
+                                Text(stringResource(R.string.attach_remove), color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.size(10.dp))
+                } else {
+                    TextButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text(stringResource(R.string.attach_add)) }
+                }
+                OutlinedTextField(
+                    value = value, onValueChange = { value = it },
+                    modifier = Modifier.fillMaxWidth(), minLines = 2,
+                )
+            }
         },
         confirmButton = {
-            TextButton(onClick = { if (value.text.isNotBlank()) onConfirm(value.text.trim()) }) {
+            TextButton(onClick = { if (value.text.isNotBlank() || shown != null) onConfirm(value.text.trim(), edit) }) {
                 Text(stringResource(R.string.edit_redo))
             }
         },

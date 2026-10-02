@@ -60,11 +60,13 @@ private fun PlayBadge(size: Int = 40) {
 @Composable
 private fun RemoveBadge(onRemove: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        modifier.padding(6.dp).size(26.dp).clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.55f)).clickable(onClick = onRemove),
+        // A large, plainly visible remove button: 32 dp in a 44 dp touch area.
+        modifier.size(44.dp).clip(CircleShape).clickable(onClick = onRemove).padding(6.dp)
+            .clip(CircleShape).background(Color.Black.copy(alpha = 0.65f))
+            .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Rounded.Close, stringResource(R.string.remove), Modifier.size(16.dp), tint = Color.White)
+        Icon(Icons.Rounded.Close, stringResource(R.string.remove), Modifier.size(18.dp), tint = Color.White)
     }
 }
 
