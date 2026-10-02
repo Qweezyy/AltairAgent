@@ -569,7 +569,13 @@ fun ChatScreen(
             onSpeak = { speak(msg.text) },
             onEdit = { editingFor = idx; actionFor = null },
             onRegenerate = { onRegenerate(idx) },
-            onRevert = { onRevert(idx) },
+            // A user's message with no answer after it (the answer was stopped) can be answered anew.
+            canRegenerateUser = com.localaiagent.app.canRegenerateUserMessage(state.messages, idx),
+            onRevert = {
+                // Rewinding to one's own message puts its text back into the input.
+                if (msg.fromUser && !state.running) prefill = msg.text
+                onRevert(idx)
+            },
             onBranch = { onBranch(idx) },
             onSelectText = { selectingText = msg.text; actionFor = null },
             onReact = { emoji -> onReact(msg.id, emoji) },

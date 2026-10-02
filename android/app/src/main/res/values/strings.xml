@@ -352,4 +352,5 @@
     <string name="answer_spacing">Answer line spacing</string>
     <string name="answer_spacing_hint">How airy the model\'s answers are</string>
     <string name="answer_spacing_sample">This is how an answer reads.\nA second line of the same paragraph.\n\n- a list item\n- another one</string>
+    <string name="act_revert_mine">Take back (to the input, erase the rest)</string>
 </resources>

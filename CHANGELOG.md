@@ -15,6 +15,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Fixed
+- Android: rewinding to your own message takes it back — it leaves the chat with the AI's reaction on it,
+  and its text and attachments return to the input. Regenerating or editing a message also drops the
+  reaction the replaced answer put on it.
+- Android: stopping an answer removes it whole (and cleans the half-made step out of the conversation);
+  the unanswered message then offers "Regenerate" in its menu.
+- Android: saved memory notes are framed as background facts in the prompt — the system rules and the
+  conversation take precedence over them, and a contradicting note gets corrected.
 - Android: full-screen pages (settings, plugins, library, the vault, the canvas) are drawn in the app window
   instead of Dialog windows, so they cover the whole display on every phone.
 - Android: the PC chip turns "online" again — a successful check was read as a timeout. Tapping the chip

@@ -351,4 +351,5 @@
     <string name="answer_spacing">Интервал в ответах</string>
     <string name="answer_spacing_hint">Насколько свободно набраны ответы модели</string>
     <string name="answer_spacing_sample">Так выглядит ответ.\nВторая строка того же абзаца.\n\n- пункт списка\n- ещё один</string>
+    <string name="act_revert_mine">Вернуть в поле ввода (стереть далее)</string>
 </resources>

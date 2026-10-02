@@ -77,6 +77,7 @@ fun MessageActionsSheet(
     onSpeak: () -> Unit,
     onEdit: () -> Unit,
     onRegenerate: () -> Unit,
+    canRegenerateUser: Boolean = false,
     onRevert: () -> Unit,
     onBranch: () -> Unit,
     onSelectText: () -> Unit,
@@ -132,11 +133,17 @@ fun MessageActionsSheet(
             if (msg.text.isNotBlank()) ActionRow(Icons.Rounded.TextFields, stringResource(R.string.act_select_text)) { onSelectText() }
             if (msg.fromUser) {
                 ActionRow(Icons.Rounded.Edit, stringResource(R.string.act_edit)) { onEdit() }
+                if (canRegenerateUser) {
+                    ActionRow(Icons.Rounded.Refresh, stringResource(R.string.act_regenerate)) { onRegenerate(); onDismiss() }
+                }
             } else {
                 ActionRow(Icons.Rounded.Refresh, stringResource(R.string.act_regenerate)) { onRegenerate(); onDismiss() }
             }
             ActionRow(Icons.AutoMirrored.Rounded.CallSplit, stringResource(R.string.act_continue_new)) { onBranch(); onDismiss() }
-            ActionRow(Icons.Rounded.Restore, stringResource(R.string.act_revert_here)) { onRevert(); onDismiss() }
+            ActionRow(
+                Icons.Rounded.Restore,
+                stringResource(if (msg.fromUser) R.string.act_revert_mine else R.string.act_revert_here),
+            ) { onRevert(); onDismiss() }
         }
     }
 }
