@@ -34,6 +34,9 @@ object ChatStore {
                     m.html?.let { put("html", it) }
                     m.replyQuote?.let { put("rq", it) }
                     m.reaction?.let { put("re", it) }
+                    if (m.attachments.isNotEmpty()) putJsonArray("att") {
+                        m.attachments.forEach { a -> addJsonObject { put("p", a.path); put("n", a.name); put("k", a.kind) } }
+                    }
                     put("id", m.id)
                     if (m.versions.isNotEmpty()) {
                         put("vi", m.verIndex)
@@ -69,6 +72,14 @@ object ChatStore {
                         html = m["html"]?.jsonPrimitive?.contentOrNull,
                         replyQuote = m["rq"]?.jsonPrimitive?.contentOrNull,
                         reaction = m["re"]?.jsonPrimitive?.contentOrNull,
+                        attachments = (m["att"] as? JsonArray)?.mapNotNull { a ->
+                            val o = a.jsonObject
+                            val p = o["p"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                            com.localaiagent.app.LibraryItem(
+                                p, o["n"]?.jsonPrimitive?.contentOrNull ?: p.substringAfterLast('/'),
+                                o["k"]?.jsonPrimitive?.contentOrNull ?: "file",
+                            )
+                        } ?: emptyList(),
                         id = m["id"]?.jsonPrimitive?.contentOrNull ?: com.localaiagent.app.randomMsgId(),
                         versions = (m["vs"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
                         versionReplies = (m["vr"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),

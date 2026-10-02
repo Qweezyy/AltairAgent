@@ -69,7 +69,21 @@ data class ChatMessage(
     val verIndex: Int = 0,
     // Эмодзи-реакция на сообщение (юзер → ответ ИИ, либо ИИ → сообщение юзера).
     val reaction: String? = null,
+    /** Everything the user attached to this message (photos, videos, audio, files), in order. */
+    val attachments: List<LibraryItem> = emptyList(),
 )
+
+/** How many attachments one message may carry; generous on purpose — the user decides. */
+const val MAX_ATTACHMENTS = 100
+
+/** The user's attachments, including the single-attachment fields of chats saved by older builds. */
+val ChatMessage.userAttachments: List<LibraryItem>
+    get() = attachments.ifEmpty {
+        listOfNotNull(
+            imageUrl?.let { LibraryItem(it, it.substringAfterLast('/'), "image") },
+            attachPath?.let { LibraryItem(it, attachName ?: it.substringAfterLast('/'), attachKind ?: kindOfName(it)) },
+        )
+    }
 
 private var msgSeq = 0L
 fun randomMsgId(): String = "m" + java.lang.Long.toHexString(System.nanoTime()) + (msgSeq++).toString(36)
@@ -128,12 +142,8 @@ data class ChatUiState(
     val contextTokens: Int = 0,
     val status: String = "",
     val needsKey: Boolean = false,
-    val pendingImagePath: String? = null,
-    /** Имя прикреплённого файла (не-картинки), пока не отправлено. */
-    val pendingFileName: String? = null,
-    /** Absolute path and kind (image/video/audio/file) of the pending file, for its preview tile. */
-    val pendingFilePathAbs: String? = null,
-    val pendingFileKind: String? = null,
+    /** Attachments waiting in the composer, in the order they were added (up to [MAX_ATTACHMENTS]). */
+    val pendingAttachments: List<LibraryItem> = emptyList(),
     /** Прикреплённая цитата (фрагмент сообщения), уйдёт в следующий вопрос как контекст. */
     val pendingQuote: String? = null,
     /** Предложенные моделью follow-up вопросы (кнопки-подсказки под ответом). */
@@ -662,20 +672,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * the user sent goes back to the model as an image, so nothing the conversation relied on is
      * lost; files are pointed to by their path in the chat folder.
      */
-    private fun toHistory(prefix: List<ChatMessage>, chatFolder: File = chatDir()): List<Message> {
-        val withImage = prefix.indices.filter { prefix[it].fromUser && prefix[it].imageUrl != null }.toSet()
-        return prefix.mapIndexedNotNull { i, cm ->
+    private fun toHistory(prefix: List<ChatMessage>, chatFolder: File = chatDir()): List<Message> =
+        prefix.mapNotNull { cm ->
             val body = cm.text.trim()
             when {
                 cm.fromUser -> {
-                    val file = cm.attachPath?.takeIf { cm.attachKind != "image" }?.let { path ->
-                        val rel = File(path).relativeToOrNull(chatFolder)?.invariantSeparatorsPath ?: path
-                        "[The user attached a file: $rel]"
-                    }
-                    val text = listOfNotNull(body.ifBlank { null }, file).joinToString("\n\n")
-                        .ifBlank { if (cm.imageUrl != null) "[image]" else "[attachment]" }
-                    val parts = if (i in withImage) listOfNotNull(cm.imageUrl?.let { imagePart(it) }) else emptyList()
-                    Message(Role.USER, text, parts = parts)
+                    val atts = cm.userAttachments
+                    val text = listOfNotNull(body.ifBlank { null }, filesHint(atts, chatFolder)).joinToString("\n\n")
+                        .ifBlank { if (atts.isNotEmpty()) "[attachments]" else "" }
+                    Message(Role.USER, text, parts = imageParts(atts))
                 }
                 body.isNotBlank() -> {
                     val react = cm.reaction?.let { "\n[The user reacted: $it]" } ?: ""
@@ -684,7 +689,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 else -> null
             }
         }
-    }
 
     /**
      * Re-runs the conversation from the user's message #userIndex (edit, regenerate, steer). Its photo
@@ -702,25 +706,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (_ui.value.running || userIndex !in msgs.indices || !msgs[userIndex].fromUser) return
         val base = (override ?: msgs[userIndex]).copy(text = newText.trim())
         // A bare attachment shows no text; re-running it uses the same default prompt as sending it.
-        val text = base.text.ifEmpty {
-            when {
-                base.imageUrl != null -> "What is in this image? Describe it."
-                base.attachPath != null -> "Study the attached file and briefly tell what is in it."
-                else -> ""
-            }
-        }
+        val atts = base.userAttachments
+        val text = base.text.ifEmpty { defaultPrompt(atts) }
         if (text.isEmpty()) return
         val prefix = msgs.subList(0, userIndex).toList()
         session.loadHistory(toHistory(prefix))
         setMessages(prefix + base + ChatMessage(false, "", versions = carryVersions, versionReplies = carryReplies))
         var agentTask = text
-        if (base.attachPath != null && base.attachName != null && base.attachKind != "image") {
-            val rel = File(base.attachPath).relativeToOrNull(chatDir())?.invariantSeparatorsPath ?: "attachments/${base.attachName}"
-            agentTask += "\n\n[The user attached a file: $rel — read it with read_file or read_table.]"
-        }
+        filesHint(atts)?.let { agentTask += "\n\n$it" }
         if (extraInstruction.isNotBlank()) agentTask += "\n\n[$extraInstruction]"
-        val parts = base.imageUrl?.let { imagePart(it) }?.let { listOf(it) } ?: emptyList()
-        launchAgent(agentTask, parts, text.take(40))
+        launchAgent(agentTask, imageParts(atts), text.take(40))
     }
 
     /** A local photo as a model input (data URI), or null if the file is gone. */
@@ -734,12 +729,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return Part.Image("data:$mime;base64," + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP))
     }
 
-    /** How an edit changes the message's attachment. */
-    sealed interface AttachEdit {
-        data object Keep : AttachEdit
-        data object Remove : AttachEdit
-        data class Replace(val uri: Uri) : AttachEdit
-    }
+    /** An edit of a message's attachments: the ones kept (in order) and the newly added files. */
+    data class AttachEdit(val keep: List<LibraryItem>, val add: List<Uri> = emptyList())
 
     /** Copies a picked file into this chat's attachments folder under a unique name. */
     private fun saveToChat(uri: Uri): File? {
@@ -781,23 +772,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Изменить своё сообщение → ответ ИИ переделывается (версии не копим — это новый вопрос). */
-    /** Edits the user's message #index: new text and, optionally, its attachment removed or replaced. */
-    fun editUserMessage(index: Int, newText: String, attach: AttachEdit = AttachEdit.Keep) {
+    /** Edits the user's message #index: new text and its attachments (some removed, others added). */
+    fun editUserMessage(index: Int, newText: String, attach: AttachEdit? = null) {
         val msg = _ui.value.messages.getOrNull(index) ?: return
-        if (attach == AttachEdit.Keep) { rerunFromUser(index, newText); return }
+        if (attach == null || (attach.add.isEmpty() && attach.keep == msg.userAttachments)) {
+            rerunFromUser(index, newText); return
+        }
         viewModelScope.launch {
-            val updated = withContext(Dispatchers.IO) {
-                val cleared = msg.copy(imageUrl = null, attachPath = null, attachName = null, attachKind = null)
-                when (attach) {
-                    is AttachEdit.Replace -> {
-                        val file = runCatching { saveToChat(attach.uri) }.getOrNull() ?: return@withContext null
-                        val kind = kindOfName(file.name)
-                        if (kind == "image") cleared.copy(imageUrl = file.absolutePath)
-                        else cleared.copy(attachPath = file.absolutePath, attachName = file.name, attachKind = kind)
-                    }
-                    else -> cleared
-                }
-            } ?: return@launch
+            val added = withContext(Dispatchers.IO) {
+                attach.add.mapNotNull { uri -> runCatching { saveToChat(uri) }.getOrNull()?.let { toItem(it, uri) } }
+            }
+            val updated = msg.copy(
+                imageUrl = null, attachPath = null, attachName = null, attachKind = null,
+                attachments = (attach.keep + added).take(MAX_ATTACHMENTS),
+            )
             rerunFromUser(index, newText, override = updated)
         }
     }
@@ -832,7 +820,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         // still open and the agent can read them by their chat-relative paths.
         val freshDir = File(getApplication<Application>().filesDir, "chats/${fresh.id}").apply { mkdirs() }
         val kept = msgs.subList(0, index + 1)
-            .filter { it.text.isNotBlank() || it.imageUrl != null || it.attachPath != null || it.html != null }
+            .filter { it.text.isNotBlank() || it.imageUrl != null || it.attachPath != null || it.html != null || it.attachments.isNotEmpty() }
             .map { m -> copyAttachments(m, freshDir) }
         fresh.messages = kept
         fresh.session.loadHistory(toHistory(kept, freshDir))
@@ -851,7 +839,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val dest = File(File(dir, "attachments").apply { mkdirs() }, src.name)
             return runCatching { src.copyTo(dest, overwrite = true).absolutePath }.getOrDefault(path)
         }
-        return m.copy(imageUrl = copy(m.imageUrl), attachPath = copy(m.attachPath))
+        return m.copy(
+            imageUrl = copy(m.imageUrl), attachPath = copy(m.attachPath),
+            attachments = m.attachments.map { it.copy(path = copy(it.path) ?: it.path) },
+        )
     }
 
     /** Прикрепить цитату (выделенный фрагмент) к следующему вопросу. */
@@ -1166,6 +1157,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     if (it.startsWith("http")) "image" else kindOfName(it.substringAfterLast('/')))
             }
             m.attachPath?.let { items[it] = LibraryItem(it, m.attachName ?: tr(R.string.file_generic), m.attachKind ?: "file") }
+            m.attachments.forEach { items[it.path] = it }
         }
         File(chatDir(), "attachments").listFiles()?.forEach {
             if (it.isFile) items[it.absolutePath] = LibraryItem(it.absolutePath, it.name, kindOfName(it.name))
@@ -1189,60 +1181,58 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- вложения
 
-    private var pendingImageDataUri: String? = null
-    private var pendingFilePath: String? = null // путь в рабочей папке (attachments/…)
+    /** Adds attachments to the composer, keeping the order of arrival and the overall limit. */
+    private fun addPending(items: List<LibraryItem>) {
+        val room = MAX_ATTACHMENTS - _ui.value.pendingAttachments.size
+        if (room <= 0) return
+        _ui.value = _ui.value.copy(pendingAttachments = _ui.value.pendingAttachments + items.take(room))
+    }
 
     fun attachCamera(bmp: Bitmap) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                val bytes = ByteArrayOutputStream().use { out ->
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 85, out); out.toByteArray()
-                }
-                val dir = File(chatDir(), "attachments").apply { mkdirs() }
-                val file = File(dir, "photo_${System.currentTimeMillis()}.jpg").apply { writeBytes(bytes) }
-                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                pendingImageDataUri = "data:image/jpeg;base64,$b64"
-                _ui.value = _ui.value.copy(pendingImagePath = file.absolutePath)
+        viewModelScope.launch {
+            val item = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = ByteArrayOutputStream().use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 85, out); out.toByteArray() }
+                    val dir = File(chatDir(), "attachments").apply { mkdirs() }
+                    val file = File(dir, "photo_${System.currentTimeMillis()}.jpg").apply { writeBytes(bytes) }
+                    LibraryItem(file.absolutePath, file.name, "image")
+                }.getOrNull()
             }
+            item?.let { addPending(listOf(it)) }
         }
     }
 
-    /** Прикрепить фото из галереи (view_image) — отправляется модели как изображение. */
-    fun attachImageUri(uri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                val app = getApplication<Application>()
-                val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-                val mime = app.contentResolver.getType(uri) ?: "image/jpeg"
-                // In the chat folder, under a unique name: the cache may be wiped by the system and
-                // size-based names collided, which lost photos on a later rewind.
-                val ext = when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
-                val dir = File(chatDir(), "attachments").apply { mkdirs() }
-                val file = File(dir, "image_${System.currentTimeMillis()}.$ext").apply { writeBytes(bytes) }
-                pendingImageDataUri = "data:$mime;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                pendingFilePath = null
-                _ui.value = _ui.value.copy(pendingImagePath = file.absolutePath, pendingFileName = null)
+    /** Photos picked from the gallery (any number); they go to the model as images. */
+    fun attachImageUri(uri: Uri) = attachUris(listOf(uri))
+
+    /** Files of any kind (any number): copied into the chat folder, which the agent's tools read. */
+    fun attachFileUri(uri: Uri) = attachUris(listOf(uri))
+
+    fun attachUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            // Copied off the main thread; added on it, in the picked order, so parallel picks never race.
+            val items = withContext(Dispatchers.IO) {
+                uris.take(MAX_ATTACHMENTS).mapNotNull { uri -> runCatching { saveToChat(uri) }.getOrNull()?.let { toItem(it, uri) } }
             }
+            addPending(items)
         }
     }
 
-    /** Прикрепить файл (документ/аудио/видео): копируем в рабочую папку, модель читает инструментами. */
-    fun attachFileUri(uri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                val app = getApplication<Application>()
-                val name = queryDisplayName(app, uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
-                val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-                val dir = File(chatDir(), "attachments").apply { mkdirs() }
-                val dest = File(dir, name).apply { writeBytes(bytes) }
-                pendingFilePath = "attachments/$name"
-                pendingImageDataUri = null
-                _ui.value = _ui.value.copy(
-                    pendingFileName = name, pendingImagePath = null,
-                    pendingFilePathAbs = dest.absolutePath, pendingFileKind = kindOfName(name),
-                )
-            }
+    private fun toItem(file: File, uri: Uri?): LibraryItem {
+        val mime = uri?.let { getApplication<Application>().contentResolver.getType(it) }.orEmpty()
+        val kind = when {
+            mime.startsWith("image/") -> "image"
+            mime.startsWith("video/") -> "video"
+            mime.startsWith("audio/") -> "audio"
+            else -> kindOfName(file.name)
         }
+        return LibraryItem(file.absolutePath, file.name, kind)
+    }
+
+    fun removePendingAttachment(index: Int) {
+        val list = _ui.value.pendingAttachments
+        if (index in list.indices) _ui.value = _ui.value.copy(pendingAttachments = list.toMutableList().apply { removeAt(index) })
     }
 
     private fun queryDisplayName(app: Application, uri: Uri): String? = runCatching {
@@ -1252,9 +1242,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }.getOrNull()
 
     fun clearAttachment() {
-        pendingImageDataUri = null
-        pendingFilePath = null
-        _ui.value = _ui.value.copy(pendingImagePath = null, pendingFileName = null, pendingFilePathAbs = null, pendingFileKind = null)
+        _ui.value = _ui.value.copy(pendingAttachments = emptyList())
     }
 
     // ------------------------------------------------------------- прогон
@@ -1423,48 +1411,45 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun send(text: String) {
-        val imgPath = _ui.value.pendingImagePath
-        val imgData = pendingImageDataUri
-        val filePath = pendingFilePath
-        val fileName = _ui.value.pendingFileName
-        val task = text.trim().ifEmpty {
-            when {
-                imgData != null -> "What is in this image? Describe it."
-                filePath != null -> "Study the attached file and briefly tell what is in it."
-                else -> ""
-            }
-        }
+        val atts = _ui.value.pendingAttachments
+        val task = text.trim().ifEmpty { defaultPrompt(atts) }
         if (task.isEmpty() || _ui.value.running) return
         val quote = _ui.value.pendingQuote
-        // Сообщение пользователя: картинка-пузырь, файл-вложение (иконка/превью) или текст.
-        // Если есть цитата — показываем её в пузыре как «> …» над текстом.
-        // Only what the user typed is shown; the default prompt for a bare attachment stays hidden.
+        // Only what the user typed is shown; the default prompt for bare attachments stays hidden.
+        // A quote is shown in the bubble as «> …» above the text.
         val typed = text.trim()
         val shownText = if (quote != null) "> ${quote.replace("\n", "\n> ")}\n\n$typed" else typed
-        val userMsg = when {
-            imgPath != null -> ChatMessage(true, shownText, imageUrl = imgPath)
-            filePath != null && fileName != null -> ChatMessage(
-                true, shownText,
-                attachPath = File(chatDir(), filePath).absolutePath,
-                attachName = fileName, attachKind = kindOfName(fileName),
-            )
-            else -> ChatMessage(true, shownText)
-        }
+        val userMsg = ChatMessage(true, shownText, attachments = atts)
         setMessages(_ui.value.messages + userMsg + ChatMessage(false, ""))
         _ui.value = _ui.value.copy(
             running = true, status = tr(R.string.status_thinking),
-            pendingImagePath = null, pendingFileName = null, pendingQuote = null,
-            pendingFilePathAbs = null, pendingFileKind = null,
+            pendingAttachments = emptyList(), pendingQuote = null,
         )
-        pendingImageDataUri = null
-        pendingFilePath = null
-        // Модели: цитата как контекст + подсказка про файл.
         var agentTask = task
         if (quote != null) agentTask = "[The user refers to this fragment from the conversation:\n«$quote»]\n\n$task"
-        if (filePath != null)
-            agentTask += "\n\n[The user attached a file: $filePath — read it with read_file or read_table.]"
-        val parts = imgData?.let { listOf(Part.Image(it)) } ?: emptyList()
-        launchAgent(agentTask, parts, task.take(40))
+        filesHint(atts)?.let { agentTask += "\n\n$it" }
+        launchAgent(agentTask, imageParts(atts), task.take(40))
+    }
+
+    /** The prompt used when the user sends attachments without text. */
+    private fun defaultPrompt(atts: List<LibraryItem>): String = when {
+        atts.isEmpty() -> ""
+        atts.all { it.kind == "image" } -> if (atts.size == 1) "What is in this image? Describe it." else "What is in these images? Describe them."
+        atts.size == 1 -> "Study the attached file and briefly tell what is in it."
+        else -> "Study the attached files and briefly tell what is in them."
+    }
+
+    /** Photos go to the model as images, every one of them. */
+    private fun imageParts(atts: List<LibraryItem>): List<Part> =
+        atts.filter { it.kind == "image" }.mapNotNull { imagePart(it.path) }
+
+    /** Everything else is pointed to by its path in the chat folder, for the agent's file tools. */
+    private fun filesHint(atts: List<LibraryItem>, folder: File = chatDir()): String? {
+        val files = atts.filter { it.kind != "image" }
+        if (files.isEmpty()) return null
+        val paths = files.joinToString(", ") { File(it.path).relativeToOrNull(folder)?.invariantSeparatorsPath ?: it.path }
+        return if (files.size == 1) "[The user attached a file: $paths — read it with read_file or read_table.]"
+        else "[The user attached ${files.size} files: $paths — read them with read_file or read_table.]"
     }
 
     /**

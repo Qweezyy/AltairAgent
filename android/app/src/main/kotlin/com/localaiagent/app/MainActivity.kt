@@ -137,6 +137,8 @@ class MainActivity : ComponentActivity() {
                     onPickImageUri = vm::attachImageUri,
                     onPickFileUri = vm::attachFileUri,
                     onClearAttachment = vm::clearAttachment,
+                    onRemoveAttachment = vm::removePendingAttachment,
+                    onPickUris = vm::attachUris,
                     chatMemoryProvider = vm::chatMemory,
                     onSaveChatMemory = vm::saveChatMemory,
                     chatItemsProvider = vm::currentChatItems,

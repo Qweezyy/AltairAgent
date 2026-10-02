@@ -83,8 +83,8 @@ fun ComposerAttachment(path: String, name: String, kind: String, onOpen: () -> U
                 .border(1.dp, alt.hair, RoundedCornerShape(16.dp)).clickable(onClick = onOpen),
         ) {
             AsyncImage(
-                model = java.io.File(path), contentDescription = name,
-                modifier = Modifier.matchParentSize(), contentScale = ContentScale.Crop,
+                model = if (path.startsWith("content:")) android.net.Uri.parse(path) else java.io.File(path),
+                contentDescription = name, modifier = Modifier.matchParentSize(), contentScale = ContentScale.Crop,
             )
             if (kind == "video") Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) { PlayBadge(34) }
             RemoveBadge(onRemove, Modifier.align(Alignment.TopEnd))
@@ -142,5 +142,44 @@ fun SentFileCard(name: String, kind: String, onOpen: () -> Unit) {
         Icon(fileIcon(kind, name), null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(10.dp))
         Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+
+/**
+ * Everything attached to a sent message, right-aligned like ChatGPT: a single photo or video keeps its
+ * proportions; several are square tiles that wrap into rows; files and audio are cards below them.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun SentAttachments(items: List<com.localaiagent.app.LibraryItem>, onOpen: (com.localaiagent.app.LibraryItem) -> Unit) {
+    val visual = items.filter { isVisualKind(it.kind) }
+    val files = items.filterNot { isVisualKind(it.kind) }
+    androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.End) {
+        if (visual.size == 1) {
+            val v = visual[0]
+            SentMedia(v.path, v.name, v.kind) { onOpen(v) }
+        } else if (visual.isNotEmpty()) {
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier.widthIn(max = 300.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp, Alignment.End),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+            ) {
+                visual.forEach { v ->
+                    Box(
+                        Modifier.size(96.dp).clip(RoundedCornerShape(14.dp)).clickable { onOpen(v) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val model: Any = if (v.path.startsWith("http")) v.path else java.io.File(v.path)
+                        AsyncImage(model = model, contentDescription = v.name, modifier = Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+                        if (v.kind == "video") PlayBadge(30)
+                    }
+                }
+            }
+        }
+        files.forEachIndexed { i, f ->
+            if (i > 0 || visual.isNotEmpty()) Spacer(Modifier.size(6.dp))
+            SentFileCard(f.name, f.kind) { onOpen(f) }
+        }
     }
 }

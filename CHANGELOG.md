@@ -36,6 +36,8 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in a terminal.
 
 ### Added
+- Android: attach as many photos, videos, audio and files as you like to one message (up to 100, mixed),
+  pick several at once, remove any of them before sending or while editing.
 - Android: editing a sent message can remove or replace its photo, video or file before sending it again.
 - Android: Settings → Appearance → Text size (70–200 %) for the whole app.
 - **A premium look.** Larger type and controls, surfaces set like plates in a tray, thin icons,

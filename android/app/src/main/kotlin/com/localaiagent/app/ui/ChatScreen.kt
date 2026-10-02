@@ -5,6 +5,7 @@
 
 package com.localaiagent.app.ui
 
+import com.localaiagent.app.userAttachments
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.snapshotFlow
@@ -217,11 +218,13 @@ fun ChatScreen(
     onPickImageUri: (android.net.Uri) -> Unit = {},
     onPickFileUri: (android.net.Uri) -> Unit = {},
     onClearAttachment: () -> Unit = {},
+    onRemoveAttachment: (Int) -> Unit = {},
+    onPickUris: (List<android.net.Uri>) -> Unit = {},
     chatMemoryProvider: () -> String = { "" },
     onSaveChatMemory: (String) -> Unit = {},
     chatItemsProvider: () -> List<LibraryItem> = { emptyList() },
     searchProvider: (String) -> List<com.localaiagent.app.ChatSearchHit> = { emptyList() },
-    onEditMessage: (Int, String, com.localaiagent.app.ChatViewModel.AttachEdit) -> Unit = { _, _, _ -> },
+    onEditMessage: (Int, String, com.localaiagent.app.ChatViewModel.AttachEdit?) -> Unit = { _, _, _ -> },
     onRegenerate: (Int) -> Unit = {},
     onRevert: (Int) -> Unit = {},
     onBranch: (Int) -> Unit = {},
@@ -473,8 +476,9 @@ fun ChatScreen(
                 state.pendingQuote?.let { QuoteChip(it, onClear = onClearQuote) }
                 InputBar(
                     running = state.running,
-                    pendingImagePath = state.pendingImagePath,
-                    pendingFileName = state.pendingFileName,
+                    pending = state.pendingAttachments,
+                    onRemoveAttachment = onRemoveAttachment,
+                    onPickUris = onPickUris,
                     caps = state.activeCaps,
                     contextTokens = state.contextTokens,
                     onSend = onSend,
@@ -486,8 +490,6 @@ fun ChatScreen(
                     onSteer = onSteer,
                     prefill = prefill,
                     onPrefillUsed = { prefill = null },
-                    pendingFileAbs = state.pendingFilePathAbs,
-                    pendingFileKind = state.pendingFileKind,
                     onOpenAttachment = { openedAttachment = it },
                 )
             }
@@ -575,12 +577,9 @@ fun ChatScreen(
     editingFor?.let { idx ->
         val msg = state.messages.getOrNull(idx)
         if (msg == null) { editingFor = null; return@let }
-        val attachment = (msg.imageUrl ?: msg.attachPath)?.let { path ->
-            LibraryItem(path, msg.attachName ?: path.substringAfterLast('/'), if (msg.imageUrl != null) "image" else (msg.attachKind ?: "file"))
-        }
         EditMessageDialog(
             initial = msg.text,
-            attachment = attachment,
+            attachments = msg.userAttachments,
             onConfirm = { newText, edit -> onEditMessage(idx, newText, edit); editingFor = null },
             onDismiss = { editingFor = null },
         )
@@ -992,15 +991,10 @@ private fun MessageBubble(
             }
         }
         // The user's photo, video or file: the media on the right with the text bubble under it.
-        msg.fromUser && (msg.imageUrl != null || msg.attachPath != null) -> Column(
+        msg.fromUser && msg.userAttachments.isNotEmpty() -> Column(
             Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End,
         ) {
-            val path = msg.imageUrl ?: msg.attachPath!!
-            val kind = if (msg.imageUrl != null) "image" else (msg.attachKind ?: "file")
-            val name = msg.attachName ?: path.substringAfterLast('/')
-            val item = LibraryItem(path, name, kind)
-            if (isVisualKind(kind)) SentMedia(path, name, kind) { onOpenAttachment(item) }
-            else SentFileCard(name, kind) { onOpenAttachment(item) }
+            SentAttachments(msg.userAttachments, onOpenAttachment)
             if (msg.text.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 UserTextBubble(msg.text)
@@ -1642,6 +1636,7 @@ private fun ThinkingIndicator(status: String) {
 /** Тип элемента ленты для `contentType` LazyColumn — чтобы Compose переиспользовал слоты по типу. */
 private fun msgContentType(msg: ChatMessage): String = when {
     msg.html != null -> "html"
+    msg.fromUser && msg.attachments.isNotEmpty() -> "media"
     msg.imageUrl != null -> "image"
     msg.attachPath != null -> "file"
     msg.fromUser -> "user"
@@ -1785,8 +1780,9 @@ private fun AttachRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
 @Composable
 private fun InputBar(
     running: Boolean,
-    pendingImagePath: String?,
-    pendingFileName: String?,
+    pending: List<LibraryItem>,
+    onRemoveAttachment: (Int) -> Unit,
+    onPickUris: (List<android.net.Uri>) -> Unit,
     caps: Set<String>,
     contextTokens: Int,
     onSend: (String) -> Unit,
@@ -1798,8 +1794,6 @@ private fun InputBar(
     onPickFile: (android.net.Uri) -> Unit,
     prefill: String? = null,
     onPrefillUsed: () -> Unit = {},
-    pendingFileAbs: String? = null,
-    pendingFileKind: String? = null,
     onOpenAttachment: (LibraryItem) -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
@@ -1816,12 +1810,13 @@ private fun InputBar(
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicturePreview(),
     ) { bmp -> if (bmp != null) onCamera(bmp) }
+    // Any number of photos/videos and files at once (up to MAX_ATTACHMENTS per message).
     val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri -> if (uri != null) onPickImage(uri) }
+        ActivityResultContracts.PickMultipleVisualMedia(com.localaiagent.app.MAX_ATTACHMENTS),
+    ) { uris -> if (uris.isNotEmpty()) onPickUris(uris) }
     val fileLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri -> if (uri != null) onPickFile(uri) }
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> if (uris.isNotEmpty()) onPickUris(uris) }
 
 
     if (drawing) {
@@ -1854,16 +1849,19 @@ private fun InputBar(
         // The composer is a plate in its tray, as on the PC; on focus the ring takes the accent.
         Column(Modifier.fillMaxWidth().plate(com.localaiagent.app.ui.theme.PremiumRadii.lg, focused = inputFocused)) {
             // The pending attachment sits inside the composer, above the text, as in ChatGPT.
-            val pendingPath = pendingImagePath ?: pendingFileAbs
-            if (pendingPath != null) {
-                val kind = if (pendingImagePath != null) "image" else (pendingFileKind ?: "file")
-                val name = pendingFileName ?: pendingPath.substringAfterLast('/')
-                Box(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)) {
-                    ComposerAttachment(
-                        path = pendingPath, name = name, kind = kind,
-                        onOpen = { onOpenAttachment(LibraryItem(pendingPath, name, kind)) },
-                        onRemove = onClearAttachment,
-                    )
+            if (pending.isNotEmpty()) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    itemsIndexed(pending, key = { _, it -> it.path }) { i, att ->
+                        ComposerAttachment(
+                            path = att.path, name = att.name, kind = att.kind,
+                            onOpen = { onOpenAttachment(att) },
+                            onRemove = { onRemoveAttachment(i) },
+                        )
+                    }
                 }
             }
             Row(
@@ -1880,7 +1878,7 @@ private fun InputBar(
                         onCamera = { cameraLauncher.launch(null) },
                         onPhoto = {
                             galleryLauncher.launch(
-                                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
                             )
                         },
                         onDraw = { drawing = true },
@@ -1916,7 +1914,7 @@ private fun InputBar(
                             trackColor = MaterialTheme.colorScheme.surface,
                         )
                     }
-                    val canSend = (input.isNotBlank() || pendingImagePath != null || pendingFileName != null) && !running
+                    val canSend = (input.isNotBlank() || pending.isNotEmpty()) && !running
                     // Steering on the fly: text typed during a run adjusts its direction.
                     val canSteer = running && input.isNotBlank()
                     val active = canSend || canSteer || running
