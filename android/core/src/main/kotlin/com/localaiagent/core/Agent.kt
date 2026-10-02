@@ -99,18 +99,15 @@ class Agent(
                 val allowTools = registry.all().isNotEmpty() && toolRounds < MAX_TOOL_ROUNDS
                 // Deferred loading: only core tools + those loaded/used in this chat go up front.
                 val active = DeferredTools.activeNames(registry, session.snapshot(), ctx.scratch)
-                // Text streamed by the current attempt; a retry restarts the answer from scratch.
-                var streamed = 0
+                // A broken stream is continued by the client where it stopped; only when it has to
+                // start over does it discard the streamed text, which the UI then takes back.
                 val turn = llm.complete(
                     messages = session.snapshot(),
                     tools = if (allowTools) registry.schemas(active) else null,
-                    onText = { streamed += it.length; send(AgentEvent.TextDelta(it)) },
+                    onText = { send(AgentEvent.TextDelta(it)) },
                     onReasoning = { send(AgentEvent.ReasoningDelta(it)) },
-                    onRetry = { a, m, d, r ->
-                        if (streamed > 0) send(AgentEvent.TextRetracted(streamed))
-                        streamed = 0
-                        send(AgentEvent.Reconnecting(a, m, d, r))
-                    },
+                    onRetry = { a, m, d, r -> send(AgentEvent.Reconnecting(a, m, d, r)) },
+                    onDiscard = { chars -> send(AgentEvent.TextRetracted(chars)) },
                 )
                 session.addAssistant(turn)
                 send(AgentEvent.ContextUsage(session.tokenEstimate()))

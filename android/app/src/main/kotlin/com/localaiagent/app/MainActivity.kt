@@ -145,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     searchProvider = vm::searchAllChats,
                     onEditMessage = vm::editUserMessage,
                     onRegenerate = vm::regenerateAt,
+                    onContinueAnswer = vm::continueAnswer,
                     onRevert = vm::revertToMessage,
                     onBranch = vm::branchFromMessage,
                     onQuote = vm::setQuote,

@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Calculate
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -226,6 +227,7 @@ fun ChatScreen(
     searchProvider: (String) -> List<com.localaiagent.app.ChatSearchHit> = { emptyList() },
     onEditMessage: (Int, String, com.localaiagent.app.ChatViewModel.AttachEdit?) -> Unit = { _, _, _ -> },
     onRegenerate: (Int) -> Unit = {},
+    onContinueAnswer: () -> Unit = {},
     onRevert: (Int) -> Unit = {},
     onBranch: (Int) -> Unit = {},
     onQuote: (String) -> Unit = {},
@@ -427,8 +429,10 @@ fun ChatScreen(
                                             onCopy = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg.text)) },
                                             onSpeak = { speak(msg.text) },
                                             onRegenerate = { onRegenerate(index) },
+                                            onContinue = onContinueAnswer,
                                             // Статус («Думаю…», «Инструмент: …») — у активного ответа ИИ.
                                             statusText = if (state.running && index == displayed.lastIndex) state.status else "",
+                                            foldable = index < displayed.lastIndex,
                                         )
                                         msg.reaction?.let { ReactionBadge(it, msg.fromUser) }
                                     }
@@ -979,7 +983,9 @@ private fun MessageBubble(
     onCopy: () -> Unit = {},
     onSpeak: () -> Unit = {},
     onRegenerate: () -> Unit = {},
+    onContinue: () -> Unit = {},
     statusText: String = "",
+    foldable: Boolean = false,
 ) {
     when {
         // Встроенная графика/интерактив ИИ (SVG/HTML).
@@ -997,7 +1003,7 @@ private fun MessageBubble(
             SentAttachments(msg.userAttachments, onOpenAttachment)
             if (msg.text.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
-                UserTextBubble(msg.text)
+                UserTextBubble(msg.text, msg.id)
             }
         }
         msg.imageUrl != null -> Column(Modifier.fillMaxWidth()) {
@@ -1048,7 +1054,7 @@ private fun MessageBubble(
         }
         // Пользователь — акцентный пузырь (цвет выбирает юзер), справа.
         // The user's message: a neutral plate on the right, as on the PC (not an accent fill).
-        msg.fromUser -> UserTextBubble(msg.text)
+        msg.fromUser -> UserTextBubble(msg.text, msg.id)
         // Ассистент — во весь экран, без рамок, крупным текстом.
         else -> Column(Modifier.fillMaxWidth()) {
             msg.replyQuote?.let { ReplyQuoteHeader(it) }
@@ -1063,7 +1069,13 @@ private fun MessageBubble(
                 // The quick-reply line becomes chips at the end; never flash it as text mid-stream.
                 val streaming = statusText.isNotBlank()
                 val shown = if (streaming) com.localaiagent.app.Followups.hideWhileStreaming(msg.text) else msg.text
-                MarkdownText(rememberSmoothReveal(shown, active = streaming), Modifier.fillMaxWidth())
+                // Earlier answers fold when very long; the newest one and a streaming one stay open.
+                Collapsible(
+                    key = "a:${msg.id}", collapsedHeight = ANSWER_FOLD_HEIGHT,
+                    fadeColor = MaterialTheme.colorScheme.background, enabled = foldable && !streaming,
+                ) {
+                    MarkdownText(rememberSmoothReveal(shown, active = streaming), Modifier.fillMaxWidth())
+                }
                 // Показываем полный индикатор под текстом ТОЛЬКО во время инструмента (напр.
                 // «Инструмент: run_python»). Для обычного стрима токенов — тонкая каретка-искра
                 // в конце (пока прогон идёт, т.е. statusText непустой), чтобы было видно «печатает».
@@ -1075,6 +1087,7 @@ private fun MessageBubble(
                     StreamingCaret()
                 }
             }
+            if (msg.error != null && statusText.isBlank()) AnswerBrokeOff(msg.error, onContinue)
             if (msg.versions.size > 1) {
                 VersionSwitcher(
                     index = msg.verIndex, total = msg.versions.size,
@@ -2486,7 +2499,7 @@ private fun rememberSmoothReveal(target: String, active: Boolean): String {
 
 /** The user's text: a neutral plate on the right, as on the PC (not an accent fill). */
 @Composable
-private fun UserTextBubble(text: String) {
+private fun UserTextBubble(text: String, id: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         val alt = com.localaiagent.app.ui.theme.LocalAltair.current
         Surface(
@@ -2495,8 +2508,33 @@ private fun UserTextBubble(text: String) {
             border = BorderStroke(1.dp, alt.hair),
             modifier = Modifier.fillMaxWidth(0.82f).wrapContentWidth(Alignment.End),
         ) {
-            Text(text, Modifier.padding(horizontal = 18.dp, vertical = 13.dp),
-                color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+            // A long message folds to about eight lines; the toggle sits inside the bubble.
+            Box(Modifier.padding(horizontal = 18.dp, vertical = 13.dp)) {
+                Collapsible(key = "u:$id", collapsedHeight = USER_FOLD_HEIGHT, fadeColor = alt.core) {
+                    Text(text, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
         }
     }
 }
+
+/** Under an answer that broke off: the reason and a button that continues the same answer. */
+@Composable
+private fun AnswerBrokeOff(reason: String, onContinue: () -> Unit) {
+    Column(Modifier.padding(top = 8.dp)) {
+        Text(
+            stringResource(R.string.answer_interrupted, reason),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+        )
+        Spacer(Modifier.height(6.dp))
+        androidx.compose.material3.FilledTonalButton(onClick = onContinue) {
+            Icon(androidx.compose.material.icons.Icons.Rounded.PlayArrow, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(stringResource(R.string.continue_answer))
+        }
+    }
+}
+
+/** Long messages fold to these heights; "Show more" opens them fully. */
+private val USER_FOLD_HEIGHT = 230.dp
+private val ANSWER_FOLD_HEIGHT = 520.dp

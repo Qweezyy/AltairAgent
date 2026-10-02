@@ -18,6 +18,7 @@ import com.localaiagent.app.tools.pythonTools
 import com.localaiagent.app.ui.theme.ThemePrefs
 import com.localaiagent.core.Agent
 import com.localaiagent.core.AgentEvent
+import com.localaiagent.core.AssistantTurn
 import com.localaiagent.core.Message
 import com.localaiagent.core.Part
 import com.localaiagent.core.Role
@@ -71,6 +72,8 @@ data class ChatMessage(
     val reaction: String? = null,
     /** Everything the user attached to this message (photos, videos, audio, files), in order. */
     val attachments: List<LibraryItem> = emptyList(),
+    /** Why this answer broke off; the chat then offers to continue it. Not saved with the chat. */
+    val error: String? = null,
 )
 
 /** How many attachments one message may carry; generous on purpose — the user decides. */
@@ -1458,6 +1461,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * приведена к нужной истории (для обычной отправки — накоплена сама).
      */
     private fun launchAgent(agentTask: String, parts: List<Part>, label: String) {
+        // A new run supersedes any earlier "continue the answer" offer.
+        if (_ui.value.messages.any { it.error != null }) {
+            setMessages(_ui.value.messages.map { if (it.error != null) it.copy(error = null) else it })
+        }
         _ui.value = _ui.value.copy(running = true, status = tr(R.string.status_thinking))
         haptic("thinking")
         activeRun = viewModelScope.launch {
@@ -1499,7 +1506,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 cancelled = true
                 throw error
             } catch (t: Throwable) {
-                appendToLast(("\n\n" + tr(R.string.error_prefix, t.message ?: "")))
+                markAnswerFailed(t.message ?: t.toString())
             } finally {
                 client?.close()
                 if (serviceStarted) AgentService.stop(app)
@@ -1550,6 +1557,44 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 "Take this clarification into account and restructure the answer accordingly, without needless repetition of what was already said."
             rerunFromUser(userIndex, userText, extraInstruction = steer)
         }
+    }
+
+    /** What the model had written in its last step when the run broke; continueAnswer() goes on from it. */
+    private var brokenPartial: String = ""
+
+    /**
+     * The answer broke off for good (the client's own retries are spent): keep what was written, note
+     * the reason under it and offer to continue this same answer instead of starting a new one.
+     */
+    private fun markAnswerFailed(reason: String) {
+        val text = lastAnswerText()
+        val base = attemptBase
+        brokenPartial = if (base != null && text.startsWith(base)) text.substring(base.length) else ""
+        attemptBase = null
+        val msgs = _ui.value.messages.toMutableList()
+        val idx = msgs.indexOfLast { !it.fromUser && it.imageUrl == null }
+        if (idx < 0) return
+        msgs[idx] = msgs[idx].copy(error = reason.ifBlank { "?" })
+        current.messages = msgs
+        _ui.value = _ui.value.copy(messages = msgs, status = "")
+    }
+
+    /** Continues the broken last answer in the same bubble, from where it stopped. */
+    fun continueAnswer() {
+        if (_ui.value.running) return
+        val msgs = _ui.value.messages.toMutableList()
+        val idx = msgs.indexOfLast { !it.fromUser && it.imageUrl == null }
+        if (idx < 0 || msgs[idx].error == null) return
+        msgs[idx] = msgs[idx].copy(error = null)
+        setMessages(msgs)
+        val partial = brokenPartial
+        brokenPartial = ""
+        // The broken step never reached the session; give the model its own words back first.
+        val last = session.snapshot().lastOrNull()
+        if (partial.isNotBlank() && last?.role != Role.ASSISTANT) session.addAssistant(AssistantTurn(content = partial))
+        val prompt = if (partial.isNotBlank()) OpenAiCompatClient.CONTINUE_PROMPT
+        else "[The previous attempt failed before the answer was finished. Continue the task from where it stopped.]"
+        launchAgent(prompt, emptyList(), tr(R.string.continue_answer))
     }
 
     /** The answer text before the current model attempt started streaming; see TextRetracted. */
@@ -1607,7 +1652,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 finalizeSuggestions()
                 _ui.value = _ui.value.copy(status = "")
             }
-            is AgentEvent.RunFailed -> appendToLast("\n\n${ev.message}")
+            is AgentEvent.RunFailed -> markAnswerFailed(ev.message)
             else -> Unit
         }
     }

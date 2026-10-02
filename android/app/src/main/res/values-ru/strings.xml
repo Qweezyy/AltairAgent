@@ -344,4 +344,8 @@
     <string name="attach_add">Прикрепить файл</string>
     <string name="ui_scale">Размер текста</string>
     <string name="ui_scale_hint">Действует во всём приложении</string>
+    <string name="show_more">Показать полностью</string>
+    <string name="show_less">Свернуть</string>
+    <string name="continue_answer">Продолжить ответ</string>
+    <string name="answer_interrupted">Ответ прервался: %1$s</string>
 </resources>

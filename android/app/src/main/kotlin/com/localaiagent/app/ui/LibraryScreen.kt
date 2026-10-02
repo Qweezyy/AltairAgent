@@ -6,9 +6,6 @@ import androidx.compose.ui.res.stringResource
 import com.localaiagent.app.R
 
 import android.media.MediaPlayer
-import android.net.Uri
-import android.widget.MediaController
-import android.widget.VideoView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -55,7 +52,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
@@ -153,11 +149,12 @@ fun AttachmentViewer(item: LibraryItem, onClose: () -> Unit) {
                 }
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     when (item.kind) {
-                        "image" -> {
+                        // Photos and videos zoom: pinch, drag, double-tap.
+                        "image" -> ZoomBox(Modifier.fillMaxSize()) {
                             val model: Any = if (item.path.startsWith("http")) item.path else File(item.path)
-                            AsyncImage(model, item.name, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
+                            AsyncImage(model, item.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                         }
-                        "video" -> VideoPlayer(item.path)
+                        "video" -> ZoomableVideo(item.path, Modifier.fillMaxSize())
                         "audio" -> AudioPlayer(item.path, item.name)
                         else -> FilePreview(item.path)
                     }
@@ -165,20 +162,6 @@ fun AttachmentViewer(item: LibraryItem, onClose: () -> Unit) {
             }
         }
     }
-}
-
-@Composable
-private fun VideoPlayer(path: String) {
-    AndroidView(
-        factory = { ctx ->
-            VideoView(ctx).apply {
-                setVideoURI(if (path.startsWith("http")) Uri.parse(path) else Uri.fromFile(File(path)))
-                val mc = MediaController(ctx); mc.setAnchorView(this); setMediaController(mc)
-                setOnPreparedListener { it.isLooping = false; start() }
-            }
-        },
-        modifier = Modifier.fillMaxWidth().height(320.dp),
-    )
 }
 
 @Composable

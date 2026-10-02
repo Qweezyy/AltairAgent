@@ -38,6 +38,13 @@ Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in 
 ### Added
 - Android: attach as many photos, videos, audio and files as you like to one message (up to 100, mixed),
   pick several at once, remove any of them before sending or while editing.
+- Android: a dropped connection no longer restarts the answer — the model picks it up exactly where it
+  stopped, in the same message. If every retry fails, the written part stays, the reason is shown under it,
+  and "Continue the answer" finishes it later. A stream that just ends without the model finishing now
+  counts as a break instead of passing for a complete answer.
+- Android: pinch, pan and double-tap zoom for photos and videos in the full-screen viewer (up to 6x).
+- Android: long messages fold — the user's after about eight lines, earlier answers after a screenful —
+  with "Show more" / "Show less".
 - Android: editing a sent message can remove or replace its photo, video or file before sending it again.
 - Android: Settings → Appearance → Text size (70–200 %) for the whole app.
 - **A premium look.** Larger type and controls, surfaces set like plates in a tray, thin icons,

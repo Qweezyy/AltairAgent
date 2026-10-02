@@ -14,6 +14,8 @@ interface LlmClient {
         onReasoning: (suspend (String) -> Unit)? = null,
         onRetry: (suspend (attempt: Int, max: Int, delaySeconds: Double, reason: String) -> Unit)? = null,
         maxTokens: Int? = null,
+        /** Text already streamed was thrown away (a retry had to start over); undo [chars] of it. */
+        onDiscard: (suspend (chars: Int) -> Unit)? = null,
     ): AssistantTurn
 
     suspend fun close() {}

@@ -61,14 +61,32 @@ class OpenAiCompatClient(
         onReasoning: (suspend (String) -> Unit)?,
         onRetry: (suspend (attempt: Int, max: Int, delaySeconds: Double, reason: String) -> Unit)?,
         maxTokens: Int?,
+        onDiscard: (suspend (chars: Int) -> Unit)?,
     ): AssistantTurn {
         val attempts = maxOf(1, config.maxRetries)
         var lastError: Throwable? = null
+        // What the user has already seen of this answer. A broken stream is continued from here
+        // (the model gets its own partial reply and is asked to go on), so the answer is never
+        // started over and never printed twice.
+        val shown = StringBuilder()
         for (attempt in 1..attempts) {
+            val acc = StreamAcc()
+            val request = if (shown.isEmpty()) messages
+            else messages + Message(Role.ASSISTANT, shown.toString()) + Message(Role.USER, CONTINUE_PROMPT)
             try {
-                return streamOnce(messages, tools, onText, onReasoning, maxTokens)
+                val turn = streamOnce(
+                    request, tools, { shown.append(it); onText?.invoke(it) }, onReasoning, maxTokens, acc,
+                )
+                val prefix = shown.substring(0, shown.length - acc.content.length)
+                return if (prefix.isEmpty()) turn else turn.copy(content = prefix + turn.content)
             } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 lastError = t
+                // A half-received tool call cannot be continued as text: start this answer over.
+                if (acc.sawToolCall && shown.isNotEmpty()) {
+                    onDiscard?.invoke(shown.length)
+                    shown.clear()
+                }
                 if (attempt == attempts) break
                 val delaySec = min(2.0 * attempt, 10.0) + Random.nextDouble(0.2, 0.8)
                 onRetry?.invoke(attempt + 1, attempts, delaySec, t.message ?: t.toString())
@@ -76,8 +94,14 @@ class OpenAiCompatClient(
             }
         }
         throw RuntimeException(
-            "Не удалось связаться с моделью после $attempts попыток: ${lastError?.message}",
+            "Could not reach the model after $attempts attempts: ${lastError?.message}",
         )
+    }
+
+    /** What one streaming attempt received before it ended or broke. */
+    private class StreamAcc {
+        val content = StringBuilder()
+        var sawToolCall = false
     }
 
     private suspend fun streamOnce(
@@ -86,6 +110,7 @@ class OpenAiCompatClient(
         onText: (suspend (String) -> Unit)?,
         onReasoning: (suspend (String) -> Unit)?,
         maxTokens: Int?,
+        acc: StreamAcc = StreamAcc(),
     ): AssistantTurn {
         val body = buildRequest(messages, tools, maxTokens)
         val url = config.baseUrl.trimEnd('/') + "/chat/completions"
@@ -95,6 +120,8 @@ class OpenAiCompatClient(
         val calls = LinkedHashMap<Int, MutableToolCall>()
         var finishReason = "stop"
         var usage = Usage()
+        // A stream that just stops, with neither [DONE] nor a finish_reason, was cut off.
+        var completed = false
 
         http.preparePost(url) {
             contentType(ContentType.Application.Json)
@@ -116,7 +143,7 @@ class OpenAiCompatClient(
                 val line = channel.readUTF8Line() ?: break
                 if (!line.startsWith("data:")) continue
                 val data = line.removePrefix("data:").trim()
-                if (data == "[DONE]") break
+                if (data == "[DONE]") { completed = true; break }
                 if (data.isEmpty()) continue
 
                 val chunk = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
@@ -128,29 +155,31 @@ class OpenAiCompatClient(
                     )
                 }
                 val choice = chunk["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
-                choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
+                choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it; completed = true }
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 delta["content"]?.jsonPrimitive?.contentOrNull?.let {
-                    if (it.isNotEmpty()) { sbContent.append(it); onText?.invoke(it) }
+                    if (it.isNotEmpty()) { sbContent.append(it); acc.content.append(it); onText?.invoke(it) }
                 }
                 (delta["reasoning"] ?: delta["reasoning_content"])?.jsonPrimitive?.contentOrNull?.let {
                     if (it.isNotEmpty()) { sbReasoning.append(it); onReasoning?.invoke(it) }
                 }
+                delta["tool_calls"]?.jsonArray?.let { if (it.isNotEmpty()) acc.sawToolCall = true }
                 delta["tool_calls"]?.jsonArray?.forEach { tcEl ->
                     val tc = tcEl.jsonObject
                     val index = tc["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
-                    val acc = calls.getOrPut(index) { MutableToolCall() }
-                    tc["id"]?.jsonPrimitive?.contentOrNull?.let { acc.id = it }
+                    val call = calls.getOrPut(index) { MutableToolCall() }
+                    tc["id"]?.jsonPrimitive?.contentOrNull?.let { call.id = it }
                     tc["function"]?.jsonObject?.let { fn ->
                         // ВАЖНО: некоторые провайдеры (gateyourway) шлют полное имя в первом
                         // чанке, а дальше — пустое name="" в чанках с кусками arguments.
                         // Поэтому НЕ перезаписываем непустое имя пустым — накапливаем куски.
-                        fn["name"]?.jsonPrimitive?.contentOrNull?.let { acc.name += it }
-                        fn["arguments"]?.jsonPrimitive?.contentOrNull?.let { acc.args.append(it) }
+                        fn["name"]?.jsonPrimitive?.contentOrNull?.let { call.name += it }
+                        fn["arguments"]?.jsonPrimitive?.contentOrNull?.let { call.args.append(it) }
                     }
                 }
             }
+            if (!completed) throw java.io.IOException("The answer stream ended before the model finished")
         }
 
         return AssistantTurn(
@@ -225,5 +254,12 @@ class OpenAiCompatClient(
         var id: String = ""
         var name: String = ""
         val args = StringBuilder()
+    }
+
+    companion object {
+        /** Sent after the model's own partial reply when its stream broke, so it goes on from there. */
+        const val CONTINUE_PROMPT =
+            "[The connection dropped in the middle of your answer. Continue it exactly from where it " +
+                "stopped: do not repeat anything already written and do not start over.]"
     }
 }

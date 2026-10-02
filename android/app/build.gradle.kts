@@ -28,6 +28,7 @@ android {
         targetSdk = 35
         versionCode = altairVersionCode
         versionName = altairVersion
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Chaquopy bundles a native CPython, so a single ABI keeps the APK small (each ABI adds
         // several MB). arm64-v8a covers every current device; add "x86_64" temporarily if an
@@ -136,4 +137,12 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // On-device UI tests (gestures like pinch and double-tap need a real input pipeline).
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    // Espresso before 3.6 calls a hidden InputManager API that newer Android removed.
+    androidTestImplementation(libs.androidx.test.espresso)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
