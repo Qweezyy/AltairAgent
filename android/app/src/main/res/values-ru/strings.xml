@@ -338,4 +338,5 @@
     <string name="drawer_profile_hint">Настройки</string>
     <string name="theme_snow">Снег</string>
     <string name="theme_graphite">Графит</string>
+    <string name="scroll_to_bottom">К последнему сообщению</string>
 </resources>

@@ -5,6 +5,10 @@
 
 package com.localaiagent.app.ui
 
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.unit.em
@@ -331,14 +335,36 @@ fun ChatScreen(
                         state.messages.filter { it.text.contains(searchQuery, ignoreCase = true) }
                     else state.messages
                 }
-                // The feed is laid out bottom-up (reverseLayout): item 0 is the newest message and the
-                // bottom edge is the anchor. A streaming answer then grows upward on its own, with no
-                // scroll call per token — the per-token scrollToItem used to jerk the list every frame
-                // (the flicker). A new message only scrolls if the reader is already at the bottom.
-                val newestFirst = remember(displayed) { displayed.asReversed() }
-                LaunchedEffect(state.messages.size) {
-                    if (state.messages.isNotEmpty() && !searching && listState.firstVisibleItemIndex <= 1) {
-                        listState.animateScrollToItem(0)
+                // Following the answer, as in ChatGPT: while the reader is at the bottom the feed keeps
+                // the growing answer in view; the moment they touch the list it lets go and the text
+                // stays still, and scrolling back to the bottom (or the arrow) picks it up again.
+                var follow by remember { mutableStateOf(true) }
+                val dragged by listState.interactionSource.collectIsDraggedAsState()
+                LaunchedEffect(dragged) { if (dragged) follow = false }
+                LaunchedEffect(listState) {
+                    snapshotFlow { listState.canScrollForward }.collect { more ->
+                        if (!more && !listState.isScrollInProgress) follow = true
+                    }
+                }
+                // Keep the end in view as the content grows: one small step per layout change, never a
+                // jump per token. Content grows a few characters a frame (smooth reveal), so it is smooth.
+                LaunchedEffect(listState) {
+                    snapshotFlow {
+                        val info = listState.layoutInfo
+                        info.totalItemsCount to (info.visibleItemsInfo.lastOrNull()?.let { it.offset + it.size } ?: 0)
+                    }.collect {
+                        if (follow && !listState.isScrollInProgress && listState.canScrollForward) {
+                            listState.scrollBy(100_000f)
+                        }
+                    }
+                }
+                // Sending a message always brings the conversation back to the bottom.
+                val userCount = state.messages.count { it.fromUser }
+                LaunchedEffect(userCount) {
+                    if (userCount > 0 && !searching) {
+                        follow = true
+                        listState.scrollToItem(maxOf(0, state.messages.lastIndex))
+                        listState.scrollBy(100_000f)
                     }
                 }
                 if (searching) {
@@ -358,20 +384,18 @@ fun ChatScreen(
                             }
                         } else WelcomeState(Modifier.fillMaxSize(), onStarter = { prefill = it })
                     } else {
+                        Box(Modifier.fillMaxSize()) {
                         LazyColumn(
                             state = listState,
-                            reverseLayout = true,
                             modifier = Modifier.fillMaxSize().padding(horizontal = Dims.screenPad),
-                            // Short chats still start at the top, like before.
-                            verticalArrangement = Arrangement.spacedBy(Dims.messageGap, Alignment.Top),
+                            verticalArrangement = Arrangement.spacedBy(Dims.messageGap),
                             contentPadding = PaddingValues(top = if (searching) 8.dp else topClear, bottom = 16.dp),
                         ) {
                             itemsIndexed(
-                                newestFirst,
+                                displayed,
                                 key = { _, it -> it.id },
                                 contentType = { _, it -> msgContentType(it) },
-                            ) { revIndex, msg ->
-                                val index = displayed.lastIndex - revIndex
+                            ) { index, msg ->
                                 val actionsEnabled = !(searching && searchQuery.isNotBlank())
                                 Box(
                                     // Fade items in and out, but never animate their placement: a growing
@@ -408,6 +432,31 @@ fun ChatScreen(
                                 }
                             }
                         }
+                        // The arrow back to the bottom while reading earlier messages (ChatGPT ↓).
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = !follow && listState.canScrollForward,
+                            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.8f),
+                            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.8f),
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                        ) {
+                            val alt = com.localaiagent.app.ui.theme.LocalAltair.current
+                            Box(
+                                Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    .border(1.dp, alt.hairStrong, CircleShape)
+                                    .clickable {
+                                        follow = true
+                                        scope.launch {
+                                            listState.animateScrollToItem(maxOf(0, displayed.lastIndex))
+                                            listState.scrollBy(100_000f)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Rounded.ArrowDownward, stringResource(R.string.scroll_to_bottom),
+                                    Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                        }
                     }
                 }
 
@@ -437,6 +486,9 @@ fun ChatScreen(
                     onSteer = onSteer,
                     prefill = prefill,
                     onPrefillUsed = { prefill = null },
+                    pendingFileAbs = state.pendingFilePathAbs,
+                    pendingFileKind = state.pendingFileKind,
+                    onOpenAttachment = { openedAttachment = it },
                 )
             }
             // Плавающие кнопки поверх безграничного чата — без шапки.
@@ -935,6 +987,21 @@ private fun MessageBubble(
                     color = MaterialTheme.colorScheme.outline)
             }
         }
+        // The user's photo, video or file: the media on the right with the text bubble under it.
+        msg.fromUser && (msg.imageUrl != null || msg.attachPath != null) -> Column(
+            Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End,
+        ) {
+            val path = msg.imageUrl ?: msg.attachPath!!
+            val kind = if (msg.imageUrl != null) "image" else (msg.attachKind ?: "file")
+            val name = msg.attachName ?: path.substringAfterLast('/')
+            val item = LibraryItem(path, name, kind)
+            if (isVisualKind(kind)) SentMedia(path, name, kind) { onOpenAttachment(item) }
+            else SentFileCard(name, kind) { onOpenAttachment(item) }
+            if (msg.text.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                UserTextBubble(msg.text)
+            }
+        }
         msg.imageUrl != null -> Column(Modifier.fillMaxWidth()) {
             val model: Any = if (msg.imageUrl.startsWith("http")) msg.imageUrl else java.io.File(msg.imageUrl)
             AsyncImage(
@@ -983,18 +1050,7 @@ private fun MessageBubble(
         }
         // Пользователь — акцентный пузырь (цвет выбирает юзер), справа.
         // The user's message: a neutral plate on the right, as on the PC (not an accent fill).
-        msg.fromUser -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            val alt = com.localaiagent.app.ui.theme.LocalAltair.current
-            Surface(
-                color = alt.core,
-                shape = com.localaiagent.app.ui.theme.PremiumRadii.bubble,
-                border = BorderStroke(1.dp, alt.hair),
-                modifier = Modifier.fillMaxWidth(0.82f).wrapContentWidth(Alignment.End),
-            ) {
-                Text(msg.text, Modifier.padding(horizontal = 18.dp, vertical = 13.dp),
-                    color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
-            }
-        }
+        msg.fromUser -> UserTextBubble(msg.text)
         // Ассистент — во весь экран, без рамок, крупным текстом.
         else -> Column(Modifier.fillMaxWidth()) {
             msg.replyQuote?.let { ReplyQuoteHeader(it) }
@@ -1006,7 +1062,10 @@ private fun MessageBubble(
                 if (statusText.isNotBlank()) ThinkingIndicator(statusText)
             } else {
                 // While the answer streams, reveal it at a steady pace instead of in network bursts.
-                MarkdownText(rememberSmoothReveal(msg.text, active = statusText.isNotBlank()), Modifier.fillMaxWidth())
+                // The quick-reply line becomes chips at the end; never flash it as text mid-stream.
+                val streaming = statusText.isNotBlank()
+                val shown = if (streaming) com.localaiagent.app.Followups.hideWhileStreaming(msg.text) else msg.text
+                MarkdownText(rememberSmoothReveal(shown, active = streaming), Modifier.fillMaxWidth())
                 // Показываем полный индикатор под текстом ТОЛЬКО во время инструмента (напр.
                 // «Инструмент: run_python»). Для обычного стрима токенов — тонкая каретка-искра
                 // в конце (пока прогон идёт, т.е. statusText непустой), чтобы было видно «печатает».
@@ -1730,6 +1789,9 @@ private fun InputBar(
     onPickFile: (android.net.Uri) -> Unit,
     prefill: String? = null,
     onPrefillUsed: () -> Unit = {},
+    pendingFileAbs: String? = null,
+    pendingFileKind: String? = null,
+    onOpenAttachment: (LibraryItem) -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
     val inputFocus = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -1770,22 +1832,6 @@ private fun InputBar(
             // Room for the plate's outer ring (drawn outside its bounds).
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        if (pendingImagePath != null) {
-            Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(
-                    model = java.io.File(pendingImagePath), contentDescription = stringResource(R.string.attachment),
-                    modifier = Modifier.size(46.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop,
-                )
-                IconButton(onClick = onClearAttachment) { Icon(Icons.Rounded.Close, stringResource(R.string.remove)) }
-            }
-        } else if (pendingFileName != null) {
-            Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Description, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(6.dp))
-                Text(pendingFileName, fontSize = 14.sp, maxLines = 1)
-                IconButton(onClick = onClearAttachment) { Icon(Icons.Rounded.Close, stringResource(R.string.remove)) }
-            }
-        }
         if (running && input.isNotBlank()) {
             Row(
                 Modifier.padding(start = 14.dp, bottom = 4.dp),
@@ -1797,7 +1843,20 @@ private fun InputBar(
             }
         }
         // The composer is a plate in its tray, as on the PC; on focus the ring takes the accent.
-        Box(Modifier.fillMaxWidth().plate(com.localaiagent.app.ui.theme.PremiumRadii.lg, focused = inputFocused)) {
+        Column(Modifier.fillMaxWidth().plate(com.localaiagent.app.ui.theme.PremiumRadii.lg, focused = inputFocused)) {
+            // The pending attachment sits inside the composer, above the text, as in ChatGPT.
+            val pendingPath = pendingImagePath ?: pendingFileAbs
+            if (pendingPath != null) {
+                val kind = if (pendingImagePath != null) "image" else (pendingFileKind ?: "file")
+                val name = pendingFileName ?: pendingPath.substringAfterLast('/')
+                Box(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)) {
+                    ComposerAttachment(
+                        path = pendingPath, name = name, kind = kind,
+                        onOpen = { onOpenAttachment(LibraryItem(pendingPath, name, kind)) },
+                        onRemove = onClearAttachment,
+                    )
+                }
+            }
             Row(
                 Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2396,4 +2455,22 @@ private fun rememberSmoothReveal(target: String, active: Boolean): String {
     // Never cut a surrogate pair (emoji) in half.
     if (end in 1 until target.length && Character.isHighSurrogate(target[end - 1])) end++
     return if (end >= target.length) target else target.substring(0, end)
+}
+
+
+/** The user's text: a neutral plate on the right, as on the PC (not an accent fill). */
+@Composable
+private fun UserTextBubble(text: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        val alt = com.localaiagent.app.ui.theme.LocalAltair.current
+        Surface(
+            color = alt.core,
+            shape = com.localaiagent.app.ui.theme.PremiumRadii.bubble,
+            border = BorderStroke(1.dp, alt.hair),
+            modifier = Modifier.fillMaxWidth(0.82f).wrapContentWidth(Alignment.End),
+        ) {
+            Text(text, Modifier.padding(horizontal = 18.dp, vertical = 13.dp),
+                color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
 }

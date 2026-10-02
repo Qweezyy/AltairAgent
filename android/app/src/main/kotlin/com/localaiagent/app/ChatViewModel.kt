@@ -131,6 +131,9 @@ data class ChatUiState(
     val pendingImagePath: String? = null,
     /** Имя прикреплённого файла (не-картинки), пока не отправлено. */
     val pendingFileName: String? = null,
+    /** Absolute path and kind (image/video/audio/file) of the pending file, for its preview tile. */
+    val pendingFilePathAbs: String? = null,
+    val pendingFileKind: String? = null,
     /** Прикреплённая цитата (фрагмент сообщения), уйдёт в следующий вопрос как контекст. */
     val pendingQuote: String? = null,
     /** Предложенные моделью follow-up вопросы (кнопки-подсказки под ответом). */
@@ -447,17 +450,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         persist(current)
     }
 
-    /** Вытаскивает служебную строку follow-up (?>> a || b || c) и чистит текст ответа. */
-    private fun extractFollowups(text: String): Pair<String, List<String>> {
-        // Маркер может стоять где угодно. Модель непостоянна и шлёт то «?>>», то «!>>» —
-        // принимаем оба (берём тот, что встретился позже), иначе подсказки теряются.
-        val marker = maxOf(text.lastIndexOf("?>>"), text.lastIndexOf("!>>"))
-        if (marker < 0) return text to emptyList()
-        val sugg = text.substring(marker + 3).split("||")
-            .map { it.trim() }.filter { it.isNotEmpty() }.take(3)
-        val clean = text.substring(0, marker).trimEnd()
-        return clean to sugg
-    }
+    /** Pulls the quick-reply line (?>> a || b || c) out of an answer; see [Followups]. */
+    private fun extractFollowups(text: String): Pair<String, List<String>> = Followups.extract(text)
 
     /** Реальный ли это фрагмент — встречается ли (дословно, без учёта регистра/пробелов) в прошлом сообщении. */
     private fun isRealFragment(quote: String, beforeIndex: Int): Boolean {
@@ -638,14 +632,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun newChat() {
         if (_ui.value.running) return
         current = Chat(randomId()).also { chats.add(0, it) }
-        _ui.value = _ui.value.copy(messages = emptyList(), contextTokens = 0, status = "", board = emptyList())
+        _ui.value = _ui.value.copy(messages = emptyList(), contextTokens = 0, status = "", board = emptyList(), suggestions = emptyList())
         refreshChats()
     }
 
     fun switchChat(id: String) {
         if (_ui.value.running || id == current.id) return
         current = chats.firstOrNull { it.id == id } ?: return
-        _ui.value = _ui.value.copy(messages = current.messages, status = "", contextTokens = 0)
+        // Quick replies belong to the chat they were offered in.
+        _ui.value = _ui.value.copy(messages = current.messages, status = "", contextTokens = 0, suggestions = emptyList())
         refreshBoard()
         refreshChats()
     }
@@ -676,11 +671,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val msgs = _ui.value.messages
         if (_ui.value.running || userIndex !in msgs.indices || !msgs[userIndex].fromUser) return
-        val text = newText.trim()
+        // A bare attachment shows no text; re-running it uses the same default prompt as sending it.
+        val text = newText.trim().ifEmpty {
+            when {
+                msgs[userIndex].imageUrl != null -> "What is in this image? Describe it."
+                msgs[userIndex].attachPath != null -> "Study the attached file and briefly tell what is in it."
+                else -> ""
+            }
+        }
         if (text.isEmpty()) return
         val prefix = msgs.subList(0, userIndex).toList()
         session.loadHistory(toHistory(prefix))
-        val userMsg = msgs[userIndex].copy(text = text)
+        val userMsg = msgs[userIndex].copy(text = newText.trim())
         setMessages(prefix + userMsg + ChatMessage(false, "", versions = carryVersions, versionReplies = carryReplies))
         var agentTask = text
         userMsg.attachName?.let { name ->
@@ -1133,10 +1135,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val name = queryDisplayName(app, uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
                 val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
                 val dir = File(chatDir(), "attachments").apply { mkdirs() }
-                File(dir, name).writeBytes(bytes)
+                val dest = File(dir, name).apply { writeBytes(bytes) }
                 pendingFilePath = "attachments/$name"
                 pendingImageDataUri = null
-                _ui.value = _ui.value.copy(pendingFileName = name, pendingImagePath = null)
+                _ui.value = _ui.value.copy(
+                    pendingFileName = name, pendingImagePath = null,
+                    pendingFilePathAbs = dest.absolutePath, pendingFileKind = kindOfName(name),
+                )
             }
         }
     }
@@ -1150,7 +1155,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun clearAttachment() {
         pendingImageDataUri = null
         pendingFilePath = null
-        _ui.value = _ui.value.copy(pendingImagePath = null, pendingFileName = null)
+        _ui.value = _ui.value.copy(pendingImagePath = null, pendingFileName = null, pendingFilePathAbs = null, pendingFileKind = null)
     }
 
     // ------------------------------------------------------------- прогон
@@ -1334,7 +1339,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val quote = _ui.value.pendingQuote
         // Сообщение пользователя: картинка-пузырь, файл-вложение (иконка/превью) или текст.
         // Если есть цитата — показываем её в пузыре как «> …» над текстом.
-        val shownText = if (quote != null) "> ${quote.replace("\n", "\n> ")}\n\n$task" else task
+        // Only what the user typed is shown; the default prompt for a bare attachment stays hidden.
+        val typed = text.trim()
+        val shownText = if (quote != null) "> ${quote.replace("\n", "\n> ")}\n\n$typed" else typed
         val userMsg = when {
             imgPath != null -> ChatMessage(true, shownText, imageUrl = imgPath)
             filePath != null && fileName != null -> ChatMessage(
@@ -1348,6 +1355,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _ui.value = _ui.value.copy(
             running = true, status = tr(R.string.status_thinking),
             pendingImagePath = null, pendingFileName = null, pendingQuote = null,
+            pendingFilePathAbs = null, pendingFileKind = null,
         )
         pendingImageDataUri = null
         pendingFilePath = null
@@ -1460,13 +1468,38 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The answer text before the current model attempt started streaming; see TextRetracted. */
+    private var attemptBase: String? = null
+
+    private fun lastAnswerText(): String =
+        _ui.value.messages.lastOrNull { !it.fromUser && it.imageUrl == null }?.text.orEmpty()
+
+    private fun setLastAnswerText(text: String) {
+        val msgs = _ui.value.messages.toMutableList()
+        val idx = msgs.indexOfLast { !it.fromUser && it.imageUrl == null }
+        if (idx < 0) return
+        msgs[idx] = msgs[idx].copy(text = text)
+        current.messages = msgs
+        _ui.value = _ui.value.copy(messages = msgs)
+    }
+
     private fun onEvent(ev: AgentEvent) {
         when (ev) {
-            is AgentEvent.TextDelta -> appendToLast(ev.text)
+            is AgentEvent.TextDelta -> {
+                // Remember the bubble as it was before this attempt's first chunk, so a retry can
+                // roll it back exactly (appendToLast may also rewrite markers like @react).
+                if (attemptBase == null) attemptBase = lastAnswerText()
+                appendToLast(ev.text)
+            }
+            is AgentEvent.TextRetracted -> {
+                attemptBase?.let { base -> setLastAnswerText(base) }
+                attemptBase = null
+            }
             is AgentEvent.ContextUsage -> _ui.value = _ui.value.copy(contextTokens = ev.tokens)
             is AgentEvent.Reconnecting ->
                 _ui.value = _ui.value.copy(status = tr(R.string.status_reconnecting, ev.attempt, ev.maxAttempts))
             is AgentEvent.ToolStarted -> {
+                attemptBase = null
                 // Делегирование ПК → плашка среды показывает BUSY, пока идёт прогон.
                 val presence = if (ev.name == "pc_agent") PcPresence.BUSY else _ui.value.pcPresence
                 _ui.value = _ui.value.copy(status = tr(R.string.status_tool, ev.name), pcPresence = presence)
@@ -1484,6 +1517,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             is AgentEvent.RunFinished -> {
+                attemptBase = null
                 val last = _ui.value.messages.lastOrNull { !it.fromUser && it.imageUrl == null }
                 if (last != null && last.text.isBlank() && ev.text.isNotBlank()) appendToLast(ev.text)
                 finalizeSuggestions()

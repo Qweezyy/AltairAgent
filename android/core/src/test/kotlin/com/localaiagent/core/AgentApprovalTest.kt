@@ -71,6 +71,41 @@ class AgentApprovalTest {
         assertEquals(3, tool.ran.size)
     }
 
+    /** A model whose stream breaks after part of the answer, then succeeds on the retry. */
+    private class FlakyLlm : LlmClient {
+        override suspend fun complete(
+            messages: List<Message>,
+            tools: List<JsonObject>?,
+            onText: (suspend (String) -> Unit)?,
+            onReasoning: (suspend (String) -> Unit)?,
+            onRetry: (suspend (Int, Int, Double, String) -> Unit)?,
+            maxTokens: Int?,
+        ): AssistantTurn {
+            onText?.invoke("Hello, wor")
+            onRetry?.invoke(2, 3, 0.0, "connection reset")
+            onText?.invoke("Hello, ")
+            onText?.invoke("world")
+            return AssistantTurn(content = "Hello, world")
+        }
+    }
+
+    @Test
+    fun brokenStreamIsTakenBackBeforeTheRetry() = runBlocking {
+        val events = Agent(
+            llm = FlakyLlm(), registry = ToolRegistry(emptyList()), session = Session(),
+            onUiRequest = { _, _ -> buildJsonObject {} },
+        ).run("hi").toList()
+        // Replay the stream the way the UI does: deltas append, a retraction removes chars.
+        val shown = StringBuilder()
+        for (e in events) when (e) {
+            is AgentEvent.TextDelta -> shown.append(e.text)
+            is AgentEvent.TextRetracted -> shown.setLength(shown.length - e.chars)
+            else -> {}
+        }
+        assertEquals("Hello, world", shown.toString())
+        assertTrue(events.any { it is AgentEvent.TextRetracted && it.chars == 10 })
+    }
+
     @Test
     fun deniedCallDoesNotRun() = runBlocking {
         val llm = ScriptedLlm(ArrayDeque(listOf(AssistantTurn(toolCalls = listOf(call("1", "rm -rf x"))))))

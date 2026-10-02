@@ -93,8 +93,17 @@ fun FullScreenDialog(onDismissRequest: () -> Unit, padBars: Boolean = true, cont
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             // With NO_LIMITS, MATCH_PARENT stops above the navigation bar: size the window to the
             // whole display explicitly and pin it to the top.
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                // Dialog windows fit the system bars by default; some OEM builds (MIUI/HyperOS) then
+                // shrink the frame above the navigation bar whatever the flags say.
+                window.attributes = window.attributes.apply {
+                    fitInsetsTypes = 0
+                    fitInsetsSides = 0
+                    isFitInsetsIgnoringVisibility = true
+                }
+            }
             val fullHeight = if (android.os.Build.VERSION.SDK_INT >= 30) {
-                window.windowManager.currentWindowMetrics.bounds.height()
+                window.windowManager.maximumWindowMetrics.bounds.height()
             } else {
                 @Suppress("DEPRECATION")
                 android.util.DisplayMetrics().also { window.windowManager.defaultDisplay.getRealMetrics(it) }.heightPixels

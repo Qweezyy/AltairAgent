@@ -214,8 +214,8 @@ private fun CodeBlock(code: String, lang: String = "") {
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             fontFamily = com.localaiagent.app.ui.theme.AppMono,
-            fontSize = 13.sp,
-            lineHeight = 20.sp,
+            fontSize = 14.sp,
+            lineHeight = 21.sp,
             color = MaterialTheme.colorScheme.onSurface,
         )
     }

@@ -15,6 +15,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Fixed
+- Android: an answer is no longer printed twice when the connection drops mid-stream and the request is
+  retried.
+- Android: quick replies are recognised in the forms models really send and no longer carry over into a
+  new chat.
+- Android: full-screen pages no longer leave a strip above the navigation bar on some phones.
 - The Windows update swap now copies every file of the new version even when robocopy would call
   it unchanged (the same size and time, or only another NTFS change time). Real updates were not
   affected — unpacked files always carry a new time — but nothing is left to chance now.

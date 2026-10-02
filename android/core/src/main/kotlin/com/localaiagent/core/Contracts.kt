@@ -68,6 +68,11 @@ sealed interface AgentEvent {
     data class ToolFinished(
         val callId: String, val name: String, val ok: Boolean, val output: String,
     ) : AgentEvent
+    /**
+     * The stream broke mid-answer and the request is being retried from the start: the text
+     * streamed by the failed attempt must be taken back, or the retry would print the answer twice.
+     */
+    data class TextRetracted(val chars: Int) : AgentEvent
     data class Reconnecting(
         val attempt: Int, val maxAttempts: Int, val delaySeconds: Double, val reason: String,
     ) : AgentEvent
