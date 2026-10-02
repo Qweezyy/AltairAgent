@@ -432,7 +432,6 @@ fun ChatScreen(
                                             onContinue = onContinueAnswer,
                                             // Статус («Думаю…», «Инструмент: …») — у активного ответа ИИ.
                                             statusText = if (state.running && index == displayed.lastIndex) state.status else "",
-                                            foldable = index < displayed.lastIndex,
                                         )
                                         msg.reaction?.let { ReactionBadge(it, msg.fromUser) }
                                     }
@@ -985,7 +984,6 @@ private fun MessageBubble(
     onRegenerate: () -> Unit = {},
     onContinue: () -> Unit = {},
     statusText: String = "",
-    foldable: Boolean = false,
 ) {
     when {
         // Встроенная графика/интерактив ИИ (SVG/HTML).
@@ -1069,13 +1067,7 @@ private fun MessageBubble(
                 // The quick-reply line becomes chips at the end; never flash it as text mid-stream.
                 val streaming = statusText.isNotBlank()
                 val shown = if (streaming) com.localaiagent.app.Followups.hideWhileStreaming(msg.text) else msg.text
-                // Earlier answers fold when very long; the newest one and a streaming one stay open.
-                Collapsible(
-                    key = "a:${msg.id}", collapsedHeight = ANSWER_FOLD_HEIGHT,
-                    fadeColor = MaterialTheme.colorScheme.background, enabled = foldable && !streaming,
-                ) {
-                    MarkdownText(rememberSmoothReveal(shown, active = streaming), Modifier.fillMaxWidth())
-                }
+                MarkdownText(rememberSmoothReveal(shown, active = streaming), Modifier.fillMaxWidth())
                 // Показываем полный индикатор под текстом ТОЛЬКО во время инструмента (напр.
                 // «Инструмент: run_python»). Для обычного стрима токенов — тонкая каретка-искра
                 // в конце (пока прогон идёт, т.е. statusText непустой), чтобы было видно «печатает».
@@ -2535,6 +2527,5 @@ private fun AnswerBrokeOff(reason: String, onContinue: () -> Unit) {
     }
 }
 
-/** Long messages fold to these heights; "Show more" opens them fully. */
+/** A long user message folds to this height; "Show more" opens it fully. Answers never fold. */
 private val USER_FOLD_HEIGHT = 230.dp
-private val ANSWER_FOLD_HEIGHT = 520.dp

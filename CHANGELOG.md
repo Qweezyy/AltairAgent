@@ -43,8 +43,8 @@ Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in 
   and "Continue the answer" finishes it later. A stream that just ends without the model finishing now
   counts as a break instead of passing for a complete answer.
 - Android: pinch, pan and double-tap zoom for photos and videos in the full-screen viewer (up to 6x).
-- Android: long messages fold — the user's after about eight lines, earlier answers after a screenful —
-  with "Show more" / "Show less".
+- Android: long user messages fold after about eight lines, with "Show more" / "Show less". The model's
+  answers are always shown in full.
 - Android: editing a sent message can remove or replace its photo, video or file before sending it again.
 - Android: Settings → Appearance → Text size (70–200 %) for the whole app.
 - **A premium look.** Larger type and controls, surfaces set like plates in a tray, thin icons,
