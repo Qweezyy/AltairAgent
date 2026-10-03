@@ -58,6 +58,10 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   to the right opens the history, which is ordered by each chat's newest message.
 
 ### Fixed
+- Android: video, audio and PDFs reach the model itself when its profile accepts them (Video / Audio /
+  Files), sent as "file" parts — the form GateYourWay passes on (it refuses media in image_url and drops
+  video_url/audio_url). Before, only photos went in and the model got a bare file path, so Gemini could
+  not watch a video at all. Up to ~14 MB per message; anything larger is pointed to with the reason.
 - The agent no longer reports a task as done when the provider did not really answer: a gateway
   error sent as the reply ("The request could not be completed…"), an empty stream, a stream cut
   at the loop guard or a reply to a prompt the provider did not process is retried like a dropped

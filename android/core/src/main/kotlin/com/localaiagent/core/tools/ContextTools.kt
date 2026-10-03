@@ -104,8 +104,8 @@ class ContextCompressTool : Tool {
 class ContextDropTool : Tool {
     override val name = "context_drop"
     override val description =
-        "Убирает из контекста тяжёлое: what=tools (все результаты инструментов) | " +
-            "images (вложения-картинки из истории). Видимый чат не меняется — только память модели."
+        "Removes heavy things from the context: what=tools (all tool results) | " +
+            "images (attached pictures, video and audio in the history). The visible chat stays; only the model's memory changes."
     override val category = ToolCategory.EDIT
     override fun schema() = cObj(mapOf("what" to cstr("tools | images")), listOf("what"))
 
@@ -114,14 +114,16 @@ class ContextDropTool : Tool {
         val before = s.tokenEstimate()
         val new = when (args.v("what").trim().lowercase()) {
             "tools" -> s.messages.filter { it.role != Role.TOOL }
-            "images" -> s.messages.map { m ->
-                if (m.parts.any { it is Part.Image }) m.copy(parts = m.parts.filter { it !is Part.Image })
-                else m
+            // Pictures and the video/audio/documents passed in directly: the heaviest parts of all.
+            "images", "media" -> s.messages.map { m ->
+                if (m.parts.any { it is Part.Image || it is Part.File }) {
+                    m.copy(parts = m.parts.filter { it !is Part.Image && it !is Part.File })
+                } else m
             }
-            else -> return ToolResult.fail("what должно быть: tools | images")
+            else -> return ToolResult.fail("what must be: tools | images")
         }
         s.loadHistory(new)
         ctx.emit(AgentEvent.ContextUsage(s.tokenEstimate()))
-        return ToolResult("Убрано. Было ~$before, стало ~${s.tokenEstimate()} токенов.")
+        return ToolResult("Removed. Was ~$before, now ~${s.tokenEstimate()} tokens.")
     }
 }

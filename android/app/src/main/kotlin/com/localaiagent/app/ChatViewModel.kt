@@ -766,7 +766,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     val atts = cm.userAttachments
                     val text = listOfNotNull(body.ifBlank { null }, filesHint(atts, chatFolder)).joinToString("\n\n")
                         .ifBlank { if (atts.isNotEmpty()) "[attachments]" else "" }
-                    Message(Role.USER, text, parts = imageParts(atts))
+                    Message(Role.USER, text, parts = mediaParts(atts))
                 }
                 body.isNotBlank() -> {
                     val react = cm.reaction?.let { "\n[The user reacted: $it]" } ?: ""
@@ -802,7 +802,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         var agentTask = text
         filesHint(atts)?.let { agentTask += "\n\n$it" }
         if (extraInstruction.isNotBlank()) agentTask += "\n\n[$extraInstruction]"
-        launchAgent(agentTask, imageParts(atts), text.take(40))
+        launchAgent(agentTask, { mediaParts(atts) }, text.take(40))
     }
 
     /** A local photo as a model input (data URI), or null if the file is gone. */
@@ -956,7 +956,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val task = "Make a brief summary of our conversation: 1) key decisions, 2) important facts, " +
             "3) open questions, 4) next steps. Structure it by these points, briefly and to the point. " +
             "Do not ask counter-questions."
-        launchAgent(task, emptyList(), tr(R.string.chat_summary))
+        launchAgent(task, { emptyList() }, tr(R.string.chat_summary))
     }
 
     /** Действие над выделенным фрагментом: объяснить проще/подробнее/перевести/проверить. */
@@ -1551,7 +1551,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         var agentTask = task
         if (quote != null) agentTask = "[The user refers to this fragment from the conversation:\n«$quote»]\n\n$task"
         filesHint(atts)?.let { agentTask += "\n\n$it" }
-        launchAgent(agentTask, imageParts(atts), task.take(40))
+        launchAgent(agentTask, { mediaParts(atts) }, task.take(40))
     }
 
     /** The prompt used when the user sends attachments without text. */
@@ -1562,17 +1562,42 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         else -> "Study the attached files and briefly tell what is in them."
     }
 
-    /** Photos go to the model as images, every one of them. */
-    private fun imageParts(atts: List<LibraryItem>): List<Part> =
-        atts.filter { it.kind == "image" }.mapNotNull { imagePart(it.path) }
+    /** Which attachments go to the model itself, for the active model's capabilities. */
+    private fun mediaPlan(atts: List<LibraryItem>): MediaInput.Plan =
+        MediaInput.plan(atts, _ui.value.activeCaps) { File(it.path).length() }
 
-    /** Everything else is pointed to by its path in the chat folder, for the agent's file tools. */
+    /**
+     * The attachments the model takes in directly: every photo, and video, audio and PDFs when the
+     * active model takes them (within the size budget). The rest is pointed to by [filesHint].
+     */
+    private fun mediaParts(atts: List<LibraryItem>): List<Part> = mediaPlan(atts).inline.mapNotNull { item ->
+        if (item.kind == "image") imagePart(item.path)
+        else File(item.path).takeIf { it.isFile }?.let { f ->
+            Part.File("data:${MediaInput.mimeOf(item.name)};base64," + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP), item.name)
+        }
+    }
+
+    /** What the model is told about attachments: which it has directly and which only by path. */
     private fun filesHint(atts: List<LibraryItem>, folder: File = chatDir()): String? {
-        val files = atts.filter { it.kind != "image" }
-        if (files.isEmpty()) return null
-        val paths = files.joinToString(", ") { File(it.path).relativeToOrNull(folder)?.invariantSeparatorsPath ?: it.path }
-        return if (files.size == 1) "[The user attached a file: $paths — read it with read_file or read_table.]"
-        else "[The user attached ${files.size} files: $paths — read them with read_file or read_table.]"
+        val plan = mediaPlan(atts)
+        fun paths(items: List<LibraryItem>) =
+            items.joinToString(", ") { File(it.path).relativeToOrNull(folder)?.invariantSeparatorsPath ?: it.path }
+        val lines = mutableListOf<String>()
+        val direct = plan.inline.filter { it.kind != "image" }
+        if (direct.isNotEmpty()) {
+            lines += "[The user attached ${paths(direct)} — included in this message: watch, listen to or read it " +
+                "directly. The file is also in the chat folder at that path.]"
+        }
+        if (plan.byPath.isNotEmpty()) {
+            lines += if (plan.byPath.size == 1) "[The user attached a file: ${paths(plan.byPath)} — read it with read_file or read_table.]"
+            else "[The user attached ${plan.byPath.size} files: ${paths(plan.byPath)} — read them with read_file or read_table.]"
+        }
+        if (plan.tooLarge.isNotEmpty()) {
+            lines += "[The user attached ${paths(plan.tooLarge)}, too large to pass to you directly (over " +
+                "${MediaInput.INLINE_BUDGET_BYTES / (1024 * 1024)} MB in one message): you only have it by path, through " +
+                "tools. If that is not enough, tell the user and suggest a shorter or smaller file.]"
+        }
+        return lines.joinToString("\n").ifEmpty { null }
     }
 
     /**
@@ -1580,7 +1605,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * сообщения уже дополнены пузырём пользователя + пустым пузырём ответа, а сессия
      * приведена к нужной истории (для обычной отправки — накоплена сама).
      */
-    private fun launchAgent(agentTask: String, parts: List<Part>, label: String) {
+    /** [partsOf] builds the media parts; it reads files, so it runs off the main thread. */
+    private fun launchAgent(agentTask: String, partsOf: () -> List<Part>, label: String) {
         // A new run supersedes any earlier "continue the answer" offer.
         if (_ui.value.messages.any { it.error != null }) {
             setMessages(_ui.value.messages.map { if (it.error != null) it.copy(error = null) else it })
@@ -1621,6 +1647,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 AgentService.start(app, tr(R.string.status_processing, label))
                 serviceStarted = true
+                val parts = withContext(Dispatchers.IO) { partsOf() }
                 agent.run(agentTask + turnContext(bridge.enabled, ctxWindow), parts).collect { ev -> onEvent(ev) }
             } catch (error: CancellationException) {
                 cancelled = true
@@ -1740,7 +1767,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (partial.isNotBlank() && last?.role != Role.ASSISTANT) session.addAssistant(AssistantTurn(content = partial))
         val prompt = if (partial.isNotBlank()) OpenAiCompatClient.CONTINUE_PROMPT
         else "[The previous attempt failed before the answer was finished. Continue the task from where it stopped.]"
-        launchAgent(prompt, emptyList(), tr(R.string.continue_answer))
+        launchAgent(prompt, { emptyList() }, tr(R.string.continue_answer))
     }
 
     /** The answer text before the current model attempt started streaming; see TextRetracted. */

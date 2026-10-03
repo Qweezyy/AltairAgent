@@ -353,18 +353,29 @@ class OpenAiCompatClient(
         putJsonArray("messages") {
             for (m in messages) addJsonObject {
                 put("role", m.role.name.lowercase())
-                // Multimodal: with pictures, content goes as an array of text + image_url parts.
-                val images = m.parts.filterIsInstance<Part.Image>()
-                if (images.isEmpty()) {
+                // Multimodal: with media, content goes as an array of text, image_url and file parts.
+                // Video and audio go as "file" parts: GateYourWay refuses them in image_url (400) and
+                // silently drops video_url/audio_url; "file" is the form it passes to the model.
+                val media = m.parts.filter { it is Part.Image || it is Part.File }
+                if (media.isEmpty()) {
                     put("content", m.content)
                 } else {
                     putJsonArray("content") {
                         if (m.content.isNotBlank()) {
                             addJsonObject { put("type", "text"); put("text", m.content) }
                         }
-                        for (img in images) addJsonObject {
-                            put("type", "image_url")
-                            putJsonObject("image_url") { put("url", img.dataUri) }
+                        for (p in media) addJsonObject {
+                            when (p) {
+                                is Part.Image -> {
+                                    put("type", "image_url")
+                                    putJsonObject("image_url") { put("url", p.dataUri) }
+                                }
+                                is Part.File -> {
+                                    put("type", "file")
+                                    putJsonObject("file") { put("filename", p.filename); put("file_data", p.dataUri) }
+                                }
+                                else -> Unit
+                            }
                         }
                     }
                 }

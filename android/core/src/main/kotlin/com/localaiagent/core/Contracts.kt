@@ -18,6 +18,13 @@ sealed interface Part {
     /** Мультимодальная часть: data:-URI картинки (base64). */
     @Serializable
     data class Image(val dataUri: String) : Part
+
+    /**
+     * A video, audio or document the model takes in directly (data: URI). Providers that pass media to
+     * multimodal models (Gemini via GateYourWay, OpenRouter) take it as an OpenAI "file" part.
+     */
+    @Serializable
+    data class File(val dataUri: String, val filename: String) : Part
 }
 
 @Serializable
