@@ -5,6 +5,18 @@
 
 package com.localaiagent.app.ui
 
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Restore
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.automirrored.rounded.CallSplit
 import com.localaiagent.app.userAttachments
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.foundation.gestures.scrollBy
@@ -284,6 +296,44 @@ fun ChatScreen(
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val speak = rememberSpeaker()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    /**
+     * The menu of message #index. The user's own: copy, select, edit, answer anew (when nothing answers
+     * it), share, branch, take back. An answer's ⋮: answer anew, branch, rewind here (its reactions and
+     * other wordings sit on top of the menu).
+     */
+    fun messageMenuEntries(index: Int, msg: com.localaiagent.app.ChatMessage): List<MenuEntry> = buildList {
+        val copy = MenuEntry(Icons.Rounded.ContentCopy, context.getString(R.string.act_copy)) {
+            clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg.text))
+        }
+        val branch = MenuEntry(Icons.AutoMirrored.Rounded.CallSplit, context.getString(R.string.act_continue_new)) { onBranch(index) }
+        if (msg.fromUser) {
+            if (msg.text.isNotBlank()) {
+                add(copy)
+                add(MenuEntry(Icons.Rounded.TextFields, context.getString(R.string.act_select_text)) { selectingText = msg.text })
+            }
+            add(MenuEntry(Icons.Rounded.Edit, context.getString(R.string.act_edit_message)) { editingFor = index })
+            // A message left without an answer (it was stopped) can be answered anew.
+            if (com.localaiagent.app.canRegenerateUserMessage(state.messages, index)) {
+                add(MenuEntry(Icons.Rounded.Refresh, context.getString(R.string.act_regenerate)) { onRegenerate(index) })
+            }
+            if (msg.text.isNotBlank()) {
+                add(MenuEntry(Icons.Rounded.Share, context.getString(R.string.act_share_prompt)) { shareText(context, msg.text) })
+            }
+            add(branch)
+            add(MenuEntry(Icons.AutoMirrored.Rounded.Undo, context.getString(R.string.act_revert_mine)) {
+                // Rewinding to one's own message puts its text back into the input.
+                if (!state.running) prefill = msg.text
+                onRevert(index)
+            })
+        } else {
+            // Copy is a quick button under the answer already.
+            add(MenuEntry(Icons.Rounded.Refresh, context.getString(R.string.act_regenerate)) { onRegenerate(index) })
+            add(branch)
+            add(MenuEntry(Icons.Rounded.Restore, context.getString(R.string.act_revert_here)) { onRevert(index) })
+        }
+    }
     val pickReqMultiple = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) onProvideFiles(uris) else onCancelFileReq()
     }
@@ -291,6 +341,19 @@ fun ChatScreen(
         if (uri != null) onProvideFiles(listOf(uri)) else onCancelFileReq()
     }
 
+    val selectionActions: (SelectionAction, String) -> Unit = { action, text ->
+        when (action) {
+            SelectionAction.SIMPLER -> onAskSelection(text, "simpler")
+            SelectionAction.MORE -> onAskSelection(text, "elaborate")
+            SelectionAction.TRANSLATE -> onAskSelection(text, "translate")
+            SelectionAction.VERIFY -> onAskSelection(text, "verify")
+            SelectionAction.QUOTE -> onQuote(text)
+            SelectionAction.BOARD -> onAddToBoard(text)
+            SelectionAction.CHAT_MEMORY -> onSaveSelection(text, false)
+            SelectionAction.SHARED_MEMORY -> onSaveSelection(text, true)
+        }
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalSelectionActions provides selectionActions) {
     ModalNavigationDrawer(
         drawerState = drawerState,
         // Свайп-жест открытия отключаем (иначе горизонтальное перетаскивание ползунков в
@@ -311,7 +374,10 @@ fun ChatScreen(
         },
     ) {
         // Borderless chat: no top bar, the buttons float over the content.
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                .openDrawerBySwipe { scope.launch { drawerState.open() } },
+        ) {
             // Live cosmos behind the empty chat. After the first message it does not cut to the plain
             // background: it fades out while drifting slightly forward, as if flying past the stars.
             val welcome = state.messages.isEmpty() && !searching
@@ -403,12 +469,16 @@ fun ChatScreen(
                                 contentType = { _, it -> msgContentType(it) },
                             ) { index, msg ->
                                 val actionsEnabled = !(searching && searchQuery.isNotBlank())
+                                // An answer's text is selected by a long press; its actions sit under it.
+                                val answerText = !msg.fromUser && msg.html == null && msg.imageUrl == null &&
+                                    msg.attachPath == null
+                                val menuEntries = messageMenuEntries(index, msg)
                                 Box(
                                     // Fade items in and out, but never animate their placement: a growing
                                     // answer moves the items above it every frame, and a placement spring
                                     // on that is a visible wobble.
                                     Modifier.animateItem(placementSpec = null).fillMaxWidth().combinedClickable(
-                                        enabled = actionsEnabled,
+                                        enabled = actionsEnabled && !answerText,
                                         onClick = {},
                                         onLongClick = {
                                             if (actionsEnabled) {
@@ -425,16 +495,34 @@ fun ChatScreen(
                                             msg,
                                             onOpenAttachment = { openedAttachment = it },
                                             onSwitchVersion = onSwitchVersion,
-                                            showActions = index == displayed.lastIndex && !state.running,
+                                            showActions = !(state.running && index == displayed.lastIndex),
                                             onRemix = onRemix,
                                             onCopy = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg.text)) },
                                             onSpeak = { speak(msg.text) },
+                                            onShare = { shareText(context, msg.text) },
+                                            menuEntries = menuEntries,
+                                            menuHeader = messageTimeLabel(context, msg.time),
+                                            onReact = { onReact(msg.id, it) },
                                             onRegenerate = { onRegenerate(index) },
                                             onContinue = onContinueAnswer,
                                             // Статус («Думаю…», «Инструмент: …») — у активного ответа ИИ.
                                             statusText = if (state.running && index == displayed.lastIndex) state.status else "",
                                         )
                                         msg.reaction?.let { ReactionBadge(it, msg.fromUser) }
+                                    }
+                                    // The long-press menu of the user's message (and of pictures/widgets),
+                                    // under the bubble, on its side.
+                                    if (!answerText) {
+                                        Box(Modifier.matchParentSize()) {
+                                            Box(Modifier.align(if (msg.fromUser) Alignment.BottomEnd else Alignment.BottomStart).size(1.dp)) {
+                                                AltairMenu(
+                                                    expanded = actionFor == index,
+                                                    onDismiss = { actionFor = null },
+                                                    entries = menuEntries,
+                                                    header = messageTimeLabel(context, msg.time),
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -509,13 +597,53 @@ fun ChatScreen(
                     PcPresenceChip(state.pcPresence)
                 }
                 Spacer(Modifier.weight(1f))
-                FloatIcon(Icons.Rounded.Search, stringResource(R.string.search_in_chat)) { searching = !searching; if (!searching) searchQuery = "" }
-                FloatIcon(Icons.Rounded.FolderOpen, stringResource(R.string.chat_menu)) { showChatMenu = true }
-                FloatIcon(Icons.Rounded.EditNote, stringResource(R.string.nav_new_chat)) { onNewChat() }
+                // As in ChatGPT: a new chat and the chat's own actions in one pill on the right.
+                var chatMenu by remember { mutableStateOf(false) }
+                val alt = com.localaiagent.app.ui.theme.LocalAltair.current
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, alt.hair),
+                    modifier = Modifier.padding(2.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onNewChat) {
+                            Icon(Icons.Rounded.EditNote, stringResource(R.string.nav_new_chat), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Box {
+                            IconButton(onClick = { chatMenu = true }) {
+                                Icon(Icons.Rounded.MoreVert, stringResource(R.string.chat_actions), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            val window = state.models.firstOrNull { it.id == state.activeModelId }?.contextWindow ?: 128_000
+                            val info = buildString {
+                                val win = com.localaiagent.app.data.formatContextWindow(window)
+                                // Until the first answer of this session the usage is unknown: show the window only.
+                                if (state.contextTokens > 0) append(context.getString(
+                                    R.string.ctx_info, com.localaiagent.app.data.formatContextWindow(state.contextTokens), win,
+                                )) else append(context.getString(R.string.ctx_window_only, win))
+                                state.cacheStat?.let { append(" · ").append(context.getString(R.string.ctx_cache, it.percent)) }
+                            }
+                            AltairMenu(
+                                expanded = chatMenu,
+                                onDismiss = { chatMenu = false },
+                                header = info,
+                                entries = listOf(
+                                    MenuEntry(Icons.Rounded.Search, context.getString(R.string.search_in_chat)) {
+                                        searching = !searching; if (!searching) searchQuery = ""
+                                    },
+                                    MenuEntry(Icons.Rounded.FolderOpen, context.getString(R.string.chat_memory_files)) { showChatMenu = true },
+                                    MenuEntry(Icons.Rounded.Dashboard, context.getString(R.string.board_title)) { showBoard = true },
+                                    MenuEntry(Icons.Rounded.Summarize, context.getString(R.string.chat_summary)) { onSummarize() },
+                                ),
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 
+    }
     // A missing API key opens Settings once. It is a one-shot request, not a lock: the screen must
     // stay closable, and saving a model with a key goes through a different path.
     LaunchedEffect(state.needsKey) {
@@ -561,30 +689,6 @@ fun ChatScreen(
         )
     }
 
-    // Меню действий над выбранным сообщением.
-    actionFor?.let { idx ->
-        val msg = state.messages.getOrNull(idx)
-        if (msg == null) { actionFor = null; return@let }
-        MessageActionsSheet(
-            msg = msg,
-            onCopy = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg.text)) },
-            onSpeak = { speak(msg.text) },
-            onEdit = { editingFor = idx; actionFor = null },
-            onRegenerate = { onRegenerate(idx) },
-            // A user's message with no answer after it (the answer was stopped) can be answered anew.
-            canRegenerateUser = com.localaiagent.app.canRegenerateUserMessage(state.messages, idx),
-            onRevert = {
-                // Rewinding to one's own message puts its text back into the input.
-                if (msg.fromUser && !state.running) prefill = msg.text
-                onRevert(idx)
-            },
-            onBranch = { onBranch(idx) },
-            onSelectText = { selectingText = msg.text; actionFor = null },
-            onReact = { emoji -> onReact(msg.id, emoji) },
-            onFormat = { mode -> onRemix(msg.id, mode) },
-            onDismiss = { actionFor = null },
-        )
-    }
     editingFor?.let { idx ->
         val msg = state.messages.getOrNull(idx)
         if (msg == null) { editingFor = null; return@let }
@@ -991,6 +1095,10 @@ private fun MessageBubble(
     onSpeak: () -> Unit = {},
     onRegenerate: () -> Unit = {},
     onContinue: () -> Unit = {},
+    onShare: () -> Unit = {},
+    menuEntries: List<MenuEntry> = emptyList(),
+    menuHeader: String? = null,
+    onReact: (String) -> Unit = {},
     statusText: String = "",
 ) {
     when {
@@ -1075,7 +1183,8 @@ private fun MessageBubble(
                 // The quick-reply line becomes chips at the end; never flash it as text mid-stream.
                 val streaming = statusText.isNotBlank()
                 val shown = if (streaming) com.localaiagent.app.Followups.hideWhileStreaming(msg.text) else msg.text
-                MarkdownText(rememberSmoothReveal(shown, active = streaming), Modifier.fillMaxWidth())
+                // A long press selects text, with the app's actions in the selection toolbar.
+                AnswerSelectable { MarkdownText(rememberSmoothReveal(shown, active = streaming), Modifier.fillMaxWidth()) }
                 // Показываем полный индикатор под текстом ТОЛЬКО во время инструмента (напр.
                 // «Инструмент: run_python»). Для обычного стрима токенов — тонкая каретка-искра
                 // в конце (пока прогон идёт, т.е. statusText непустой), чтобы было видно «печатает».
@@ -1096,8 +1205,9 @@ private fun MessageBubble(
             }
             if (showActions && msg.text.isNotBlank()) {
                 AnswerActionBar(
-                    onCopy = onCopy, onSpeak = onSpeak, onRegenerate = onRegenerate,
-                    onRemix = { mode -> onRemix(msg.id, mode) },
+                    onCopy = onCopy, onSpeak = onSpeak, onShare = onShare,
+                    entries = menuEntries, header = menuHeader, reaction = msg.reaction,
+                    onReact = onReact, onRemix = { mode -> onRemix(msg.id, mode) },
                 )
             }
         }
@@ -1129,14 +1239,15 @@ private fun ReactionBadge(emoji: String, fromUser: Boolean) {
 private fun AnswerActionBar(
     onCopy: () -> Unit,
     onSpeak: () -> Unit,
-    onRegenerate: () -> Unit,
+    onShare: () -> Unit,
+    entries: List<MenuEntry>,
+    header: String?,
+    reaction: String?,
+    onReact: (String) -> Unit,
     onRemix: (String) -> Unit,
 ) {
+    // Three quick actions under the answer; everything else behind ⋮ (as in ChatGPT).
     var menuOpen by remember { mutableStateOf(false) }
-    val remix = listOf(
-        "shorter" to stringResource(R.string.remix_shorter), "longer" to stringResource(R.string.remix_longer),
-        "simpler" to stringResource(R.string.sel_simpler), "formal" to stringResource(R.string.remix_formal),
-    )
     Row(
         Modifier.fillMaxWidth().padding(top = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -1144,26 +1255,97 @@ private fun AnswerActionBar(
     ) {
         ActionIcon(Icons.Rounded.ContentCopy, stringResource(R.string.act_copy), onCopy)
         ActionIcon(Icons.AutoMirrored.Rounded.VolumeUp, stringResource(R.string.act_speak), onSpeak)
+        ActionIcon(Icons.Rounded.Share, stringResource(R.string.act_share), onShare)
         Box {
-            ActionIcon(Icons.Rounded.Autorenew, stringResource(R.string.act_regenerate)) { menuOpen = true }
-            DropdownMenu(
+            ActionIcon(Icons.Rounded.MoreVert, stringResource(R.string.more_actions)) { menuOpen = true }
+            AltairMenu(
                 expanded = menuOpen,
-                onDismissRequest = { menuOpen = false },
-                offset = DpOffset(0.dp, (-8).dp), // смещаем вверх от кнопки
-            ) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.act_regenerate)) },
-                    leadingIcon = { Icon(Icons.Rounded.Autorenew, null) },
-                    onClick = { menuOpen = false; onRegenerate() },
-                )
-                HorizontalDivider()
-                remix.forEach { (mode, label) ->
-                    DropdownMenuItem(
-                        text = { Text(label) },
-                        onClick = { menuOpen = false; onRemix(mode) },
-                    )
-                }
-            }
+                onDismiss = { menuOpen = false },
+                entries = entries,
+                header = header,
+                top = {
+                    // Reactions to the answer, then other wordings of it.
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        listOf("👍", "👎", "❤️", "😕", "🔖").forEach { e ->
+                            Box(
+                                Modifier.size(40.dp).clip(CircleShape)
+                                    .background(
+                                        if (reaction == e) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                        else Color.Transparent,
+                                    )
+                                    .clickable { menuOpen = false; onReact(e) },
+                                contentAlignment = Alignment.Center,
+                            ) { Text(e, fontSize = 19.sp) }
+                        }
+                    }
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        listOf(
+                            "shorter" to R.string.remix_shorter, "longer" to R.string.remix_longer,
+                            "simpler" to R.string.sel_simpler, "formal" to R.string.remix_formal,
+                            "table" to R.string.remix_table, "diagram" to R.string.remix_diagram,
+                            "list" to R.string.remix_list, "eli5" to R.string.remix_simpler, "code" to R.string.remix_code,
+                        ).distinctBy { it.second }.forEach { (mode, label) ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { menuOpen = false; onRemix(mode) },
+                            ) {
+                                Text(stringResource(label), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+                            }
+                        }
+                    }
+                    androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                },
+            )
+        }
+    }
+}
+
+/** Text selection in an answer by a long press, with the app's actions in the selection toolbar. */
+@Composable
+private fun AnswerSelectable(content: @Composable () -> Unit) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val actions = LocalSelectionActions.current
+    val real = androidx.compose.ui.platform.LocalClipboardManager.current
+    val clipboard = remember(real) { CapturingClipboard(real) }
+    val toolbar = remember(view, clipboard) { AnswerTextToolbar(view, clipboard) { a, t -> actions(a, t) } }
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalTextToolbar provides toolbar,
+        androidx.compose.ui.platform.LocalClipboardManager provides clipboard,
+    ) {
+        androidx.compose.foundation.text.selection.SelectionContainer { content() }
+    }
+}
+
+/** What to do with text selected in an answer. */
+val LocalSelectionActions = androidx.compose.runtime.staticCompositionLocalOf<(SelectionAction, String) -> Unit> { { _, _ -> } }
+
+/**
+ * Opens the chat history with a swipe to the right that starts in the left part of the chat. Only an
+ * unclaimed drag counts: sliders, widgets and text selection keep their own gestures.
+ */
+private fun Modifier.openDrawerBySwipe(onOpen: () -> Unit): Modifier = pointerInput(Unit) {
+    val trigger = 56.dp.toPx()
+    val giveUp = 24.dp.toPx()
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        if (down.position.x > size.width * 0.4f) return@awaitEachGesture
+        var dx = 0f
+        var dy = 0f
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (!change.pressed || change.isConsumed) break
+            val delta = change.positionChange()
+            dx += delta.x; dy += delta.y
+            if (kotlin.math.abs(dy) > giveUp && kotlin.math.abs(dy) > kotlin.math.abs(dx)) break
+            if (dx > trigger && dx > 2 * kotlin.math.abs(dy)) { change.consume(); onOpen(); break }
         }
     }
 }

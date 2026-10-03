@@ -365,4 +365,15 @@
     <string name="effort_high">High</string>
     <string name="effort_provider">Provider default</string>
     <string name="effort_hint">Adaptive thinks briefly and harder only after a failed step: much cheaper and faster on the same tasks.</string>
+    <string name="time_today">Today, %1$s</string>
+    <string name="time_yesterday">Yesterday, %1$s</string>
+    <string name="act_share">Share</string>
+    <string name="act_share_prompt">Share prompt</string>
+    <string name="act_edit_message">Edit message</string>
+    <string name="more_actions">More</string>
+    <string name="chat_actions">Chat actions</string>
+    <string name="chat_memory_files">Memory and files</string>
+    <string name="ctx_info">Context %1$s of %2$s</string>
+    <string name="ctx_cache">cache %1$d%%</string>
+    <string name="ctx_window_only">Context window %1$s</string>
 </resources>

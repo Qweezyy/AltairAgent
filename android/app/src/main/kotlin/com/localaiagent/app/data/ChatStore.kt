@@ -19,7 +19,13 @@ import java.io.File
 object ChatStore {
     private val JSON = Json { ignoreUnknownKeys = true }
 
-    data class PersistedChat(val id: String, val created: Long, val messages: List<ChatMessage>)
+    data class PersistedChat(
+        val id: String,
+        val created: Long,
+        val messages: List<ChatMessage>,
+        /** When the file was last written: the last activity of chats saved before message times. */
+        val savedAt: Long = 0L,
+    )
 
     fun save(chatDir: File, id: String, created: Long, messages: List<ChatMessage>) {
         runCatching {
@@ -38,6 +44,7 @@ object ChatStore {
                         m.attachments.forEach { a -> addJsonObject { put("p", a.path); put("n", a.name); put("k", a.kind) } }
                     }
                     put("id", m.id)
+                    if (m.time > 0) put("ts", m.time)
                     if (m.versions.isNotEmpty()) {
                         put("vi", m.verIndex)
                         putJsonArray("vs") { m.versions.forEach { add(it) } }
@@ -84,9 +91,10 @@ object ChatStore {
                         versions = (m["vs"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
                         versionReplies = (m["vr"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
                         verIndex = m["vi"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
+                        time = m["ts"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
                     )
                 } ?: emptyList()
-                out += PersistedChat(id, created, msgs)
+                out += PersistedChat(id, created, msgs, if (msgs.any { it.time > 0 }) 0L else f.lastModified())
             }
         }
         return out.sortedByDescending { it.created }

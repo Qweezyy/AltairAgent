@@ -40,6 +40,23 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 - Deferred tools load by family: one browser, dev-server, Android or code-quality tool brings its
   family, so the provider's prompt cache is reset once instead of once per tool.
 
+### Added
+- Android: model calls are as reliable as on the PC — no cut-off of long healthy answers (silence and
+  first-byte timeouts instead), gateway error texts and empty or runaway answers retried instead of shown,
+  a "Reasoning effort" setting (adaptive by default: cheaper and faster), fallback models that take over
+  while the main one is slow or down, and a per-provider limit on parallel requests. The system prompt
+  stays the same within a chat, so providers serve the history from cache.
+- Android: the context window is set when adding a model (128K, 1M, …); the context ring around the send
+  key follows the key's shape and fills against that window; the chat menu shows context use and cache share.
+- Android: formulas in answers ($…$, $$…$$, \(…\), \[…\], ```math) drawn with KaTeX, ```mermaid
+  diagrams, and rare markdown: strikethrough, ==highlight==, sub/superscript, inline HTML tags, task lists,
+  nested quotes, GitHub alerts, footnotes, <details>, autolinks and escapes.
+- Android: a long press on your message opens a ChatGPT-style menu (time, copy, select, edit, share,
+  branch, take back); under each answer: copy, read aloud, share and ⋮ for the rest. A long press on an
+  answer selects text, with the app's actions (simpler, translate, quote, board, memory) in the toolbar.
+- Android: top bar as in ChatGPT — history on the left, new chat and ⋮ chat actions on the right; a swipe
+  to the right opens the history, which is ordered by each chat's newest message.
+
 ### Fixed
 - The agent no longer reports a task as done when the provider did not really answer: a gateway
   error sent as the reply ("The request could not be completed…"), an empty stream, a stream cut

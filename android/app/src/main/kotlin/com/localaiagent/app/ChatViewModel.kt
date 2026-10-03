@@ -74,6 +74,8 @@ data class ChatMessage(
     val attachments: List<LibraryItem> = emptyList(),
     /** Why this answer broke off; the chat then offers to continue it. Not saved with the chat. */
     val error: String? = null,
+    /** When the message was written (epoch ms); 0 for messages saved by older builds. */
+    val time: Long = System.currentTimeMillis(),
 )
 
 /**
@@ -123,6 +125,11 @@ fun randomMsgId(): String = "m" + java.lang.Long.toHexString(System.nanoTime()) 
 
 /** Краткая карточка чата для бокового меню. */
 data class ChatSummary(val id: String, val title: String)
+
+/** The prompt-cache share of the last model call, for the chat menu; null until there is one. */
+data class CacheStat(val promptTokens: Int, val cachedTokens: Int) {
+    val percent: Int get() = if (promptTokens > 0) cachedTokens * 100 / promptTokens else 0
+}
 
 /** Элемент библиотеки: путь/URL, имя, тип (image/video/audio/file). */
 data class LibraryItem(val path: String, val name: String, val kind: String)
@@ -225,6 +232,8 @@ data class ChatUiState(
     val reasoningEffort: String = "adaptive",
     /** Models that take over while the active one is slow or down, in order. */
     val fallbackIds: List<String> = emptyList(),
+    /** The prompt-cache share of the last answer. */
+    val cacheStat: CacheStat? = null,
     /** Доска-коллекция текущего чата: собранные сниппеты (закреплённая заметка). */
     val board: List<String> = emptyList(),
     /** Живое присутствие ПК по мосту (для плашки среды у плавающих кнопок). */
@@ -287,6 +296,13 @@ private class Chat(
      */
     var frozenKey: String? = null
     var frozenPrompt: String? = null
+
+    /** For chats saved before messages had times: when the chat file last changed. */
+    var savedAt: Long = 0L
+
+    /** The time of the newest message: the chat history is ordered by it. */
+    val lastActivity: Long
+        get() = maxOf(messages.maxOfOrNull { it.time } ?: 0L, savedAt, if (messages.isEmpty()) created else 0L)
     val title: String
         get() = messages.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text?.take(40) ?: "New chat"
 }
@@ -330,8 +346,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Загружает сохранённые чаты с диска; если пусто — создаёт новый. */
     private fun loadPersistedOrCreate(): Chat {
         val persisted = ChatStore.loadAll(chatsRoot)
-        for (p in persisted) chats += Chat(p.id, Session(), p.messages, p.created)
+        for (p in persisted) chats += Chat(p.id, Session(), p.messages, p.created).apply { savedAt = p.savedAt }
         if (chats.isEmpty()) chats += Chat(randomId())
+        // The app opens on the chat with the newest message.
+        chats.sortByDescending { it.lastActivity }
         return chats.first()
     }
 
@@ -664,7 +682,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun refreshChats() {
-        val summaries = chats.map { ChatSummary(it.id, it.title) }
+        // The chat with the newest message first, and so on down.
+        val summaries = chats.sortedByDescending { it.lastActivity }.map { ChatSummary(it.id, it.title) }
         _ui.value = _ui.value.copy(chats = summaries, currentChatId = current.id, libraryItems = collectLibrary())
     }
 
@@ -1773,6 +1792,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             is AgentEvent.RunFinished -> {
+                if (ev.usage.promptTokens > 0) {
+                    _ui.value = _ui.value.copy(cacheStat = CacheStat(ev.usage.promptTokens, ev.usage.cachedTokens))
+                }
                 attemptBase = null
                 val last = _ui.value.messages.lastOrNull { !it.fromUser && it.imageUrl == null }
                 if (last != null && last.text.isBlank() && ev.text.isNotBlank()) appendToLast(ev.text)
