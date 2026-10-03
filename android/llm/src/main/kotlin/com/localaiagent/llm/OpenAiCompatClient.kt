@@ -22,13 +22,14 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -147,35 +148,36 @@ class OpenAiCompatClient(
                 if (data.isEmpty()) continue
 
                 val chunk = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
-                chunk["usage"]?.jsonObject?.let { u ->
+                (chunk["usage"] as? JsonObject)?.let { u ->
                     usage = Usage(
-                        promptTokens = u["prompt_tokens"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
-                        completionTokens = u["completion_tokens"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
-                        totalTokens = u["total_tokens"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
+                        promptTokens = u["prompt_tokens"].str()?.toIntOrNull() ?: 0,
+                        completionTokens = u["completion_tokens"].str()?.toIntOrNull() ?: 0,
+                        totalTokens = u["total_tokens"].str()?.toIntOrNull() ?: 0,
                     )
                 }
-                val choice = chunk["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
-                choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it; completed = true }
-                val delta = choice["delta"]?.jsonObject ?: continue
+                val choice = (chunk["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: continue
+                choice["finish_reason"].str()?.let { finishReason = it; completed = true }
+                val delta = choice["delta"] as? JsonObject ?: continue
 
-                delta["content"]?.jsonPrimitive?.contentOrNull?.let {
+                delta["content"].str()?.let {
                     if (it.isNotEmpty()) { sbContent.append(it); acc.content.append(it); onText?.invoke(it) }
                 }
-                (delta["reasoning"] ?: delta["reasoning_content"])?.jsonPrimitive?.contentOrNull?.let {
+                (delta["reasoning"].str() ?: delta["reasoning_content"].str())?.let {
                     if (it.isNotEmpty()) { sbReasoning.append(it); onReasoning?.invoke(it) }
                 }
-                delta["tool_calls"]?.jsonArray?.let { if (it.isNotEmpty()) acc.sawToolCall = true }
-                delta["tool_calls"]?.jsonArray?.forEach { tcEl ->
-                    val tc = tcEl.jsonObject
-                    val index = tc["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                val toolCalls = delta["tool_calls"] as? JsonArray
+                if (!toolCalls.isNullOrEmpty()) acc.sawToolCall = true
+                toolCalls?.forEach { tcEl ->
+                    val tc = tcEl as? JsonObject ?: return@forEach
+                    val index = tc["index"].str()?.toIntOrNull() ?: 0
                     val call = calls.getOrPut(index) { MutableToolCall() }
-                    tc["id"]?.jsonPrimitive?.contentOrNull?.let { call.id = it }
-                    tc["function"]?.jsonObject?.let { fn ->
+                    tc["id"].str()?.let { call.id = it }
+                    (tc["function"] as? JsonObject)?.let { fn ->
                         // ВАЖНО: некоторые провайдеры (gateyourway) шлют полное имя в первом
                         // чанке, а дальше — пустое name="" в чанках с кусками arguments.
                         // Поэтому НЕ перезаписываем непустое имя пустым — накапливаем куски.
-                        fn["name"]?.jsonPrimitive?.contentOrNull?.let { call.name += it }
-                        fn["arguments"]?.jsonPrimitive?.contentOrNull?.let { call.args.append(it) }
+                        fn["name"].str()?.let { call.name += it }
+                        fn["arguments"].str()?.let { call.args.append(it) }
                     }
                 }
             }
@@ -263,3 +265,9 @@ class OpenAiCompatClient(
                 "stopped: do not repeat anything already written and do not start over.]"
     }
 }
+
+/**
+ * A field read as text, or null when it is missing, JSON null or not a primitive. Providers send
+ * "usage": null, "reasoning": null and the like in stream chunks; a strict read would throw on them.
+ */
+private fun JsonElement?.str(): String? = (this as? JsonPrimitive)?.contentOrNull

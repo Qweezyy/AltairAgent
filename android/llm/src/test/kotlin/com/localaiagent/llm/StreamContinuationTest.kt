@@ -138,6 +138,40 @@ class StreamContinuationTest {
     }
 
     @Test
+    fun jsonNullFieldsInChunksAreIgnoredNotFatal() = runBlocking {
+        // As real providers send them: usage/reasoning/tool_calls/function as null, a null delta,
+        // and the reasoning text under reasoning_content while "reasoning" is null.
+        serve(
+            Reply(
+                listOf(
+                    """{"choices":[{"delta":{"content":"Hel","reasoning":null,"reasoning_content":"think",""" +
+                        """"tool_calls":null},"finish_reason":null}],"usage":null}""",
+                    """{"choices":[{"delta":{"content":"lo","tool_calls":[{"index":0,"function":null}]},""" +
+                        """"finish_reason":null}],"usage":null}""",
+                    """{"choices":[{"delta":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":3,""" +
+                        """"completion_tokens":2,"total_tokens":5}}""",
+                    """{"choices":null,"usage":null}""",
+                ),
+                complete = true,
+            ),
+        )
+        var retries = 0
+        val reasoning = StringBuilder()
+        val llm = client()
+        val turn = llm.complete(
+            messages = listOf(Message(Role.USER, "Hi")),
+            onReasoning = { reasoning.append(it) },
+            onRetry = { _, _, _, _ -> retries++ },
+        )
+        llm.close()
+        assertEquals("Hello", turn.content)
+        assertEquals("think", reasoning.toString())
+        assertEquals(5, turn.usage.totalTokens)
+        assertTrue(turn.toolCalls.isEmpty())
+        assertEquals(0, retries)
+    }
+
+    @Test
     fun aStreamThatEndsProperlyIsNotRetried() = runBlocking {
         serve(Reply(listOf(text("All good.", finish = "stop")), complete = true))
         var retries = 0

@@ -15,6 +15,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Fixed
+- Android: answers from providers that put `null` into stream fields ("usage": null, "reasoning": null,
+  a null delta) no longer fail with "JsonNull is not a JsonObject" after every retry.
 - Android: rewinding to your own message takes it back — it leaves the chat with the AI's reaction on it,
   and its text and attachments return to the input. Regenerating or editing a message also drops the
   reaction the replaced answer put on it.
