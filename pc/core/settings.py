@@ -106,6 +106,26 @@ class Settings(BaseSettings):
     #: Как только суммарная длина ответа (текст + размышления) превысит лимит,
     #: поток обрывается. Значение заведомо выше любого нормального ответа.
     llm_stream_char_limit: int = 160_000
+    #: How much the model reasons. "adaptive" (default): low, and high for the step right after
+    #: a failing test or tool error — measured as cheap and fast as "low" and as accurate as
+    #: "high". "default" sends nothing (the provider decides; reasoning models may then think
+    #: without end). Service calls (chat titles, history summaries) always ask for the least.
+    llm_reasoning: Literal["adaptive", "low", "medium", "high", "default"] = "adaptive"
+    #: How the provider takes the level: auto (by endpoint/model), openrouter, openai, zai, none.
+    llm_reasoning_dialect: Literal["auto", "openrouter", "openai", "zai", "none"] = "auto"
+    #: Give up an attempt that has not sent its first byte in this many seconds (0 = only the
+    #: read timeout). A stream that is flowing is never cut by a total time limit.
+    llm_first_byte_timeout: float = 90.0
+    #: Backup models (comma-separated, each with its own key/provider from the model list).
+    #: When the main one fails or is slow, the step goes to the next one.
+    llm_fallback_models: str = ""
+    #: A provider whose first byte comes later than this twice in a row is taken as slow and
+    #: skipped for llm_breaker_minutes while a backup model is set (0 = never).
+    llm_slow_first_byte: float = 40.0
+    llm_breaker_minutes: float = 10.0
+    #: Requests in flight per provider (0 = no limit until the provider refuses for
+    #: concurrency; then the limit adapts by itself).
+    llm_max_concurrent: int = 0
 
     # --- Директории ---
     #: Папка приложения: логи, чаты, навыки, mcp_servers.json. Не меняется в чатах.

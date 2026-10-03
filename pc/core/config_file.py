@@ -54,6 +54,9 @@ EDITABLE_KEYS = {
     "BRIDGE_TOKEN": "bridge_token",
     "BRIDGE_LAN": "bridge_lan",
     "BROWSER_NETWORK": "browser_network",
+    "LLM_REASONING": "llm_reasoning",
+    "LLM_FALLBACK_MODELS": "llm_fallback_models",
+    "LLM_MAX_CONCURRENT": "llm_max_concurrent",
 }
 
 #: Настройки-переключатели: в .env пишем строго "true"/"false".
@@ -129,6 +132,9 @@ def read_public_settings(settings: Settings | None = None) -> dict:
         "custom_instructions": settings.custom_instructions,
         "llm_temperature": settings.llm_temperature,
         "max_parallel_tools": settings.max_parallel_tools,
+        "llm_reasoning": settings.llm_reasoning,
+        "llm_fallback_models": settings.llm_fallback_models,
+        "llm_max_concurrent": settings.llm_max_concurrent,
         "context_token_budget": settings.context_token_budget,
         "context_compaction": settings.context_compaction,
         "tool_result_clearing": settings.tool_result_clearing,

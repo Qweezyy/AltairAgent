@@ -35,7 +35,9 @@ def test_active_set_is_core_plus_history_plus_loaded():
     active = active_tool_names(registry, True, messages, {LOADED_KEY: ["browser_click"]})
 
     assert active is not None
-    assert set(active) == set(CORE_TOOLS) | {"git_log", "browser_click"}
+    browser = {n for n in registry.names() if n.startswith("browser_")}
+    # One browser tool brings its whole family (one cache miss instead of one per tool).
+    assert set(active) == set(CORE_TOOLS) | {"git_log"} | browser
     assert active == sorted(active)  # stable order keeps the prompt cache prefix stable
 
 
@@ -168,10 +170,18 @@ async def test_runner_clears_old_outputs_past_half_budget(settings):
     settings.tool_result_clearing = True
     settings.tool_result_keep_recent = 2
     session = _history(10, size=4_000)  # ~13k tokens > half of the budget
-    llm = ScriptedLLM([AssistantTurn(content="ok")])
+    llm = ScriptedLLM([AssistantTurn(tool_calls=[tool_call("list_directory", path=".")]),
+                       AssistantTurn(content="ok")])
     runner = AgentRunner(llm=llm, registry=build_default_registry(), settings=settings, session=session)
     await runner.run("next")
 
-    sent = [m for m in llm.calls[0]["messages"] if m["role"] == "tool"]
-    assert sum(m["content"].startswith(CLEARED_MARK) for m in sent) == 8
-    assert sent[-1]["content"].startswith("output 9")
+    # First a step of warning: nothing is cleared yet, the model is asked to note what it needs.
+    first = llm.calls[0]["messages"]
+    assert not any(str(m.get("content")).startswith(CLEARED_MARK) for m in first if m["role"] == "tool")
+    assert "cleared at your next step" in str(first[-1]["content"])
+    # The step after it clears the old outputs; each note says how to get the output back.
+    sent = [m for m in llm.calls[1]["messages"] if m["role"] == "tool"]
+    masked = [m for m in sent if m["content"].startswith(CLEARED_MARK)]
+    assert len(masked) == 9  # 11 outputs now (the step added one), the newest 2 stay whole
+    assert all("tool_output(id=" in m["content"] for m in masked)
+    assert any(m["content"].startswith("output 9") for m in sent)

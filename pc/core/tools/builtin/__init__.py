@@ -63,6 +63,7 @@ from core.tools.builtin.codemap_tools import AstSearchTool, CodeMapTool, FindSym
 from core.tools.builtin.context_tools import (
     ContextCompressTool,
     ContextDropTool,
+    ToolOutputTool,
     ContextInfoTool,
 )
 from core.tools.builtin.coverage_tools import TestCoverageTool
@@ -270,6 +271,7 @@ def builtin_tools() -> list[Tool]:
         ContextInfoTool(),
         ContextCompressTool(),
         ContextDropTool(),
+        ToolOutputTool(),
         # инлайн-канвас в ленте: графика/виджет/вложение
         ShowGraphicTool(),
         ShowInteractiveTool(),

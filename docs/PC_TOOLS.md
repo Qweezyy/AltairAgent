@@ -175,6 +175,7 @@ workspace (for testing the sites/apps the agent builds); links out of it are ref
 | `context_info` | read | Context-window usage breakdown. | context_tools |
 | `context_compress` | edit | Replace old history with a self-written summary, keeping the last N messages. | context_tools |
 | `context_drop` | edit | Drop heavy items from context (tool results / images) without touching the visible chat. | context_tools |
+| `tool_output` | read | The exact original output of an earlier call that was cleared from the context (by tool_call_id, paged for long ones). Always loaded. | context_tools |
 
 ## Reminders & conditions
 

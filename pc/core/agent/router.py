@@ -105,12 +105,13 @@ async def choose_model(
 
     try:
         client = build_client(**_build_kwargs(judge))
+        client.reasoning = "minimal"  # a service call: the least reasoning (it decides the cost and the wait)
     except Exception as exc:  # noqa: BLE001 — сбой судьи не должен ронять прогон
         logger.warning("Роутер: не удалось создать судью (%s) → сильная модель", exc)
         return strong, f"оценщик недоступен → сильная модель ({strong.get('model')})"
 
     try:
-        turn = await asyncio.wait_for(client.complete(prompt, max_tokens=6), timeout=timeout)
+        turn = await asyncio.wait_for(client.complete(prompt, max_tokens=400), timeout=timeout)
         verdict = (turn.content or "").strip().upper()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Роутер: оценка не удалась (%s) → сильная модель", exc)
@@ -201,6 +202,7 @@ async def plan_subtasks(
     ]
     try:
         client = build_client(**_build_kwargs(judge))
+        client.reasoning = "minimal"  # a service call: the least reasoning (it decides the cost and the wait)
     except Exception as exc:  # noqa: BLE001 — сбой судьи не должен ронять прогон
         logger.warning("Роутер: не удалось создать планировщика (%s)", exc)
         return []

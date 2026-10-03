@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import Any
 
 import httpx
@@ -25,6 +26,8 @@ from core.llm.base import (
     ToolCall,
     ToolProgressCallback,
 )
+from core.llm import reliability
+from core.llm.reliability import BadTurn
 from core.logging_setup import get_logger
 from core.settings import Settings, get_settings
 
@@ -88,6 +91,10 @@ class OpenAICompatClient(LLMClient):
         #: через OpenRouter). Для остальных провайдеров этот маркер бессмыслен/ломает
         #: запрос, поэтому включаем только для claude-моделей.
         self._caching = _supports_cache(self.model)
+        #: False once the provider refused our reasoning field (then it is not sent again).
+        self._reasoning_supported = True
+        #: Requests in flight to this provider are shared by every client that talks to it.
+        self._gate = reliability.gate(self.base_url, self.settings.llm_max_concurrent)
 
     # ------------------------------------------------------------------
 
@@ -135,9 +142,10 @@ class OpenAICompatClient(LLMClient):
         on_retry: RetryCallback | None = None,
         max_tokens: int | None = None,
     ) -> AssistantTurn:
-        attempts = max(5, self.settings.llm_max_retries)
+        attempts = self.max_attempts or max(5, self.settings.llm_max_retries)
         last_error: Exception | None = None
         error_details = []
+        cuts = 0
 
         async def _retry(attempt: int, exc: Exception, reason: str, base: float) -> None:
             """Единая точка повтора: логирует, уведомляет UI и ждёт с backoff.
@@ -158,70 +166,92 @@ class OpenAICompatClient(LLMClient):
                     logger.debug("Колбэк on_retry упал", exc_info=True)
             await asyncio.sleep(delay)
 
-        for attempt in range(1, attempts + 1):
-            streamed = [False]
-            try:
-                return await self._stream_once(
-                    messages,
-                    tools,
-                    on_text,
-                    on_reasoning,
-                    on_tool_progress,
-                    mark_streamed=lambda: streamed.__setitem__(0, True),  # noqa: B023
-                    max_tokens=max_tokens,
-                )
-            except openai.BadRequestError as exc:
-                # Временные ошибки стриминга от upstream провайдеров (DigitalOcean/Cloudflare 400 TransferEncoding)
-                err_str = str(exc).lower()
-                if "transfer" in err_str or "upstream" in err_str or "payload is not completed" in err_str:
+        saved_reasoning = self.reasoning
+        try:
+            for attempt in range(1, attempts + 1):
+                streamed = [False]
+                try:
+                    return await self._stream_once(
+                        messages,
+                        tools,
+                        on_text,
+                        on_reasoning,
+                        on_tool_progress,
+                        mark_streamed=lambda: streamed.__setitem__(0, True),  # noqa: B023
+                        max_tokens=max_tokens,
+                    )
+                except openai.BadRequestError as exc:
+                    # Временные ошибки стриминга от upstream провайдеров (DigitalOcean/Cloudflare 400 TransferEncoding)
+                    err_str = str(exc).lower()
+                    if "transfer" in err_str or "upstream" in err_str or "payload is not completed" in err_str:
+                        last_error = exc
+                        error_details.append(f"Попытка {attempt}: BadRequest (upstream) — {exc}")
+                        if attempt < attempts:
+                            await _retry(attempt, exc, f"upstream 400: {exc}", 0.5)
+                            continue
+                        break
+                    raise LLMError(
+                        f"Провайдер отклонил запрос (400): {_short(exc)}. "
+                        "Обычно это несовместимая модель (нет поддержки tools) или слишком длинный контекст."
+                    ) from exc
+                except openai.AuthenticationError as exc:
+                    raise LLMError(
+                        f"API отклонил ключ (401): {_short(exc)}. Проверьте LLM_API_KEY в настройках."
+                    ) from exc
+                except openai.PermissionDeniedError as exc:
+                    # A key that is valid but not allowed for this model (per-model keys on gateways):
+                    # retrying cannot help and only stalls the caller.
+                    raise LLMError(tr("llm.forbidden", model=self.model, detail=_short(exc))) from exc
+                except openai.NotFoundError as exc:
+                    raise LLMError(
+                        f"Модель '{self.model}' недоступна на {self.base_url} (404). "
+                        f"Проверьте название модели в настройках или у провайдера. Детали: {_short(exc)}"
+                    ) from exc
+                except BadTurn as exc:
+                    # The provider "answered" without running the model (a gateway error text, an
+                    # empty stream, a stream cut at the loop guard): as good as a dropped connection.
                     last_error = exc
-                    error_details.append(f"Попытка {attempt}: BadRequest (upstream) — {exc}")
-                    if attempt < attempts:
-                        await _retry(attempt, exc, f"upstream 400: {exc}", 0.5)
-                        continue
-                    break
-                raise LLMError(
-                    f"Провайдер отклонил запрос (400): {_short(exc)}. "
-                    "Обычно это несовместимая модель (нет поддержки tools) или слишком длинный контекст."
-                ) from exc
-            except openai.AuthenticationError as exc:
-                raise LLMError(
-                    f"API отклонил ключ (401): {_short(exc)}. Проверьте LLM_API_KEY в настройках."
-                ) from exc
-            except openai.PermissionDeniedError as exc:
-                # A key that is valid but not allowed for this model (per-model keys on gateways):
-                # retrying cannot help and only stalls the caller.
-                raise LLMError(tr("llm.forbidden", model=self.model, detail=_short(exc))) from exc
-            except openai.NotFoundError as exc:
-                raise LLMError(
-                    f"Модель '{self.model}' недоступна на {self.base_url} (404). "
-                    f"Проверьте название модели в настройках или у провайдера. Детали: {_short(exc)}"
-                ) from exc
-            except openai.APIStatusError as exc:
-                # Статусы 502, 503, 504, 524, 429 тоже пробуем повторить
-                if exc.status_code in (408, 429, 500, 502, 503, 504, 520, 521, 522, 524):
-                    last_error = exc
-                    error_details.append(f"Попытка {attempt}: HTTP {exc.status_code} — {exc}")
+                    error_details.append(f"Attempt {attempt}: not a real answer — {exc}")
+                    if str(exc) == "cut":
+                        # A model that loops once may loop again: one more try with little
+                        # reasoning, then an honest error instead of more 160K-char streams.
+                        cuts += 1
+                        if cuts >= 2:
+                            raise LLMError(tr("llm.loop", model=self.model)) from exc
+                        saved_reasoning, self.reasoning = self.reasoning, "low"
+                        restore_reasoning = saved_reasoning
                     if attempt == attempts:
                         break
-                    await _retry(attempt, exc, f"HTTP {exc.status_code}", 0.5)
+                    await _retry(attempt, exc, f"not a real answer: {exc}", 0.5)
                     continue
-                raise LLMError(f"Ошибка API {exc.status_code}: {_short(exc)}") from exc
-            except RETRYABLE as exc:
-                last_error = exc
-                error_details.append(f"Попытка {attempt}: {type(exc).__name__} — {exc}")
-                if attempt == attempts:
-                    break
-                await _retry(attempt, exc, f"{type(exc).__name__}: {exc}", 0.2)
+                except openai.APIStatusError as exc:
+                    # Статусы 502, 503, 504, 524, 429 тоже пробуем повторить
+                    if exc.status_code in (408, 429, 500, 502, 503, 504, 520, 521, 522, 524):
+                        last_error = exc
+                        error_details.append(f"Попытка {attempt}: HTTP {exc.status_code} — {exc}")
+                        if attempt == attempts:
+                            break
+                        await _retry(attempt, exc, f"HTTP {exc.status_code}", 0.5)
+                        continue
+                    raise LLMError(f"Ошибка API {exc.status_code}: {_short(exc)}") from exc
+                except RETRYABLE as exc:
+                    last_error = exc
+                    error_details.append(f"Попытка {attempt}: {type(exc).__name__} — {exc}")
+                    if attempt == attempts:
+                        break
+                    await _retry(attempt, exc, f"{type(exc).__name__}: {exc}", 0.2)
 
-        detailed_message = (
-            f"Не удалось связаться с моделью «{self.model}» после {attempts} попыток переподключения. "
-            f"Последняя ошибка: {_short(last_error)}.\n\n"
-            "Что можно сделать: проверьте интернет и доступность провайдера, "
-            "смените модель или endpoint в настройках, затем нажмите «Повторить».\n\n"
-            "История попыток:\n" + "\n".join(error_details)
-        )
-        raise LLMError(detailed_message) from last_error
+            detailed_message = (
+                f"Не удалось связаться с моделью «{self.model}» после {attempts} попыток переподключения. "
+                f"Последняя ошибка: {_short(last_error)}.\n\n"
+                "Что можно сделать: проверьте интернет и доступность провайдера, "
+                "смените модель или endpoint в настройках, затем нажмите «Повторить».\n\n"
+                "История попыток:\n" + "\n".join(error_details)
+            )
+            raise LLMError(detailed_message) from last_error
+        finally:
+            # A retry after a loop runs with little reasoning; the next request gets the level back.
+            self.reasoning = saved_reasoning
 
     async def _stream_once(
         self,
@@ -249,23 +279,85 @@ class OpenAICompatClient(LLMClient):
         if tools:
             params["tools"] = tools
             params["tool_choice"] = "auto"
+        extra = (reliability.reasoning_extra(self.reasoning, str(self._client.base_url), self.model,
+                                             self.settings.llm_reasoning_dialect)
+                 if self._reasoning_supported else {})
+        if extra:
+            params["extra_body"] = extra
 
+        gate = self._gate
+        await gate.acquire()
+        ok = False
         try:
-            stream = await self._client.chat.completions.create(**params)
-        except openai.BadRequestError as exc:
-            # Не все провайдеры знают stream_options — пробуем без него
-            if "stream_options" in str(exc):
-                params.pop("stream_options", None)
-                stream = await self._client.chat.completions.create(**params)
-            else:
-                raise
+            turn = await self._stream_body(params, messages, tools, on_text, on_reasoning, on_tool_progress,
+                                           mark_streamed)
+            ok = True
+            return turn
+        except openai.APIStatusError as exc:
+            # Counted while this request is still in flight, so the new limit is right.
+            if exc.status_code == 429 and reliability.is_concurrency_refusal(str(exc)):
+                gate.too_many()
+            raise
+        finally:
+            gate.release(ok)
 
-        turn = AssistantTurn(model=self.model)
+    async def _open_stream(self, params: dict[str, Any]) -> Any:
+        try:
+            return await self._client.chat.completions.create(**params)
+        except openai.BadRequestError as exc:
+            text = str(exc)
+            # Не все провайдеры знают stream_options — пробуем без него
+            if "stream_options" in text:
+                params.pop("stream_options", None)
+                return await self._client.chat.completions.create(**params)
+            # A provider that does not take our reasoning field: send without it from now on.
+            if "extra_body" in params and any(k in text.lower() for k in ("reasoning", "thinking", "unrecognized", "unknown", "extra")):
+                logger.info("%s does not take the reasoning level (%s): sending without it", self.model, _short(exc, 120))
+                self._reasoning_supported = False
+                params.pop("extra_body", None)
+                return await self._client.chat.completions.create(**params)
+            raise
+
+    async def _stream_body(self, params, messages, tools, on_text, on_reasoning, on_tool_progress,
+                           mark_streamed) -> AssistantTurn:
+        started = time.perf_counter()
+        first_byte = self.settings.llm_first_byte_timeout or None
+        try:
+            stream = await asyncio.wait_for(self._open_stream(params), first_byte)
+            chunks = stream.__aiter__()
+            first = await asyncio.wait_for(chunks.__anext__(), first_byte)
+        except asyncio.TimeoutError as exc:
+            raise BadTurn(f"no first byte in {first_byte:.0f} s") from exc
+        except StopAsyncIteration:
+            first = None
+            chunks = None
+
+        turn = AssistantTurn(model=self.model, first_byte_s=time.perf_counter() - started)
         calls: dict[int, ToolCall] = {}
         reported: dict[int, int] = {}  # сколько символов уже показали интерфейсу
         limit = self.settings.llm_stream_char_limit
+        cut = False
+        # The first characters are held back until it is clear they are not a gateway's error
+        # text (that would otherwise show in the chat and stay there after the retry).
+        held = ""
+        hold = on_text is not None
 
-        async for chunk in stream:
+        async def flush() -> None:
+            nonlocal held, hold
+            hold = False
+            if held and on_text:
+                mark_streamed()
+                await on_text(held)
+            held = ""
+
+        async def all_chunks():
+            if first is not None:
+                yield first
+            if chunks is not None:
+                async for item in chunks:
+                    yield item
+
+        async for chunk in all_chunks():
             # Предохранитель от зацикливания. Reasoning-модель может генерировать
             # один и тот же текст бесконечно; read-timeout при этом молчит, ведь
             # поток идёт. Обрываем, как только вывод превысил разумный предел —
@@ -276,15 +368,22 @@ class OpenAICompatClient(LLMClient):
                     limit,
                 )
                 turn.finish_reason = "length"
+                cut = True
                 await _close_stream(stream)
                 break
 
             usage = getattr(chunk, "usage", None)
             if usage:
+                details = getattr(usage, "prompt_tokens_details", None)
+                cached = getattr(details, "cached_tokens", None) if details is not None else None
+                if cached is None and isinstance(details, dict):
+                    cached = details.get("cached_tokens")
                 turn.usage = {
                     "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
                     "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
                     "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+                    # Prompt tokens served from the provider's cache (billed at a fraction).
+                    "cached_tokens": cached or getattr(usage, "prompt_cache_hit_tokens", 0) or 0,
                 }
             if not getattr(chunk, "choices", None):
                 continue
@@ -299,10 +398,15 @@ class OpenAICompatClient(LLMClient):
 
             text = delta.content or ""
             if text:
-                mark_streamed()
                 turn.content += text
-                if on_text:
-                    await on_text(text)
+                if hold:
+                    held += text
+                    if len(turn.content) >= 160:
+                        await flush()
+                else:
+                    mark_streamed()
+                    if on_text:
+                        await on_text(text)
 
             reasoning = _extract_reasoning(delta)
             if reasoning:
@@ -311,6 +415,8 @@ class OpenAICompatClient(LLMClient):
                 if on_reasoning:
                     await on_reasoning(reasoning)
 
+            if delta.tool_calls and hold:
+                await flush()
             for part in delta.tool_calls or []:
                 index = part.index or 0
                 call = calls.setdefault(index, ToolCall(id="", name=""))
@@ -336,6 +442,12 @@ class OpenAICompatClient(LLMClient):
             for idx, call in sorted(calls.items())
             if call.name
         ]
+        verdict = reliability.judge_turn(turn, messages, tools, cut=cut)
+        if verdict:
+            logger.warning("%s: not a real answer (%s), %d chars: %r", self.model, verdict,
+                           len(turn.content), turn.content[:120])
+            raise BadTurn(verdict)
+        await flush()
         return turn
 
     async def aclose(self) -> None:

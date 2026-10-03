@@ -39,6 +39,8 @@ CORE_TOOLS = frozenset({
     "memory_read",
     "git_diff",
     "read_skill",
+    # Cleared outputs point to it: it has to be there when the model follows that pointer.
+    "tool_output",
 })
 
 #: A registry this small is sent whole: deferral would only add a search round trip.
@@ -69,6 +71,25 @@ def called_tool_names(messages: Iterable[dict[str, Any]]) -> set[str]:
     return names
 
 
+#: Tools that come together: once one of a family is used or found, the whole family is sent.
+#: Every change of the tool list resends the prompt without the provider's cache, and a browser
+#: task used to pull its tools in one by one (navigate, then read, tabs, click…), one cache miss
+#: each. On 21 real chats loading by family cut the misses from 77 to 43.
+QUALITY_TOOLS = frozenset({"run_lint", "type_check", "review_changes", "audit_ui", "screenshot_ui", "scan_secrets"})
+
+
+def family(name: str) -> str:
+    if name.startswith("browser_"):
+        return "browser"
+    if name.startswith("android_"):
+        return "android"
+    if name.endswith("_dev_server") or name.endswith("_dev_servers"):
+        return "dev_server"
+    if name in QUALITY_TOOLS:
+        return "quality"
+    return name
+
+
 def active_tool_names(
     registry: Any, enabled: bool, messages: Iterable[dict[str, Any]], scratch: dict[str, Any]
 ) -> list[str] | None:
@@ -76,7 +97,8 @@ def active_tool_names(
     if not deferral_active(registry, enabled):
         return None
     wanted = set(CORE_TOOLS) | called_tool_names(messages) | set(scratch.get(LOADED_KEY, ()))
-    return [name for name in registry.names() if name in wanted]
+    families = {family(name) for name in wanted if name not in CORE_TOOLS}
+    return [name for name in registry.names() if name in wanted or family(name) in families]
 
 
 def mark_loaded(scratch: dict[str, Any], names: Iterable[str]) -> None:

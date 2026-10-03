@@ -100,11 +100,17 @@ def to_anthropic_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dic
             pending.clear()
 
     pending_tool: list[dict[str, Any]] = []
-    for m in messages:
+    for position, m in enumerate(messages):
         role = m.get("role")
         if role == "system":
             flush_pending(pending_tool)
-            system_parts.append(_text_of(m.get("content")))
+            if position == 0 or not out:
+                system_parts.append(_text_of(m.get("content")))
+            else:
+                # A note in the middle of the conversation ("the user stopped this task", a failed
+                # check) belongs where it happened. Lifted into the system prompt it would stay
+                # there for good and read as standing orders on every later turn.
+                out.append({"role": "user", "content": f"[Note from the app] {_text_of(m.get('content'))}"})
             continue
         if role == "tool":
             pending_tool.append({

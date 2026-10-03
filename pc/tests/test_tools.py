@@ -237,7 +237,7 @@ async def test_write_then_read_roundtrip(ctx):
 
     read = await ReadFileTool().invoke({"path": "notes/hello.txt"}, ctx)
     assert "привет" in read.content
-    assert "строки 1-2 из 2" in read.content
+    assert "lines 1-2 of 2" in read.content
 
 
 async def test_write_outside_workspace_blocked(ctx):

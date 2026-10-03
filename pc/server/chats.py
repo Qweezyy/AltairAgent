@@ -394,6 +394,11 @@ class ChatState:
 
                 cands = tier_candidates(route_chosen)
                 llm = FallbackLLM(cands, build_llm_client) if len(cands) > 1 else build_llm_client(**client_kwargs)
+            elif backups := fallback_models(self.session_settings, client_kwargs.get("model")):
+                # Backup models from the settings: a failing or slow provider hands the step on.
+                from core.llm.fallback import FallbackLLM
+
+                llm = FallbackLLM([client_kwargs] + [{"model": m} for m in backups], build_llm_client)
             else:
                 llm = build_llm_client(**client_kwargs)
         except AgentError as exc:
@@ -890,3 +895,13 @@ def hub_of(app: Any) -> ChatHub | None:
     except AttributeError:
         return None
 
+
+def fallback_models(settings: Any, model: str | None) -> list[str]:
+    """The backup models of the settings, without the one the run already uses."""
+    main = (model or settings.default_model or "").strip()
+    out: list[str] = []
+    for name in (settings.llm_fallback_models or "").split(","):
+        name = name.strip()
+        if name and name != main and name not in out:
+            out.append(name)
+    return out

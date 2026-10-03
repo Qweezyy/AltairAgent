@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import re
 import json
 import time
 import uuid
@@ -23,7 +25,7 @@ from typing import Any
 from core.agent.prompt import build_system_prompt
 from core.agent.run_options import RunOptions
 from core.agent.run_state import RunStateStore
-from core.agent.session import TOOL_MEDIA_MARK, Session, estimate_tokens
+from core.agent.session import NOTE, TOOL_MEDIA_MARK, Session, estimate_tokens
 from core.checkpoints import CheckpointStore
 from core.cost import estimate_cost, load_pricing
 from core.errors import AgentError, LLMError
@@ -60,6 +62,17 @@ from core.tools.registry import ToolRegistry
 #: Old tool outputs are masked past half the context budget, but never later than this:
 #: models use a huge window poorly, and every request resends the whole history.
 CLEARING_CEILING_TOKENS = 100_000
+#: Said to the model one step before old tool outputs leave its context.
+CLEARING_WARNING = (
+    "[Context note — not from the user] To save context, the outputs of your older tool calls will be "
+    "cleared at your next step (each stays retrievable with tool_output). If facts from them still "
+    "matter for the rest of the task — values, names, paths, findings — write them down briefly in your "
+    "next message, then carry on."
+)
+
+#: Tool output that means "this went wrong": the next step gets more reasoning (adaptive level).
+FAILURE_RE = re.compile(r"\b\d+ failed\b|\bFAILED\b|Traceback \(most recent call last\)|AssertionError|"
+                        r"\bexit code [1-9]\d*\b|\bSyntaxError\b|[A-Za-z]Error:")
 
 logger = get_logger("agent")
 
@@ -487,6 +500,7 @@ class AgentRunner:
                 Reconnecting(attempt=attempt, max_attempts=total, delay_s=round(delay, 1), reason=reason)
             )
 
+        self.llm.reasoning = self._reasoning_level()
         tools = None
         if with_tools:
             # Deferred loading: core tools + whatever this chat has found or used.
@@ -505,6 +519,23 @@ class AgentRunner:
         self._partial_text = ""  # the answer is complete: it goes into the history as a whole
         return turn
 
+    def _clearing_would_apply(self, keep_recent: int, min_free: int) -> bool:
+        """Whether clearing old outputs now would change anything (tried on a copy)."""
+        probe = Session(messages=copy.deepcopy(self.session.messages))
+        cleared, _ = probe.clear_old_tool_results(keep_recent=keep_recent, min_free_chars=min_free)
+        return cleared > 0
+
+    def _reasoning_level(self) -> str | None:
+        """The reasoning level of the next request (core.llm.reliability.LEVELS, None = the
+        provider decides). "adaptive" is low, and high right after a failing round of tools:
+        in the lab it solved as many hard tasks as "high" at the cost and speed of "low"."""
+        mode = self.settings.llm_reasoning
+        if mode == "default":
+            return None
+        if mode == "adaptive":
+            return "high" if getattr(self, "_round_failed", False) else "low"
+        return mode
+
     async def _run_tools(self, calls: list[ToolCall], repeats: Counter[str]) -> None:
         semaphore = asyncio.Semaphore(max(1, self.settings.max_parallel_tools))
 
@@ -521,6 +552,10 @@ class AgentRunner:
         # Порядок ответов должен совпадать с порядком tool_calls.
         for call, result in results:
             self.session.add_tool_result(call.id, call.name, result.content)
+        # A failing test run or a tool error: the next step thinks harder (adaptive level).
+        self._round_failed = any(
+            not result.ok or FAILURE_RE.search(str(result.content)[:6000]) for _, result in results
+        )
 
     async def _execute_call(
         self, call: ToolCall, ctx: ToolContext, repeats: Counter[str]
@@ -588,11 +623,18 @@ class AgentRunner:
         # lot, so the cache breaks rarely.
         threshold = min(budget // 2, CLEARING_CEILING_TOKENS)
         if self.settings.tool_result_clearing and self.session.token_estimate() > threshold:
-            cleared, freed = self.session.clear_old_tool_results(
-                keep_recent=self.settings.tool_result_keep_recent, min_free_chars=min(budget // 5, 60_000)
-            )
-            if cleared:
-                await self._log(tr("log.cleared", n=cleared, chars=freed), "debug")
+            keep, min_free = self.settings.tool_result_keep_recent, min(budget // 5, 60_000)
+            if not getattr(self, "_clear_warned", False) and self._clearing_would_apply(keep, min_free):
+                # One step of warning first: the model writes down what it still needs from the
+                # outputs about to go (in the answer it gives anyway, no extra call). In the lab
+                # that answered 10 of 16 later questions at once instead of re-reading.
+                self._clear_warned = True
+                self.session.messages.append({"role": "user", "content": CLEARING_WARNING, NOTE: True})
+            else:
+                cleared, freed = self.session.clear_old_tool_results(keep_recent=keep, min_free_chars=min_free)
+                if cleared:
+                    self._clear_warned = False
+                    await self._log(tr("log.cleared", n=cleared, chars=freed), "debug")
 
         count = self.session.overflow_count(budget)
         if count <= 0:
@@ -614,32 +656,35 @@ class AgentRunner:
             await self._log(tr("log.trimmed", n=dropped), "warning")
 
     async def _summarize_history(self, messages: list[dict[str, Any]]) -> str:
-        """Сжимает старую часть диалога в короткое резюме одним вызовом модели."""
+        """Folds the old part of the conversation into a short summary with one model call."""
         transcript = _format_for_summary(messages)
         if not transcript.strip():
             return ""
+        saved_level, self.llm.reasoning = self.llm.reasoning, "minimal"
         try:
             turn = await self.llm.complete(
                 [
-                    {
-                        "role": "system",
-                        "content": "Ты сжимаешь начало диалога в краткую памятку для продолжения работы.",
-                    },
+                    {"role": "system", "content": "You condense the start of a conversation into a short memo "
+                                                  "for carrying on the work."},
                     {
                         "role": "user",
                         "content": (
-                            "Сожми это начало диалога агента с пользователем в короткое резюме "
-                            "(5–8 предложений): что просил пользователь, что сделал агент, какие "
-                            "факты, договорённости и решения важны для продолжения. Пиши по делу, "
-                            "без воды.\n\n" + transcript
+                            "Condense this start of the conversation between the agent and the user into a "
+                            "short summary (5–8 sentences): what the user asked for, what the agent did, and "
+                            "which facts, agreements and decisions matter for carrying on. To the point. "
+                            "Write in the language of the conversation.\n\n" + transcript
                         ),
                     },
                 ],
-                max_tokens=600,
+                # Room for reasoning models: with 600 the thinking used it all and the summary
+                # came back empty, so the oldest part was dropped instead of folded.
+                max_tokens=2500,
             )
         except (AgentError, LLMError) as exc:
-            logger.debug("Не удалось сжать контекст: %s", exc)
+            logger.debug("Could not condense the context: %s", exc)
             return ""
+        finally:
+            self.llm.reasoning = saved_level
         return (turn.content or "").strip()
 
     def _app_closing(self) -> bool:
@@ -763,7 +808,7 @@ class AgentRunner:
     ) -> RunResult:
         final_text = (text or "").strip()
         if not final_text:
-            final_text = "Задача завершена, но модель не вернула текстовый ответ."
+            final_text = tr("run.no_text")
             self.session.add_assistant_turn(AssistantTurn(content=final_text))
 
         cost = estimate_cost(dict(usage), self.llm.model, pricing or {})

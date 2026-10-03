@@ -42,6 +42,8 @@ HIDDEN = "_hidden"        # not sent at all (folded into a summary)
 DROP_CALLS = "_drop_calls"  # sent without its tool calls (their results were dropped)
 #: A user-role message that is a reminder waking the agent, not something the user wrote.
 WAKE = "_wake"
+#: A user-role message the app adds for the model (a context note), not something the user wrote.
+NOTE = "_note"
 #: The tool calls the model gets instead of the original ones (old writes without their text).
 CALLS_VIEW = "_calls_view"
 #: Arguments of old writes that are folded away: the file holds that text now, and the
@@ -60,7 +62,8 @@ KEEP_PAGE_STATES = 2
 
 #: Tools whose outputs are never cleared: user answers and skill recipes are not
 #: reproducible by re-running a tool.
-CLEARING_PROTECTED_TOOLS = frozenset({"ask", "read_skill", "phone_ask_user", "request_secret", "tool_search"})
+CLEARING_PROTECTED_TOOLS = frozenset({"ask", "read_skill", "phone_ask_user", "request_secret", "tool_search",
+                                      "tool_output"})
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -431,7 +434,7 @@ class Session:
             size = len(message["content"])
             message[VIEW] = (
                 f"{CLEARED_MARK} output of {message.get('name') or 'tool'} ({size} chars) was cleared to "
-                "save context. Run the tool again if you need it.]"
+                f"save context. tool_output(id=\"{message.get('tool_call_id')}\") returns it exactly.]"
             )
             freed -= len(message[VIEW])
         self.updated_at = time.time()

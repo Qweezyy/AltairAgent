@@ -68,6 +68,7 @@ async def audit_screenshot(
     ]
 
     client = build_llm_client(model or settings.default_model, settings)
+    client.reasoning = "low"
     try:
         turn = await client.complete(messages, max_tokens=_MAX_TOKENS)
     finally:
@@ -115,6 +116,7 @@ async def describe_image(
     ]
 
     client = build_llm_client(model or settings.default_model, settings)
+    client.reasoning = "low"
     try:
         turn = await client.complete(messages, max_tokens=_MAX_TOKENS)
     finally:

@@ -12,7 +12,7 @@ from core.agent.session import CLEARED_MARK, KEEP_PAGE_STATES, TOOL_MEDIA_MARK, 
 from core.llm.base import AssistantTurn
 from core.settings import Settings
 from core.tools import build_default_registry
-from tests.fakes import ScriptedLLM
+from tests.fakes import ScriptedLLM, tool_call
 
 IMAGE = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
 
@@ -86,10 +86,11 @@ async def test_a_huge_budget_does_not_postpone_clearing(settings):
             {"id": f"c{i}", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]})
         session.add_tool_result(f"c{i}", "read_file", "x" * 10_000)
     assert session.token_estimate() > CLEARING_CEILING_TOKENS
-    llm = ScriptedLLM([AssistantTurn(content="ok")])
+    llm = ScriptedLLM([AssistantTurn(tool_calls=[tool_call("list_directory", path=".")]),
+                       AssistantTurn(content="ok")])
     await AgentRunner(llm=llm, registry=build_default_registry(), settings=settings, session=session).run("go")
-    sent = [m for m in llm.calls[0]["messages"] if m["role"] == "tool"]
-    assert sum(m["content"].startswith(CLEARED_MARK) for m in sent) == 38
+    sent = [m for m in llm.calls[1]["messages"] if m["role"] == "tool"]  # after the step of warning
+    assert sum(m["content"].startswith(CLEARED_MARK) for m in sent) >= 38
 
 
 async def test_the_ring_uses_the_providers_own_count(settings):

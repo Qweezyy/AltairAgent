@@ -149,6 +149,46 @@ class ContextDropTool(Tool):
         return f"Убрано ({args.what}). Было ~{before}, стало ~{after} токенов."
 
 
+class ToolOutputArgs(BaseModel):
+    id: str = Field(description="The tool_call_id of the earlier call whose output was cleared")
+    start: int = Field(default=0, ge=0, description="Character to start from, for long outputs")
+
+
+class ToolOutputTool(Tool):
+    """The exact output of an earlier call that was cleared from the context.
+
+    Old outputs leave the model's view to save context, but the chat keeps them whole
+    (session.py). Asked about a cleared output, models re-ran the tool — a step, and for a
+    command or a page not even the same answer. With this they got the original back in 15
+    of 16 cases, without a wrong answer.
+    """
+
+    name = "tool_output"
+    description = (
+        "Returns the full original output of an earlier tool call that was cleared from your context, "
+        "by its tool_call_id. Exact and cheaper than running the tool again."
+    )
+    Args = ToolOutputArgs
+    category = "read"
+    timeout = 10.0
+    #: Outputs are cut at the general limit: `start` pages through a long one.
+    max_output_chars = 12_000
+
+    async def run(self, args: ToolOutputArgs, ctx: ToolContext) -> str | ToolResult:
+        session = _session(ctx)
+        if session is None:
+            return ToolResult.fail("The session is not available here.")
+        for m in session.messages:
+            if m.get("role") == "tool" and m.get("tool_call_id") == args.id:
+                content = m.get("content")
+                text = content if isinstance(content, str) else str(content)
+                part = text[args.start:args.start + self.max_output_chars]
+                more = len(text) - args.start - len(part)
+                tail = f"\n... [{more} more characters: tool_output(id=\"{args.id}\", start={args.start + len(part)})]" if more > 0 else ""
+                return f"[Original output of {m.get('name') or 'the tool'}, call {args.id}]\n{part}{tail}"
+        return ToolResult.fail(f"No tool call with id {args.id!r} in this chat.")
+
+
 def _strip_images(message: dict[str, Any]) -> dict[str, Any]:
     """Убирает картиночные части из мультимодального user-сообщения, оставляя текст."""
     content = message.get("content")

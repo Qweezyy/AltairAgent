@@ -66,6 +66,8 @@ class AssistantTurn:
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
     model: str = ""
+    #: Seconds until the provider sent the first byte of this answer (0 = unknown).
+    first_byte_s: float = 0.0
 
     @property
     def wants_tools(self) -> bool:
@@ -87,6 +89,12 @@ class LLMClient(ABC):
     """Минимальный контракт провайдера."""
 
     model: str
+    #: The reasoning level for the next requests (see core.llm.reliability.LEVELS; None = the
+    #: provider decides). The runner sets it per step; service calls set the lowest.
+    reasoning: str | None = None
+    #: Attempts per request, None = the settings' default. A client with a backup model behind
+    #: it gives up sooner, so the step moves to the backup instead of waiting out retries.
+    max_attempts: int | None = None
 
     @abstractmethod
     async def complete(

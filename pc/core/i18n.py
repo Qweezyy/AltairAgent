@@ -167,6 +167,20 @@ CATALOG: dict[str, dict[str, str]] = {
         "ru": "Ключ API не допущен к модели «{model}» (403): {detail}. "
               "Задайте этой модели свой ключ в «Настройки → Модели и провайдеры».",
     },
+    "llm.loop": {
+        "en": "The model '{model}' kept generating without end twice in a row, so the answer was "
+              "stopped. Try again, or choose a lower reasoning level or another model in Settings.",
+        "ru": "Модель «{model}» дважды подряд генерировала без конца, ответ остановлен. "
+              "Повторите, либо выберите в настройках уровень рассуждений пониже или другую модель.",
+    },
+    "run.no_text": {
+        "en": "The model finished without a text answer.",
+        "ru": "Модель закончила без текстового ответа.",
+    },
+    "llm.backup_used": {
+        "en": "{model} is not answering well ({reason}) — this step goes to the backup model {backup}.",
+        "ru": "{model} отвечает плохо ({reason}) — этот шаг выполнит запасная модель {backup}.",
+    },
     "ws.routing_split": {"en": "Routing: the task was split into {n} subtasks — {summary}",
                          "ru": "Маршрутизация: задача разбита на {n} подзадач — {summary}"},
     "ws.nothing_to_resume": {"en": "No interrupted run was found — nothing to continue.",

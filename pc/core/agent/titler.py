@@ -63,6 +63,7 @@ async def _ask(task: str, build_client: Callable[..., Any], client_kwargs: dict[
                timeout: float) -> str | None:
     try:
         client = build_client(**client_kwargs)
+        client.reasoning = "minimal"  # a service call: the least reasoning (it decides the cost and the wait)
     except Exception as exc:  # noqa: BLE001 - a title must never break the run
         logger.info("title: no client for %s (%s)", client_kwargs.get("model"), exc)
         return None

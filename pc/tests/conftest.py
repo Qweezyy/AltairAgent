@@ -49,3 +49,13 @@ def settings(tmp_path: Path) -> Settings:
 @pytest.fixture()
 def ctx(settings: Settings) -> ToolContext:
     return ToolContext(settings=settings)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_provider_state():
+    """Provider gates and the breaker are process-wide: each test starts with none of them."""
+    from core.llm import reliability
+
+    reliability.reset_state()
+    yield
+    reliability.reset_state()

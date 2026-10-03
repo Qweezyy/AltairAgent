@@ -178,6 +178,7 @@ class ReviewChangesTool(Tool):
             {"role": "user", "content": _CRITIC_INSTRUCTION + truncated},
         ]
         client = build_llm_client(ctx.settings.default_model, ctx.settings)
+        client.reasoning = "low"
         try:
             turn = await client.complete(messages, max_tokens=1400)
         finally:

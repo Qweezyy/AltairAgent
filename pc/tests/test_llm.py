@@ -122,22 +122,41 @@ class _EndlessStream:
 
 
 async def test_endless_generation_is_cut_off(monkeypatch):
-    """Reasoning-модель может генерировать без конца — поток обязан оборваться."""
-    settings = Settings(openrouter_api_key="test-key", llm_stream_char_limit=500)
-    client = OpenAICompatClient(settings=settings, model="test-model")
+    """A model that generates without end: the stream is cut at the limit and closed, tried once
+    more with little reasoning, and then the call fails honestly — a cut stream is never handed
+    back as if it were the answer (the agent took it for a finished task)."""
+    import pytest
 
-    stream = _EndlessStream()
+    from core.errors import LLMError
+    from core.llm import reliability
+
+    reliability.reset_state()
+    settings = Settings(openrouter_api_key="test-key", llm_stream_char_limit=500,
+                        llm_base_url="https://openrouter.ai/api/v1")
+    client = OpenAICompatClient(settings=settings, model="test-model")
+    client.reasoning = "medium"
+    streams: list[_EndlessStream] = []
+    sent: list[dict] = []
 
     async def fake_create(**params):
-        return stream
+        sent.append(params)
+        streams.append(_EndlessStream())
+        return streams[-1]
+
+    async def no_wait(_seconds):
+        return None
 
     monkeypatch.setattr(client._client.chat.completions, "create", fake_create)
+    monkeypatch.setattr("core.llm.openai_client.asyncio.sleep", no_wait)
 
-    result = await client.complete([{"role": "user", "content": "зациклись"}])
+    with pytest.raises(LLMError, match="without end"):
+        await client.complete([{"role": "user", "content": "зациклись"}])
 
-    assert len(result.content) < 1000, "поток не оборвался у лимита"
-    assert result.finish_reason == "length"
-    assert stream.closed, "зависший поток провайдера не был закрыт"
+    assert len(streams) == 2, "one retry after a loop, not five"
+    assert all(s.closed for s in streams), "a runaway provider stream was not closed"
+    assert sent[0]["extra_body"] == {"reasoning": {"effort": "medium"}}
+    assert sent[1]["extra_body"] == {"reasoning": {"effort": "low"}}
+    assert client.reasoning == "medium", "the lowered level must not stick to the client"
 
 
 async def test_max_tokens_reaches_the_request(monkeypatch):
@@ -147,11 +166,18 @@ async def test_max_tokens_reaches_the_request(monkeypatch):
 
     captured: dict = {}
 
+    class _OneAnswer(_EndlessStream):
+        sent = False
+
+        async def __anext__(self):
+            if self.sent:
+                raise StopAsyncIteration
+            self.sent = True
+            return _Chunk("ok")
+
     async def fake_create(**params):
         captured.update(params)
-        stream = _EndlessStream()
-        stream.closed = True  # сразу пустой поток
-        return stream
+        return _OneAnswer()
 
     monkeypatch.setattr(client._client.chat.completions, "create", fake_create)
 

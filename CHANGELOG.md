@@ -14,7 +14,44 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+### Added
+- **The reasoning level is set, not left to the provider.** Settings → Agent → Reasoning level:
+  Adaptive (default: low, and high for the step right after a failing test or tool error), Low,
+  Medium, High, or the provider's default. Sent in each provider's own dialect (OpenRouter
+  `reasoning.effort`, OpenAI `reasoning_effort`, Z.ai-style `thinking`). In tests on hard tasks with
+  hidden tests the adaptive level solved as many as High (17 of 18) at about a third of the cost of
+  the provider's default and many times faster; without a level the model sometimes thought for
+  14 minutes and 33K tokens in one step. Chat titles, routing and history summaries ask for the least.
+- **Backup models.** Settings → Agent → Backup models (comma-separated). When the main provider
+  fails, or sends its first byte later than 40 s twice in a row, the next steps go to the backup for
+  10 minutes, then the main one is tried again. With a backup set the main model gets two attempts
+  instead of five, so a step moves on instead of waiting out retries.
+- **Fewer requests in flight when a provider asks for it.** When a provider refuses with "too many
+  concurrent requests", the app holds fewer requests to it at once and climbs back by itself
+  (or set a fixed number in Settings → Agent).
+- `tool_output`: the exact output of an earlier tool call that was cleared from the context. Cleared
+  outputs now say how to get them back instead of "run the tool again", and one step before old
+  outputs are cleared the agent is told to note what it still needs.
+- The answer's footer shows how much of the prompt came from the provider's cache.
+
+### Changed
+- `read_file` numbers lines as `12|text` instead of `    12 | text`: 14% fewer tokens for the most
+  used tool's output, same editing accuracy.
+- Deferred tools load by family: one browser, dev-server, Android or code-quality tool brings its
+  family, so the provider's prompt cache is reset once instead of once per tool.
+
 ### Fixed
+- The agent no longer reports a task as done when the provider did not really answer: a gateway
+  error sent as the reply ("The request could not be completed…"), an empty stream, a stream cut
+  at the loop guard or a reply to a prompt the provider did not process is retried like a dropped
+  connection (and never shown in the chat). In live runs these made about 15% of the "finished"
+  tasks. A model that loops twice in a row now ends with an honest error.
+- An attempt whose first byte does not come within 90 s is given up and retried; a stream that is
+  flowing is never cut by a total time limit.
+- History summaries of reasoning models came back empty (the reasoning used the 600-token limit) and
+  the oldest part of a chat was dropped instead of folded.
+- With Anthropic models a note in the middle of a chat ("the user stopped this task") stays where it
+  happened instead of moving into the system prompt for good.
 - Android: answers from providers that put `null` into stream fields ("usage": null, "reasoning": null,
   a null delta) no longer fail with "JsonNull is not a JsonObject" after every retry.
 - Android: rewinding to your own message takes it back — it leaves the chat with the AI's reaction on it,

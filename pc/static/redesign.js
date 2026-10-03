@@ -790,6 +790,10 @@ function endAnswerStream() { if (state.answerEl) { $(".stream-caret", state.answ
 function addAnswerFooter(node, m, turn) {
   const text = m.text || state.answerText || "";
   const dur = m.duration_ms ? `${(m.duration_ms / 1000).toFixed(1)} ${T("u.sec")}` : "";
+  // How much of the prompt the provider served from its cache (billed at a fraction).
+  const u = m.usage || {};
+  const cacheShare = u.prompt_tokens > 0 && u.cached_tokens > 0 ? Math.round((100 * u.cached_tokens) / u.prompt_tokens) : 0;
+  const cache = cacheShare ? ` · ${T("a.cacheShare", { p: cacheShare })}` : "";
   if (turn == null && typeof state.userTurn === "number") turn = state.userTurn - 1;
   // Откатить весь прогон (вернуть файлы к состоянию до него) — доступно, если
   // известен run_id (живой ответ или из истории).
@@ -802,7 +806,7 @@ function addAnswerFooter(node, m, turn) {
     <button class="btn-icon small" data-a="pin" data-tip="${escAttr(T("a.pin"))}">${iconSvg("pin", "icon icon-sm")}</button>
     <button class="btn-icon small" data-a="speak" data-tip="${escAttr(T("a.speak"))}">${iconSvg("volume", "icon icon-sm")}</button>
     ${rollback}
-    <span class="ma-time">${dur}</span>
+    <span class="ma-time"${cacheShare ? ` data-tip="${escAttr(T("a.cacheTip", { cached: fmtTokens(u.cached_tokens), total: fmtTokens(u.prompt_tokens) }))}"` : ""}>${dur}${cache}</span>
   </div>`);
   $('[data-a="copy"]', foot).addEventListener("click", () => { navigator.clipboard?.writeText(text); toast(T("t.copied")); });
   $('[data-a="fork"]', foot).addEventListener("click", () => forkFrom(turn));
@@ -2344,6 +2348,11 @@ function renderSettingsSection(sec, main, s) {
       ${F("max_steps", T("ag.maxSteps"), s.max_steps, "number")}
       ${F("max_run_tokens", T("ag.maxTokens"), fmtTokens(s.max_run_tokens), "text", T("ag.maxTokensHint"))}
       ${F("max_parallel_tools", T("ag.parallel"), s.max_parallel_tools, "number")}
+      <div class="form-row"><label class="form-label" for="set-llm_reasoning">${esc(T("ag.reasoning"))}</label>
+        <select class="field" id="set-llm_reasoning">${["adaptive", "low", "medium", "high", "default"].map((v) => `<option value="${v}" ${(s.llm_reasoning || "adaptive") === v ? "selected" : ""}>${esc(T("ag.reasoning." + v))}</option>`).join("")}</select>
+        <span class="form-help">${esc(T("ag.reasoningHint"))}</span></div>
+      ${F("llm_fallback_models", T("ag.fallbackModels"), s.llm_fallback_models || "", "text", T("ag.fallbackModelsHint"))}
+      ${F("llm_max_concurrent", T("ag.maxConcurrent"), s.llm_max_concurrent || 0, "number", T("ag.maxConcurrentHint"))}
       ${tg("tg-compact", T("ag.compact"), T("ag.compactDesc"), s.context_compaction)}
       ${tg("tg-clear", T("ag.clearOld"), T("ag.clearOldDesc"), s.tool_result_clearing)}
       ${tg("tg-toolsearch", T("ag.toolSearch"), T("ag.toolSearchDesc"), s.tool_search)}
@@ -2383,7 +2392,7 @@ function renderSettingsSection(sec, main, s) {
       if (f) { const fb = fbOf("fast"); if (fb.length) f.fallbacks = fb; tiers.fast = f; }
       if (st) { const fb = fbOf("strong"); if (fb.length) st.fallbacks = fb; tiers.strong = st; }
       if (rt) tiers.router = rt;
-      const p = { agent_language: $("#set-agent_language", main).value, max_steps: Math.max(0, parseInt($("#set-max_steps", main).value, 10) || 0), max_run_tokens: parseTokens($("#set-max_run_tokens", main).value), max_parallel_tools: +$("#set-max_parallel_tools", main).value || 5, model_tiers: JSON.stringify(tiers), ...flags };
+      const p = { agent_language: $("#set-agent_language", main).value, max_steps: Math.max(0, parseInt($("#set-max_steps", main).value, 10) || 0), max_run_tokens: parseTokens($("#set-max_run_tokens", main).value), max_parallel_tools: +$("#set-max_parallel_tools", main).value || 5, llm_reasoning: $("#set-llm_reasoning", main).value, llm_fallback_models: $("#set-llm_fallback_models", main).value.trim(), llm_max_concurrent: Math.max(0, parseInt($("#set-llm_max_concurrent", main).value, 10) || 0), model_tiers: JSON.stringify(tiers), ...flags };
       save(p);
     });
   } else if (sec === "instructions") {
