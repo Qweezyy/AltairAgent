@@ -352,4 +352,16 @@
     <string name="answer_spacing_hint">Насколько свободно набраны ответы модели</string>
     <string name="answer_spacing_sample">Так выглядит ответ.\nВторая строка того же абзаца.\n\n- пункт списка\n- ещё один</string>
     <string name="act_revert_mine">Вернуть в поле ввода (стереть далее)</string>
+    <string name="model_context_window">Окно контекста</string>
+    <string name="model_context_window_hint">Сколько токенов вмещает модель: 128K, 200K, 1M</string>
+    <string name="model_fallback">Запасная</string>
+    <string name="model_fallback_n">Запасная %1$d</string>
+    <string name="model_fallback_hint">Запасные модели берут шаги на себя, пока активная тормозит или недоступна, и отдают их обратно через 10 минут.</string>
+    <string name="reasoning_effort">Уровень рассуждений</string>
+    <string name="effort_adaptive">Адаптивный (рекомендуется)</string>
+    <string name="effort_low">Низкий</string>
+    <string name="effort_medium">Средний</string>
+    <string name="effort_high">Высокий</string>
+    <string name="effort_provider">По умолчанию у провайдера</string>
+    <string name="effort_hint">Адаптивный думает коротко и сильнее только после неудачного шага: заметно дешевле и быстрее на тех же задачах.</string>
 </resources>

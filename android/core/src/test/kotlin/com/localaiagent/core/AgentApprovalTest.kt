@@ -22,6 +22,7 @@ private class ScriptedLlm(private val turns: ArrayDeque<AssistantTurn>) : LlmCli
         onRetry: (suspend (Int, Int, Double, String) -> Unit)?,
         maxTokens: Int?,
         onDiscard: (suspend (Int) -> Unit)?,
+        escalate: Boolean,
     ): AssistantTurn {
         toolListsSent += tools?.map { it["name"]!!.jsonPrimitive.contentOrNull!! }
         return turns.removeFirstOrNull() ?: AssistantTurn(content = "done")
@@ -82,6 +83,7 @@ class AgentApprovalTest {
             onRetry: (suspend (Int, Int, Double, String) -> Unit)?,
             maxTokens: Int?,
             onDiscard: (suspend (Int) -> Unit)?,
+            escalate: Boolean,
         ): AssistantTurn {
             // A client that had to start over (e.g. the partial reply held a tool call).
             onText?.invoke("Hello, wor")

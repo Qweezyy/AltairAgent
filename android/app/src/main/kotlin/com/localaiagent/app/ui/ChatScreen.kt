@@ -179,6 +179,8 @@ import com.localaiagent.app.bridge.PcBridgeFacade
 import com.localaiagent.app.data.ALL_CAPS
 import com.localaiagent.app.data.CAP_LABEL
 import com.localaiagent.app.data.ModelProfile
+import com.localaiagent.app.data.formatContextWindow
+import com.localaiagent.app.data.parseContextWindow
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -198,7 +200,6 @@ import com.localaiagent.app.ui.theme.Dims
 import com.localaiagent.app.ui.theme.Semantic
 import kotlinx.coroutines.launch
 
-private const val CONTEXT_BUDGET = 128_000f
 
 @Composable
 fun ChatScreen(
@@ -484,6 +485,7 @@ fun ChatScreen(
                     onPickUris = onPickUris,
                     caps = state.activeCaps,
                     contextTokens = state.contextTokens,
+                    contextWindow = state.models.firstOrNull { it.id == state.activeModelId }?.contextWindow ?: 128_000,
                     onSend = onSend,
                     onClearAttachment = onClearAttachment,
                     onCamera = onAttachCamera,
@@ -1796,6 +1798,7 @@ private fun InputBar(
     onPickUris: (List<android.net.Uri>) -> Unit,
     caps: Set<String>,
     contextTokens: Int,
+    contextWindow: Int = 128_000,
     onSend: (String) -> Unit,
     onClearAttachment: () -> Unit,
     onCancel: () -> Unit,
@@ -1917,12 +1920,11 @@ private fun InputBar(
                     ),
                 )
                 Box(Modifier.padding(end = 2.dp), contentAlignment = Alignment.Center) {
+                    // The context ring follows the send key's own shape: a rounded square around it.
                     if (contextTokens > 0) {
-                        CircularProgressIndicator(
-                            progress = { (contextTokens / CONTEXT_BUDGET).coerceIn(0.02f, 1f) },
-                            modifier = Modifier.size(46.dp), strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surface,
+                        ContextRing(
+                            progress = (contextTokens.toFloat() / contextWindow.coerceAtLeast(1)).coerceIn(0.02f, 1f),
+                            modifier = Modifier.size(48.dp),
                         )
                     }
                     val canSend = (input.isNotBlank() || pending.isNotEmpty()) && !running
@@ -1973,6 +1975,42 @@ private fun InputBar(
                 }
             }
         }
+    }
+}
+
+/**
+ * How full the model's context is, drawn as a stroke along a rounded square that hugs the send key
+ * (40 dp, 12 dp corners, 4 dp around it): from the middle of the top edge, clockwise.
+ */
+@Composable
+private fun ContextRing(progress: Float, modifier: Modifier = Modifier) {
+    val color = MaterialTheme.colorScheme.primary
+    val track = com.localaiagent.app.ui.theme.LocalAltair.current.hair
+    val animated by animateFloatAsState(progress, tween(600), label = "ctx")
+    androidx.compose.foundation.Canvas(modifier) {
+        val stroke = 2.dp.toPx()
+        val inset = stroke / 2
+        val radius = (12.dp + 4.dp).toPx() - inset
+        val rect = androidx.compose.ui.geometry.Rect(inset, inset, size.width - inset, size.height - inset)
+        val path = androidx.compose.ui.graphics.Path().apply {
+            // Starts at the top centre so the fill grows like a clock hand.
+            moveTo(rect.center.x, rect.top)
+            lineTo(rect.right - radius, rect.top)
+            arcTo(androidx.compose.ui.geometry.Rect(rect.right - 2 * radius, rect.top, rect.right, rect.top + 2 * radius), -90f, 90f, false)
+            lineTo(rect.right, rect.bottom - radius)
+            arcTo(androidx.compose.ui.geometry.Rect(rect.right - 2 * radius, rect.bottom - 2 * radius, rect.right, rect.bottom), 0f, 90f, false)
+            lineTo(rect.left + radius, rect.bottom)
+            arcTo(androidx.compose.ui.geometry.Rect(rect.left, rect.bottom - 2 * radius, rect.left + 2 * radius, rect.bottom), 90f, 90f, false)
+            lineTo(rect.left, rect.top + radius)
+            arcTo(androidx.compose.ui.geometry.Rect(rect.left, rect.top, rect.left + 2 * radius, rect.top + 2 * radius), 180f, 90f, false)
+            close()
+        }
+        val style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawPath(path, track, style = style)
+        val measure = androidx.compose.ui.graphics.PathMeasure().apply { setPath(path, false) }
+        val part = androidx.compose.ui.graphics.Path()
+        measure.getSegment(0f, measure.length * animated, part, true)
+        drawPath(part, color, style = style)
     }
 }
 
@@ -2392,6 +2430,7 @@ private fun ModelsSection(
     onSave: (ModelProfile) -> Unit,
     onDelete: (String) -> Unit,
 ) {
+    val actions = LocalModelActions.current
     Text(stringResource(R.string.settings_models), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
     state.models.forEach { m ->
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2401,8 +2440,16 @@ private fun ModelsSection(
                 val capCtx = androidx.compose.ui.platform.LocalContext.current
                 val caps = if (m.caps.isEmpty()) stringResource(R.string.caps_text_only)
                 else m.caps.mapNotNull { CAP_LABEL[it]?.let(capCtx::getString) }.joinToString(", ")
-                Text("${m.model} · $caps", style = MaterialTheme.typography.labelSmall,
+                Text("${m.model} · ${formatContextWindow(m.contextWindow)} · $caps", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline)
+            }
+            // Any other model can stand in while the active one is slow or down.
+            if (m.id != state.activeModelId) {
+                val fb = state.fallbackIds.indexOf(m.id)
+                FilterChipLike(
+                    if (fb >= 0) stringResource(R.string.model_fallback_n, fb + 1) else stringResource(R.string.model_fallback),
+                    fb >= 0,
+                ) { actions.toggleFallback(m.id) }
             }
             if (state.models.size > 1) {
                 IconButton(onClick = { onDelete(m.id) }) { Icon(Icons.Rounded.Close, stringResource(R.string.action_delete)) }
@@ -2419,6 +2466,8 @@ private fun ModelsSection(
         var model by remember { mutableStateOf("") }
         var url by remember { mutableStateOf("https://api.gateyourway.com/v1") }
         var key by remember { mutableStateOf("") }
+        var ctx by remember { mutableStateOf("128K") }
+        val ctxTokens = parseContextWindow(ctx)
         val caps = remember { mutableStateListOf<String>() }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.model_title)) }, singleLine = true)
@@ -2427,6 +2476,11 @@ private fun ModelsSection(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), singleLine = true)
             OutlinedTextField(key, { key = it }, label = { Text(stringResource(R.string.api_key)) },
                 visualTransformation = PasswordVisualTransformation(), singleLine = true)
+            OutlinedTextField(
+                ctx, { ctx = it }, label = { Text(stringResource(R.string.model_context_window)) },
+                supportingText = { Text(stringResource(R.string.model_context_window_hint)) },
+                isError = ctxTokens == null, singleLine = true,
+            )
             Text(stringResource(R.string.model_accepts), style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2445,16 +2499,43 @@ private fun ModelsSection(
                                 id = "m_" + java.util.UUID.randomUUID().toString().take(8),
                                 title = title.ifBlank { model }, model = model.trim(),
                                 baseUrl = url.trim(), apiKey = key.trim(), caps = caps.toSet(),
+                                contextWindow = ctxTokens ?: 128_000,
                             ),
                         )
                         expanded = false
                     }
                 },
-                enabled = model.isNotBlank(),
+                enabled = model.isNotBlank() && ctxTokens != null,
             ) { Text(stringResource(R.string.save_model)) }
         }
     }
+
+    // How hard the model thinks: adaptive saves the most and thinks harder only after a failure.
+    Spacer(Modifier.height(16.dp))
+    Text(stringResource(R.string.reasoning_effort), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+    listOf(
+        "adaptive" to R.string.effort_adaptive, "low" to R.string.effort_low, "medium" to R.string.effort_medium,
+        "high" to R.string.effort_high, "provider" to R.string.effort_provider,
+    ).forEach { (value, label) ->
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { actions.setEffort(value) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = state.reasoningEffort == value, onClick = { actions.setEffort(value) })
+            Text(stringResource(label), fontSize = 15.sp)
+        }
+    }
+    Text(stringResource(R.string.effort_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+    if (state.models.size > 1) {
+        Spacer(Modifier.height(8.dp))
+        Text(stringResource(R.string.model_fallback_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+    }
 }
+
+/** Model-screen actions that do not belong in ChatScreen's long parameter list. */
+class ModelActions(val toggleFallback: (String) -> Unit = {}, val setEffort: (String) -> Unit = {})
+
+val LocalModelActions = androidx.compose.runtime.staticCompositionLocalOf { ModelActions() }
 
 @Composable
 private fun FilterChipLike(label: String, selected: Boolean, onClick: () -> Unit) {

@@ -91,6 +91,8 @@ class Agent(
 
         var step = 0
         var toolRounds = 0
+        // The last step's tools failed (an error, failing tests): the next step may think harder.
+        var lastStepFailed = false
         try {
             while (step < maxSteps) {
                 step++
@@ -108,6 +110,7 @@ class Agent(
                     onReasoning = { send(AgentEvent.ReasoningDelta(it)) },
                     onRetry = { a, m, d, r -> send(AgentEvent.Reconnecting(a, m, d, r)) },
                     onDiscard = { chars -> send(AgentEvent.TextRetracted(chars)) },
+                    escalate = lastStepFailed,
                 )
                 session.addAssistant(turn)
                 send(AgentEvent.ContextUsage(session.tokenEstimate()))
@@ -118,6 +121,7 @@ class Agent(
                 }
 
                 toolRounds++
+                lastStepFailed = false
                 // Выполняем запрошенные инструменты и возвращаем результаты модели.
                 for (call in turn.toolCalls) {
                     val args = parseArgs(call.arguments)
@@ -139,6 +143,7 @@ class Agent(
                                 .getOrElse { ToolResult.fail(it.message ?: "tool failure") }
                         }
                     }
+                    if (looksFailed(result.ok, result.content)) lastStepFailed = true
                     session.addToolResult(call.id, call.name, result.content)
                     send(AgentEvent.ToolFinished(call.id, call.name, result.ok, result.content))
                 }
@@ -187,3 +192,17 @@ class Agent(
         return buildString { repeat(12) { append(pool[kotlin.random.Random.nextInt(pool.length)]) } }
     }
 }
+
+/** Signs that a tool's output reports a failure, though the tool itself ran: tests, a crash, an exit code. */
+private val FAILURE_SIGNS = listOf(
+    Regex("""\b[1-9]\d* failed\b"""),
+    Regex("""\bFAILED\b"""),
+    Regex("""Traceback \(most recent call last\)"""),
+    Regex("""\bAssertionError\b"""),
+    Regex("""\bSyntaxError\b"""),
+    Regex("""exit code:? *[1-9]\d*""", RegexOption.IGNORE_CASE),
+    Regex("""\b[A-Z][A-Za-z]*Error:"""),
+)
+
+/** Whether a tool result is a failure: the tool said so, or its output shows failing tests or a crash. */
+fun looksFailed(ok: Boolean, content: String): Boolean = !ok || FAILURE_SIGNS.any { it.containsMatchIn(content) }

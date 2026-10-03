@@ -35,6 +35,8 @@ class SettingsStore(private val context: Context) {
         val uiScale = androidx.datastore.preferences.core.floatPreferencesKey("ui_scale")
         val appIcon = stringPreferencesKey("app_icon")
         val answerSpacing = androidx.datastore.preferences.core.floatPreferencesKey("answer_spacing")
+        val reasoningEffort = stringPreferencesKey("reasoning_effort")
+        val fallbackModels = stringPreferencesKey("fallback_models")
     }
 
     /** Re-encrypts credentials that older builds stored in plaintext. Idempotent; call once at start. */
@@ -117,11 +119,37 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    /** Конфиг активной модели для LLM-клиента. */
+    /**
+     * The active model for the LLM client, with the chosen reasoning effort and the fallback models
+     * (in the order they were marked) that take over while it is slow or down.
+     */
     suspend fun activeConfig(): LlmConfig {
         val (list, active) = loadModels()
         val m = list.firstOrNull { it.id == active } ?: list.first()
-        return LlmConfig(baseUrl = m.baseUrl, model = m.model, apiKey = m.apiKey)
+        val effort = loadReasoningEffort()
+        val fallbacks = loadFallbackIds().filter { it != m.id }
+            .mapNotNull { id -> list.firstOrNull { it.id == id } }
+            .map { LlmConfig(baseUrl = it.baseUrl, model = it.model, apiKey = it.apiKey, reasoningEffort = effort) }
+        return LlmConfig(
+            baseUrl = m.baseUrl, model = m.model, apiKey = m.apiKey,
+            reasoningEffort = effort, fallbacks = fallbacks,
+        )
+    }
+
+    /** adaptive | low | medium | high | provider. */
+    suspend fun loadReasoningEffort(): String =
+        context.dataStore.data.first()[Keys.reasoningEffort] ?: "adaptive"
+
+    suspend fun saveReasoningEffort(value: String) {
+        context.dataStore.edit { it[Keys.reasoningEffort] = value }
+    }
+
+    /** Ids of the models marked as fallbacks, in order. */
+    suspend fun loadFallbackIds(): List<String> =
+        context.dataStore.data.first()[Keys.fallbackModels].orEmpty().split(',').filter { it.isNotBlank() }
+
+    suspend fun saveFallbackIds(ids: List<String>) {
+        context.dataStore.edit { it[Keys.fallbackModels] = ids.joinToString(",") }
     }
 
     suspend fun activeProfile(): ModelProfile {

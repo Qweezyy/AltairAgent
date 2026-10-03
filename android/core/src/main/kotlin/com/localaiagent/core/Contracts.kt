@@ -43,6 +43,8 @@ data class Usage(
     val promptTokens: Int = 0,
     val completionTokens: Int = 0,
     val totalTokens: Int = 0,
+    /** Prompt tokens the provider served from its cache. */
+    val cachedTokens: Int = 0,
 )
 
 /** Результат одного обращения к модели. */

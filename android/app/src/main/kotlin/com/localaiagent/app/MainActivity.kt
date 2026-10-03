@@ -117,6 +117,9 @@ class MainActivity : ComponentActivity() {
                   ),
                   com.localaiagent.app.ui.LocalUiScale provides (state.uiScale to vm::setUiScale),
                   com.localaiagent.app.ui.LocalAnswerSpacing provides (state.answerSpacing to vm::setAnswerSpacing),
+                  com.localaiagent.app.ui.LocalModelActions provides androidx.compose.runtime.remember {
+                      com.localaiagent.app.ui.ModelActions(vm::toggleFallback, vm::setReasoningEffort)
+                  },
                   com.localaiagent.app.ui.LocalRefreshPresence provides vm::refreshPresence,
               ) {
                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {

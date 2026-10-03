@@ -221,6 +221,10 @@ data class ChatUiState(
     val uiScale: Float = 1f,
     /** Line spacing of the model's answers (Settings → Appearance). */
     val answerSpacing: Float = com.localaiagent.app.data.ANSWER_SPACING_DEFAULT,
+    /** Reasoning effort for the model: adaptive | low | medium | high | provider. */
+    val reasoningEffort: String = "adaptive",
+    /** Models that take over while the active one is slow or down, in order. */
+    val fallbackIds: List<String> = emptyList(),
     /** Доска-коллекция текущего чата: собранные сниппеты (закреплённая заметка). */
     val board: List<String> = emptyList(),
     /** Живое присутствие ПК по мосту (для плашки среды у плавающих кнопок). */
@@ -276,6 +280,13 @@ private class Chat(
     var messages: List<ChatMessage> = emptyList(),
     val created: Long = System.currentTimeMillis(),
 ) {
+    /**
+     * The system prompt this chat runs with, kept as is while its inputs (tools, settings, secrets)
+     * stay the same: providers cache the request prefix, and a prompt that changed on every message
+     * made the whole history miss the cache. Notes saved mid-conversation do not rebuild it.
+     */
+    var frozenKey: String? = null
+    var frozenPrompt: String? = null
     val title: String
         get() = messages.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text?.take(40) ?: "New chat"
 }
@@ -359,6 +370,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 hapticsEnabled = settings.loadHaptics(),
                 uiScale = settings.loadUiScale(),
                 answerSpacing = settings.loadAnswerSpacing(),
+                reasoningEffort = settings.loadReasoningEffort(),
+                fallbackIds = settings.loadFallbackIds(),
                 appIcon = settings.loadAppIcon(),
                 language = LocaleManager.get(getApplication()),
                 mcpServers = mcpStore.load(),
@@ -606,6 +619,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun setReactionsOnUser(enabled: Boolean) {
         _ui.value = _ui.value.copy(reactionsOnUser = enabled)
         viewModelScope.launch { settings.saveReactionsOnUser(enabled) }
+    }
+
+    fun setReasoningEffort(value: String) {
+        _ui.value = _ui.value.copy(reasoningEffort = value)
+        viewModelScope.launch { settings.saveReasoningEffort(value) }
+    }
+
+    /** Marks a model as a fallback (appended last) or unmarks it. */
+    fun toggleFallback(id: String) {
+        val cur = _ui.value.fallbackIds
+        val next = if (id in cur) cur - id else cur + id
+        _ui.value = _ui.value.copy(fallbackIds = next)
+        viewModelScope.launch { settings.saveFallbackIds(next) }
     }
 
     fun setAnswerSpacing(value: Float) {
@@ -941,6 +967,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (existing.contains(note)) return@launch
             val head = if (existing.isBlank()) "$header\n\n" else existing.trimEnd() + "\n"
             f.writeText(head + "- ${java.time.LocalDate.now()}: $note\n")
+            // Saved by the user: rebuild the prompt (every chat sees a shared note).
+            if (global) chats.forEach { it.frozenPrompt = null } else current.frozenPrompt = null
         }
     }
 
@@ -1142,6 +1170,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val f = File(chatDir(), ".agent/memory.md")
             f.parentFile?.mkdirs()
             if (text.isBlank()) f.delete() else f.writeText(text)
+            // The user changed the memory by hand: the next turn sees it.
+            current.frozenPrompt = null
         }
     }
 
@@ -1433,20 +1463,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             append("phone screen.\n</tone_preference>")
         }
 
-        val used = session.tokenEstimate()
-        val pct = if (contextWindow > 0) used * 100 / contextWindow else 0
-        val chatMem = File(chatDir(), ".agent/memory.md").let { if (it.isFile) it.readText() else "" }
-        val globalMem = File(globalMemoryDir, "global.md").let { if (it.isFile) it.readText() else "" }
-        val volatile = buildString {
-            append(systemInfo(bridgeEnabled))
-            append("\nContext window: $contextWindow tokens, ~$used used ($pct%). When it fills up, fold old ")
+        // Everything that changes from message to message (time, battery, context use, reminders)
+        // travels in the turn's own <turn_context> instead; see turnContext().
+        val settled = buildString {
+            append(stable)
+            append("\n\nEvery user message ends with a <turn_context> block: live data from the app (time, ")
+            append("battery, network, context use, reminders). The user did not write it; trust it and do not ")
+            append("quote it back. The context window is $contextWindow tokens; when it fills up, fold old ")
             append("messages with context_compress or drop old tool output with context_drop.")
             append(userProfilePromptRule(_ui.value.nickname))
-            if (globalMem.isNotBlank() || chatMem.isNotBlank()) append(MEMORY_PRECEDENCE)
-            if (globalMem.isNotBlank()) {
-                append("\n\n<shared_memory>\n").append(globalMem.trim()).append("\n</shared_memory>")
-            }
-            if (chatMem.isNotBlank()) append("\n\n<chat_memory>\n").append(chatMem.trim()).append("\n</chat_memory>")
             val secretInfo = secretStore.info()
             if (secretInfo.isNotEmpty()) {
                 append("\n\n<secrets_available>\n")
@@ -1454,10 +1479,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 append(secretInfo.joinToString("; "))
                 append("\n</secrets_available>")
             }
+        }
+        val chat = current
+        chat.frozenPrompt?.let { if (chat.frozenKey == settled) return it }
+        val chatMem = File(chatDir(), ".agent/memory.md").let { if (it.isFile) it.readText() else "" }
+        val globalMem = File(globalMemoryDir, "global.md").let { if (it.isFile) it.readText() else "" }
+        val prompt = buildString {
+            append(settled)
+            if (globalMem.isNotBlank() || chatMem.isNotBlank()) append(MEMORY_PRECEDENCE)
+            if (globalMem.isNotBlank()) {
+                append("\n\n<shared_memory>\n").append(globalMem.trim()).append("\n</shared_memory>")
+            }
+            if (chatMem.isNotBlank()) append("\n\n<chat_memory>\n").append(chatMem.trim()).append("\n</chat_memory>")
+        }
+        chat.frozenKey = settled
+        chat.frozenPrompt = prompt
+        return prompt
+    }
+
+    /**
+     * Live data for this turn, appended to the user's message: at the end of the request it does not
+     * disturb the cached prefix the way it did inside the system prompt.
+     */
+    private fun turnContext(bridgeEnabled: Boolean, contextWindow: Int): String {
+        val used = session.tokenEstimate()
+        val pct = if (contextWindow > 0) used * 100 / contextWindow else 0
+        return buildString {
+            append("\n\n<turn_context>\n")
+            append(systemInfo(bridgeEnabled))
+            append("\nContext used: ~$used of $contextWindow tokens ($pct%).")
             append(remindersContext())
             append(reactionsContext())
+            append("\n</turn_context>")
         }
-        return stable + "\n\n" + volatile
     }
 
     fun send(text: String) {
@@ -1548,7 +1602,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 AgentService.start(app, tr(R.string.status_processing, label))
                 serviceStarted = true
-                agent.run(agentTask, parts).collect { ev -> onEvent(ev) }
+                agent.run(agentTask + turnContext(bridge.enabled, ctxWindow), parts).collect { ev -> onEvent(ev) }
             } catch (error: CancellationException) {
                 cancelled = true
                 throw error

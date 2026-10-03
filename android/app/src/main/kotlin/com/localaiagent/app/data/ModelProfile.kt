@@ -63,3 +63,24 @@ fun modelsFromJson(raw: String?): List<ModelProfile> {
         ModelProfile(id, s("title"), s("model"), s("baseUrl"), s("apiKey"), caps, ctxWin)
     }
 }
+
+/**
+ * A context window typed by the user: "128K", "1M", "200 000" or "200000". Null when it is not a
+ * size; too small or absurd values are refused too.
+ */
+fun parseContextWindow(input: String): Int? {
+    val t = input.trim().replace(" ", "").replace("_", "").replace(",", ".").uppercase()
+    if (t.isEmpty()) return null
+    val mult = when (t.last()) { 'K' -> 1_000.0; 'M' -> 1_000_000.0; else -> 1.0 }
+    val num = (if (mult == 1.0) t else t.dropLast(1)).toDoubleOrNull() ?: return null
+    val v = (num * mult).toLong()
+    return if (v in 1_000..100_000_000) v.toInt() else null
+}
+
+/** A context window as the user reads it: 128K, 1M, 1.5M. */
+fun formatContextWindow(tokens: Int): String = when {
+    tokens >= 1_000_000 && tokens % 1_000_000 == 0 -> "${tokens / 1_000_000}M"
+    tokens >= 1_000_000 -> "%.1fM".format(java.util.Locale.ROOT, tokens / 1_000_000.0)
+    tokens >= 1_000 -> "${tokens / 1_000}K"
+    else -> tokens.toString()
+}

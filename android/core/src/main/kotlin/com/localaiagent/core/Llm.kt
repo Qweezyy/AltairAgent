@@ -16,6 +16,8 @@ interface LlmClient {
         maxTokens: Int? = null,
         /** Text already streamed was thrown away (a retry had to start over); undo [chars] of it. */
         onDiscard: (suspend (chars: Int) -> Unit)? = null,
+        /** The previous step failed (a tool error, failing tests): an adaptive client thinks harder. */
+        escalate: Boolean = false,
     ): AssistantTurn
 
     suspend fun close() {}
@@ -29,4 +31,16 @@ data class LlmConfig(
     val temperature: Double? = 0.3,
     val timeoutMs: Long = 120_000,
     val maxRetries: Int = 5,
+    /** adaptive | low | medium | high | provider (send nothing). */
+    val reasoningEffort: String = "adaptive",
+    /** A healthy stream is never cut by its length: only by silence or a missing first byte. */
+    val connectTimeoutMs: Long = 15_000,
+    val silenceTimeoutMs: Long = 60_000,
+    val firstByteTimeoutMs: Long = 90_000,
+    /** A first byte slower than this, twice in a row, makes the provider "sick" for a while. */
+    val slowFirstByteMs: Long = 40_000,
+    /** Models (each with its own provider and key) that take the steps while this one is sick. */
+    val fallbacks: List<LlmConfig> = emptyList(),
+    /** Pauses between attempts grow 2/4/8 s plus jitter; scaled down in tests. */
+    val retryDelayScale: Double = 1.0,
 )
