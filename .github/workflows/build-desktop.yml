@@ -69,6 +69,7 @@ jobs:
             for t in tests/test_android_tools.py::test_android_diagnose_reports_missing_sdk \
                      tests/test_background.py::test_quick_command_finishes \
                      tests/test_background.py::test_watch_background_completion_notifies \
+                     tests/test_background.py::test_watch_background_completion_fires \
                      tests/test_terminal.py::test_pty_echo_roundtrip \
                      tests/test_terminal.py::test_pty_resize_does_not_crash \
                      tests/test_terminal.py::test_terminal_websocket_roundtrip; do
