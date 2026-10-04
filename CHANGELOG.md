@@ -14,6 +14,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+## [0.2.1] — 2026-10-04
+
+Steadier and cheaper answers: a set reasoning level, honest failures and backup models — and an Android
+app that keeps up with the PC: reliable model calls, video and audio to the model, chats that remember.
+
 ### Added
 - **The reasoning level is set, not left to the provider.** Settings → Agent → Reasoning level:
   Adaptive (default: low, and high for the step right after a failing test or tool error), Low,
@@ -33,14 +38,6 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   outputs now say how to get them back instead of "run the tool again", and one step before old
   outputs are cleared the agent is told to note what it still needs.
 - The answer's footer shows how much of the prompt came from the provider's cache.
-
-### Changed
-- `read_file` numbers lines as `12|text` instead of `    12 | text`: 14% fewer tokens for the most
-  used tool's output, same editing accuracy.
-- Deferred tools load by family: one browser, dev-server, Android or code-quality tool brings its
-  family, so the provider's prompt cache is reset once instead of once per tool.
-
-### Added
 - Android: model calls are as reliable as on the PC — no cut-off of long healthy answers (silence and
   first-byte timeouts instead), gateway error texts and empty or runaway answers retried instead of shown,
   a "Reasoning effort" setting (adaptive by default: cheaper and faster), fallback models that take over
@@ -56,6 +53,28 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   answer selects text, with the app's actions (simpler, translate, quote, board, memory) in the toolbar.
 - Android: top bar as in ChatGPT — history on the left, new chat and ⋮ chat actions on the right; a swipe
   to the right opens the history, which is ordered by each chat's newest message.
+- Android: attach as many photos, videos, audio and files as you like to one message (up to 100, mixed),
+  pick several at once, remove any of them before sending or while editing.
+- Android: a dropped connection no longer restarts the answer — the model picks it up exactly where it
+  stopped, in the same message. If every retry fails, the written part stays, the reason is shown under it,
+  and "Continue the answer" finishes it later. A stream that just ends without the model finishing now
+  counts as a break instead of passing for a complete answer.
+- Android: pinch, pan and double-tap zoom for photos and videos in the full-screen viewer (up to 6x).
+- Android: long user messages fold after about eight lines, with "Show more" / "Show less". The model's
+  answers are always shown in full.
+- Android: answers are set airier, and Settings → Appearance has an "Answer line spacing" slider with a
+  live sample.
+- Android: answer markup understands rules (`---` of any length, `***`, `___`), all six heading levels
+  (with closing hashes), `===` underlined titles, `+` bullets and nested lists; a bare `###` no longer shows
+  as hashes.
+- Android: editing a sent message can remove or replace its photo, video or file before sending it again.
+- Android: Settings → Appearance → Text size (70–200 %) for the whole app.
+
+### Changed
+- `read_file` numbers lines as `12|text` instead of `    12 | text`: 14% fewer tokens for the most
+  used tool's output, same editing accuracy.
+- Deferred tools load by family: one browser, dev-server, Android or code-quality tool brings its
+  family, so the provider's prompt cache is reset once instead of once per tool.
 
 ### Fixed
 - Android: after a restart or switching to an older chat, the model got none of the conversation — only
@@ -114,22 +133,6 @@ _Changes landing on `main` but not yet part of a tagged release go here._
 Everywhere: the desktop app for Windows, Linux and macOS, and the same agent in a terminal.
 
 ### Added
-- Android: attach as many photos, videos, audio and files as you like to one message (up to 100, mixed),
-  pick several at once, remove any of them before sending or while editing.
-- Android: a dropped connection no longer restarts the answer — the model picks it up exactly where it
-  stopped, in the same message. If every retry fails, the written part stays, the reason is shown under it,
-  and "Continue the answer" finishes it later. A stream that just ends without the model finishing now
-  counts as a break instead of passing for a complete answer.
-- Android: pinch, pan and double-tap zoom for photos and videos in the full-screen viewer (up to 6x).
-- Android: long user messages fold after about eight lines, with "Show more" / "Show less". The model's
-  answers are always shown in full.
-- Android: answers are set airier, and Settings → Appearance has an "Answer line spacing" slider with a
-  live sample.
-- Android: answer markup understands rules (`---` of any length, `***`, `___`), all six heading levels
-  (with closing hashes), `===` underlined titles, `+` bullets and nested lists; a bare `###` no longer shows
-  as hashes.
-- Android: editing a sent message can remove or replace its photo, video or file before sending it again.
-- Android: Settings → Appearance → Text size (70–200 %) for the whole app.
 - **A premium look.** Larger type and controls, surfaces set like plates in a tray, thin icons,
   text optically centred in every control, spring motion, and the accent used on purpose: primary
   actions, focus, the selected chat and settings section, what is running. Nothing blurs over the
@@ -373,7 +376,8 @@ The first public, **early-stage** release. Expect rough edges — see the discla
 - Auto-update is off until an update feed is published.
 - Python on PATH is needed for the agent's own code checks (tests/linters) in your projects.
 
-[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Qweezyy/AltairAgent/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Qweezyy/AltairAgent/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Qweezyy/AltairAgent/compare/v0.1.1...v0.1.2
