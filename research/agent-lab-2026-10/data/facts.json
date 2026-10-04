@@ -1,0 +1,539 @@
+{
+ "a1_reasoning_openrouter_wave2": {
+  "base": {
+   "runs": 7,
+   "passed": 6,
+   "usd_per_run": 0.01258,
+   "minutes_per_run": 4.08,
+   "steps_per_run": 8.7,
+   "input_tokens_per_run": 96550,
+   "output_tokens_per_run": 13510,
+   "reasoning_tokens_per_run": 9743,
+   "cache_share": 0.747,
+   "runs_with_loops": 1
+  },
+  "combo": {
+   "runs": 6,
+   "passed": 4,
+   "usd_per_run": 0.00435,
+   "minutes_per_run": 3.85,
+   "steps_per_run": 5.5,
+   "input_tokens_per_run": 38694,
+   "output_tokens_per_run": 4680,
+   "reasoning_tokens_per_run": 3044,
+   "cache_share": 0.786,
+   "runs_with_loops": 2
+  },
+  "eff_high": {
+   "runs": 12,
+   "passed": 12,
+   "usd_per_run": 0.00642,
+   "minutes_per_run": 1.46,
+   "steps_per_run": 7.9,
+   "input_tokens_per_run": 69255,
+   "output_tokens_per_run": 4805,
+   "reasoning_tokens_per_run": 2644,
+   "cache_share": 0.636,
+   "runs_with_loops": 0
+  },
+  "eff_low": {
+   "runs": 12,
+   "passed": 12,
+   "usd_per_run": 0.00422,
+   "minutes_per_run": 0.55,
+   "steps_per_run": 7.7,
+   "input_tokens_per_run": 63694,
+   "output_tokens_per_run": 1716,
+   "reasoning_tokens_per_run": 235,
+   "cache_share": 0.779,
+   "runs_with_loops": 0
+  },
+  "eff_medium": {
+   "runs": 12,
+   "passed": 10,
+   "usd_per_run": 0.0048,
+   "minutes_per_run": 0.64,
+   "steps_per_run": 7.2,
+   "input_tokens_per_run": 59873,
+   "output_tokens_per_run": 2542,
+   "reasoning_tokens_per_run": 966,
+   "cache_share": 0.735,
+   "runs_with_loops": 0
+  },
+  "en": {
+   "runs": 6,
+   "passed": 5,
+   "usd_per_run": 0.00981,
+   "minutes_per_run": 4.16,
+   "steps_per_run": 6.7,
+   "input_tokens_per_run": 56490,
+   "output_tokens_per_run": 13185,
+   "reasoning_tokens_per_run": 11218,
+   "cache_share": 0.775,
+   "runs_with_loops": 1
+  },
+  "finish": {
+   "runs": 8,
+   "passed": 7,
+   "usd_per_run": 0.00964,
+   "minutes_per_run": 3.62,
+   "steps_per_run": 6.4,
+   "input_tokens_per_run": 53048,
+   "output_tokens_per_run": 12467,
+   "reasoning_tokens_per_run": 10136,
+   "cache_share": 0.59,
+   "runs_with_loops": 1
+  },
+  "lean": {
+   "runs": 10,
+   "passed": 9,
+   "usd_per_run": 0.00649,
+   "minutes_per_run": 2.55,
+   "steps_per_run": 6.1,
+   "input_tokens_per_run": 33716,
+   "output_tokens_per_run": 7203,
+   "reasoning_tokens_per_run": 5580,
+   "cache_share": 0.494,
+   "runs_with_loops": 1
+  },
+  "nonum": {
+   "runs": 5,
+   "passed": 4,
+   "usd_per_run": 0.01092,
+   "minutes_per_run": 5.63,
+   "steps_per_run": 8.4,
+   "input_tokens_per_run": 86685,
+   "output_tokens_per_run": 13466,
+   "reasoning_tokens_per_run": 11014,
+   "cache_share": 0.848,
+   "runs_with_loops": 1
+  },
+  "noskills": {
+   "runs": 5,
+   "passed": 4,
+   "usd_per_run": 0.01331,
+   "minutes_per_run": 5.55,
+   "steps_per_run": 6.6,
+   "input_tokens_per_run": 55476,
+   "output_tokens_per_run": 18172,
+   "reasoning_tokens_per_run": 15030,
+   "cache_share": 0.586,
+   "runs_with_loops": 0
+  },
+  "numfmt": {
+   "runs": 6,
+   "passed": 5,
+   "usd_per_run": 0.01222,
+   "minutes_per_run": 4.62,
+   "steps_per_run": 7.8,
+   "input_tokens_per_run": 70894,
+   "output_tokens_per_run": 16220,
+   "reasoning_tokens_per_run": 13690,
+   "cache_share": 0.767,
+   "runs_with_loops": 0
+  },
+  "parallel": {
+   "runs": 6,
+   "passed": 6,
+   "usd_per_run": 0.01521,
+   "minutes_per_run": 4.06,
+   "steps_per_run": 8,
+   "input_tokens_per_run": 75905,
+   "output_tokens_per_run": 20540,
+   "reasoning_tokens_per_run": 16122,
+   "cache_share": 0.64,
+   "runs_with_loops": 0
+  },
+  "shorttools": {
+   "runs": 8,
+   "passed": 7,
+   "usd_per_run": 0.0082,
+   "minutes_per_run": 3.6,
+   "steps_per_run": 6.9,
+   "input_tokens_per_run": 53614,
+   "output_tokens_per_run": 10112,
+   "reasoning_tokens_per_run": 7877,
+   "cache_share": 0.723,
+   "runs_with_loops": 1
+  }
+ },
+ "a1_adaptive_openrouter_wave3": {
+  "eff_high": {
+   "runs": 18,
+   "passed": 17,
+   "usd_per_run": 0.00572,
+   "minutes_per_run": 1.92,
+   "steps_per_run": 8.9,
+   "input_tokens_per_run": 82262,
+   "output_tokens_per_run": 4703,
+   "reasoning_tokens_per_run": 2608,
+   "cache_share": 0.646,
+   "runs_with_loops": 0
+  },
+  "eff_low": {
+   "runs": 18,
+   "passed": 16,
+   "usd_per_run": 0.00378,
+   "minutes_per_run": 0.96,
+   "steps_per_run": 8.3,
+   "input_tokens_per_run": 72523,
+   "output_tokens_per_run": 1851,
+   "reasoning_tokens_per_run": 584,
+   "cache_share": 0.685,
+   "runs_with_loops": 0
+  },
+  "escalate": {
+   "runs": 18,
+   "passed": 17,
+   "usd_per_run": 0.00365,
+   "minutes_per_run": 0.84,
+   "steps_per_run": 7.6,
+   "input_tokens_per_run": 63820,
+   "output_tokens_per_run": 1904,
+   "reasoning_tokens_per_run": 515,
+   "cache_share": 0.641,
+   "runs_with_loops": 0
+  },
+  "plan_high": {
+   "runs": 18,
+   "passed": 15,
+   "usd_per_run": 0.00437,
+   "minutes_per_run": 1.93,
+   "steps_per_run": 6.9,
+   "input_tokens_per_run": 58373,
+   "output_tokens_per_run": 4531,
+   "reasoning_tokens_per_run": 2703,
+   "cache_share": 0.615,
+   "runs_with_loops": 0
+  }
+ },
+ "a1_long_tasks": {
+  "base": {
+   "runs": 9,
+   "passed": 9,
+   "usd_per_run": 0.028,
+   "minutes_per_run": 5.19,
+   "steps_per_run": 19.1,
+   "input_tokens_per_run": 416395,
+   "output_tokens_per_run": 19254,
+   "reasoning_tokens_per_run": 15054,
+   "cache_share": 0.752,
+   "runs_with_loops": 0
+  },
+  "eff_low": {
+   "runs": 9,
+   "passed": 9,
+   "usd_per_run": 0.01342,
+   "minutes_per_run": 1.15,
+   "steps_per_run": 16.2,
+   "input_tokens_per_run": 270717,
+   "output_tokens_per_run": 1999,
+   "reasoning_tokens_per_run": 560,
+   "cache_share": 0.784,
+   "runs_with_loops": 0
+  },
+  "eff_medium": {
+   "runs": 9,
+   "passed": 9,
+   "usd_per_run": 0.01101,
+   "minutes_per_run": 1.14,
+   "steps_per_run": 14.6,
+   "input_tokens_per_run": 224817,
+   "output_tokens_per_run": 2218,
+   "reasoning_tokens_per_run": 544,
+   "cache_share": 0.769,
+   "runs_with_loops": 0
+  }
+ },
+ "a1_gateyourway_before": {
+  "base": {
+   "runs": 12,
+   "passed": 12,
+   "usd_per_run": 0.01401,
+   "minutes_per_run": 2.81,
+   "steps_per_run": 12.3,
+   "input_tokens_per_run": 223131,
+   "output_tokens_per_run": 9081,
+   "reasoning_tokens_per_run": 541,
+   "cache_share": 0.896,
+   "runs_with_loops": 0
+  },
+  "lowthink": {
+   "runs": 12,
+   "passed": 12,
+   "usd_per_run": 0.00592,
+   "minutes_per_run": 1.86,
+   "steps_per_run": 10.5,
+   "input_tokens_per_run": 96924,
+   "output_tokens_per_run": 2382,
+   "reasoning_tokens_per_run": 129,
+   "cache_share": 0.843,
+   "runs_with_loops": 0
+  }
+ },
+ "a1_gateyourway_after_shipping": {
+  "base": {
+   "runs": 12,
+   "passed": 12,
+   "usd_per_run": 0.01081,
+   "minutes_per_run": 3.94,
+   "steps_per_run": 12.8,
+   "input_tokens_per_run": 127860,
+   "output_tokens_per_run": 4099,
+   "reasoning_tokens_per_run": 385,
+   "cache_share": 0.679,
+   "runs_with_loops": 0
+  }
+ },
+ "a3_prompt_ablations_low": {
+  "base+low": {
+   "runs": 18,
+   "passed": 15,
+   "usd_per_run": 0.00356,
+   "minutes_per_run": 1.83,
+   "steps_per_run": 7.9,
+   "input_tokens_per_run": 66945,
+   "output_tokens_per_run": 1757,
+   "reasoning_tokens_per_run": 686,
+   "cache_share": 0.749,
+   "runs_with_loops": 0
+  },
+  "combo+low": {
+   "runs": 18,
+   "passed": 16,
+   "usd_per_run": 0.00467,
+   "minutes_per_run": 0.69,
+   "steps_per_run": 7.8,
+   "input_tokens_per_run": 62179,
+   "output_tokens_per_run": 1768,
+   "reasoning_tokens_per_run": 485,
+   "cache_share": 0.64,
+   "runs_with_loops": 0
+  },
+  "en+low": {
+   "runs": 18,
+   "passed": 16,
+   "usd_per_run": 0.00489,
+   "minutes_per_run": 0.84,
+   "steps_per_run": 8.4,
+   "input_tokens_per_run": 76248,
+   "output_tokens_per_run": 2027,
+   "reasoning_tokens_per_run": 575,
+   "cache_share": 0.749,
+   "runs_with_loops": 0
+  },
+  "lean+low": {
+   "runs": 18,
+   "passed": 15,
+   "usd_per_run": 0.00649,
+   "minutes_per_run": 0.85,
+   "steps_per_run": 12.4,
+   "input_tokens_per_run": 128902,
+   "output_tokens_per_run": 2219,
+   "reasoning_tokens_per_run": 600,
+   "cache_share": 0.878,
+   "runs_with_loops": 0
+  },
+  "nonum+low": {
+   "runs": 18,
+   "passed": 16,
+   "usd_per_run": 0.00572,
+   "minutes_per_run": 0.81,
+   "steps_per_run": 9.3,
+   "input_tokens_per_run": 83559,
+   "output_tokens_per_run": 2124,
+   "reasoning_tokens_per_run": 754,
+   "cache_share": 0.734,
+   "runs_with_loops": 0
+  },
+  "noskills+low": {
+   "runs": 18,
+   "passed": 17,
+   "usd_per_run": 0.00464,
+   "minutes_per_run": 0.7,
+   "steps_per_run": 8.2,
+   "input_tokens_per_run": 69098,
+   "output_tokens_per_run": 1783,
+   "reasoning_tokens_per_run": 451,
+   "cache_share": 0.711,
+   "runs_with_loops": 0
+  },
+  "numfmt+low": {
+   "runs": 18,
+   "passed": 16,
+   "usd_per_run": 0.00471,
+   "minutes_per_run": 1.54,
+   "steps_per_run": 8.3,
+   "input_tokens_per_run": 71964,
+   "output_tokens_per_run": 1996,
+   "reasoning_tokens_per_run": 624,
+   "cache_share": 0.734,
+   "runs_with_loops": 0
+  },
+  "parallel+low": {
+   "runs": 18,
+   "passed": 17,
+   "usd_per_run": 0.00495,
+   "minutes_per_run": 0.82,
+   "steps_per_run": 7.9,
+   "input_tokens_per_run": 68514,
+   "output_tokens_per_run": 1994,
+   "reasoning_tokens_per_run": 533,
+   "cache_share": 0.648,
+   "runs_with_loops": 0
+  },
+  "shorttools+low": {
+   "runs": 18,
+   "passed": 15,
+   "usd_per_run": 0.00596,
+   "minutes_per_run": 1.56,
+   "steps_per_run": 10.4,
+   "input_tokens_per_run": 136204,
+   "output_tokens_per_run": 3975,
+   "reasoning_tokens_per_run": 2647,
+   "cache_share": 0.827,
+   "runs_with_loops": 0
+  }
+ },
+ "a2_reviewer": {
+  "verify_low": {
+   "runs": 21,
+   "passed_before": 20,
+   "passed_after": 20,
+   "flagged": 4,
+   "false_alarms": 3,
+   "missed": 0,
+   "usd_per_run": 0.00551
+  },
+  "verify_high": {
+   "runs": 18,
+   "passed_before": 15,
+   "passed_after": 16,
+   "flagged": 5,
+   "false_alarms": 4,
+   "missed": 1,
+   "usd_per_run": 0.01279
+  },
+  "agent_alone_low": {
+   "runs": 18,
+   "passed": 16,
+   "usd_per_run": 0.00378,
+   "minutes_per_run": 0.96,
+   "steps_per_run": 8.3,
+   "input_tokens_per_run": 72523,
+   "output_tokens_per_run": 1851,
+   "reasoning_tokens_per_run": 584,
+   "cache_share": 0.685,
+   "runs_with_loops": 0
+  }
+ },
+ "a1_loops_by_task_default": {
+  "h_bizdays": 0,
+  "h_cache": 1,
+  "h_conf": 0,
+  "h_logs": 0,
+  "h_rename": 0,
+  "h_tokens": 7
+ },
+ "a2_wave1": {
+  "runs": 46,
+  "false_done": 7,
+  "by_reason": {
+   "gateway_text": 6,
+   "empty_stream": 1
+  },
+  "model_failures": 0
+ },
+ "a2_wave2_loop_cut_as_done": {
+  "runs_cut": 8,
+  "of_runs_without_level": 67
+ },
+ "a3_masking": {
+  "V0 no masking": {
+   "correct": 15,
+   "tool": 1,
+   "tool:grep_search": 1
+  },
+  "V1 ours (run again)": {
+   "tool": 15,
+   "tool:read_file": 5,
+   "tool:grep_search": 10,
+   "wrong": 1
+  },
+  "V2 gist (first lines)": {
+   "tool": 12,
+   "tool:grep_search": 10,
+   "wrong": 4,
+   "tool:read_file": 2
+  },
+  "V3 restore tool": {
+   "tool": 16,
+   "tool:tool_output": 15,
+   "tool:read_file": 1
+  },
+  "V4 notes then mask": {
+   "correct": 10,
+   "tool": 6,
+   "tool:grep_search": 6
+  }
+ },
+ "a3_masking_wrong_were_gateway": true,
+ "a3_recall_budget": {
+  "base": {
+   "runs": 3,
+   "passed": 3,
+   "usd_per_run": 0.03062,
+   "minutes_per_run": 2.54,
+   "steps_per_run": 20.7,
+   "input_tokens_per_run": 678973,
+   "output_tokens_per_run": 4595,
+   "reasoning_tokens_per_run": 2434,
+   "cache_share": 0.902,
+   "runs_with_loops": 0
+  },
+  "tight": {
+   "runs": 3,
+   "passed": 3,
+   "usd_per_run": 0.05857,
+   "minutes_per_run": 4.87,
+   "steps_per_run": 28.3,
+   "input_tokens_per_run": 652877,
+   "output_tokens_per_run": 9898,
+   "reasoning_tokens_per_run": 6837,
+   "cache_share": 0.566,
+   "runs_with_loops": 0
+  }
+ },
+ "a3_alltools_vs_deferred": {
+  "base": {
+   "runs": 8,
+   "passed": 8,
+   "usd_per_run": 0.00615,
+   "minutes_per_run": 0.77,
+   "steps_per_run": 6.6,
+   "input_tokens_per_run": 61715,
+   "output_tokens_per_run": 654,
+   "reasoning_tokens_per_run": 26,
+   "cache_share": 0.464,
+   "runs_with_loops": 0
+  },
+  "alltools": {
+   "runs": 10,
+   "passed": 10,
+   "usd_per_run": 0.01095,
+   "minutes_per_run": 1.54,
+   "steps_per_run": 7.2,
+   "input_tokens_per_run": 162652,
+   "output_tokens_per_run": 1578,
+   "reasoning_tokens_per_run": 745,
+   "cache_share": 0.73,
+   "runs_with_loops": 0
+  }
+ },
+ "a2_soak": {
+  "requests": 297,
+  "succeeded": 297,
+  "needed_retry": 4,
+  "hours": 6.0
+ }
+}

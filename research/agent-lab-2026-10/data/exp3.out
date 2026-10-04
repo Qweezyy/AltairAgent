@@ -1,0 +1,6 @@
+V4 note cost: {'in': 21651, 'out': 1500, 'cached': 0, 'reasoning': 0, 'cost': None}
+V0 no masking            correct 15/16  tool  1  wrong  0  in-tokens/q  25745  tools used: {'grep_search': 1}
+V1 ours (run again)      correct  0/16  tool 15  wrong  1  in-tokens/q  10088  tools used: {'read_file': 5, 'grep_search': 10}
+V2 gist (first lines)    correct  0/16  tool 12  wrong  4  in-tokens/q   9619  tools used: {'grep_search': 10, 'read_file': 2}
+V3 restore tool          correct  0/16  tool 16  wrong  0  in-tokens/q   9801  tools used: {'tool_output': 15, 'read_file': 1}
+V4 notes then mask       correct 10/16  tool  6  wrong  0  in-tokens/q  11211  tools used: {'grep_search': 6}

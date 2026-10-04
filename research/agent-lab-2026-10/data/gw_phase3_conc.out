@@ -1,0 +1,28 @@
+round 0 no_limit  True 4s ['ok'] | True 3s ['ok'] | True 4s ['ok']
+round 0 limit_2   True 4s ['ok'] | True 6s ['ok'] | True 7s ['ok']
+round 1 no_limit  True 2s ['ok'] | True 2s ['ok'] | True 4s ['ok']
+round 1 limit_2   True 2s ['ok'] | True 2s ['ok'] | True 5s ['ok']
+round 2 no_limit  True 4s ['ok'] | True 3s ['ok'] | True 6s ['ok']
+round 2 limit_2   True 4s ['ok'] | True 4s ['ok'] | True 6s ['ok']
+round 3 no_limit  True 3s ['ok'] | True 4s ['ok'] | True 3s ['ok']
+round 3 limit_2   True 3s ['ok'] | True 2s ['ok'] | True 4s ['ok']
+round 4 no_limit  True 3s ['ok'] | True 6s ['ok'] | True 4s ['ok']
+round 4 limit_2   True 3s ['ok'] | True 3s ['ok'] | True 6s ['ok']
+round 5 no_limit  True 7s ['ok'] | True 4s ['ok'] | True 13s ['ok']
+round 5 limit_2   True 251s ['timeout', 'timeout', 'ok'] | True 101s ['ok'] | True 104s ['ok']
+round 6 no_limit  True 3s ['ok'] | True 4s ['ok'] | True 4s ['ok']
+round 6 limit_2   True 2s ['ok'] | True 8s ['ok'] | True 6s ['ok']
+round 7 no_limit  True 4s ['ok'] | True 4s ['ok'] | True 24s ['ok']
+round 7 limit_2   True 19s ['ok'] | True 3s ['ok'] | True 8s ['ok']
+round 8 no_limit  True 3s ['ok'] | True 14s ['ok'] | True 29s ['ok']
+round 8 limit_2   True 3s ['ok'] | True 2s ['ok'] | True 7s ['ok']
+round 9 no_limit  True 3s ['ok'] | True 2s ['ok'] | True 3s ['ok']
+round 9 limit_2   True 191s ['timeout', 'disguised', 'ok'] | True 2s ['ok'] | True 8s ['ok']
+round 10 no_limit  True 31s ['ok'] | True 42s ['ok'] | True 4s ['ok']
+round 10 limit_2   True 46s ['ok'] | True 4s ['ok'] | True 13s ['ok']
+round 11 no_limit  True 5s ['ok'] | True 4s ['ok'] | True 3s ['ok']
+round 11 limit_2   True 13s ['ok'] | True 2s ['ok'] | True 15s ['ok']
+
+=== summary
+no_limit   success  36/36  time p50   3.8s p90  24.4s max    42s  attempts avg 1.00  failed attempts {}
+limit_2    success  36/36  time p50   5.5s p90 101.1s max   251s  attempts avg 1.11  failed attempts {'timeout': 3, 'disguised': 1}

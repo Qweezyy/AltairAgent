@@ -1,0 +1,55 @@
+{
+ "V0 no masking": {
+  "correct": 15,
+  "tool": 1,
+  "tool:grep_search": 1
+ },
+ "V1 ours (run again)": {
+  "tool": 15,
+  "tool:read_file": 5,
+  "tool:grep_search": 10,
+  "wrong": 1
+ },
+ "V2 gist (first lines)": {
+  "tool": 12,
+  "tool:grep_search": 10,
+  "wrong": 4,
+  "tool:read_file": 2
+ },
+ "V3 restore tool": {
+  "tool": 16,
+  "tool:tool_output": 15,
+  "tool:read_file": 1
+ },
+ "V4 notes then mask": {
+  "correct": 10,
+  "tool": 6,
+  "tool:grep_search": 6
+ },
+ "wrong_examples": {
+  "V1 ours (run again)": [
+   [
+    "In core/updater.py, what value of UPDATE_URL turns",
+    "The request could not be completed. Please retry later, or reduce the request parameters/content."
+   ]
+  ],
+  "V2 gist (first lines)": [
+   [
+    "In core/agent/session.py, how many characters per ",
+    "The request could not be completed. Please retry later, or reduce the request parameters/content."
+   ],
+   [
+    "In core/agent/session.py, how many tokens is one i",
+    "The request could not be completed. Please retry later, or reduce the request parameters/content."
+   ],
+   [
+    "In core/agent/session.py, how many tokens is one i",
+    "The request could not be completed. Please retry later, or reduce the request parameters/content."
+   ],
+   [
+    "In core/updater.py, which GitHub repository is the",
+    "The request could not be completed. Please retry later, or reduce the request parameters/content."
+   ]
+  ]
+ }
+}
