@@ -238,7 +238,9 @@ fun ChatScreen(
     onSaveChatMemory: (String) -> Unit = {},
     chatItemsProvider: () -> List<LibraryItem> = { emptyList() },
     searchProvider: (String) -> List<com.localaiagent.app.ChatSearchHit> = { emptyList() },
-    onEditMessage: (Int, String, com.localaiagent.app.ChatViewModel.AttachEdit?) -> Unit = { _, _, _ -> },
+    onStartEdit: (Int) -> Unit = {},
+    onCancelEdit: () -> Unit = {},
+    onSubmitEdit: (String) -> Unit = {},
     onRegenerate: (Int) -> Unit = {},
     onContinueAnswer: () -> Unit = {},
     onRevert: (Int) -> Unit = {},
@@ -289,7 +291,6 @@ fun ChatScreen(
     var searchQuery by remember { mutableStateOf("") }
     // Меню действий над сообщением: индекс сообщения в state.messages.
     var actionFor by remember { mutableStateOf<Int?>(null) }
-    var editingFor by remember { mutableStateOf<Int?>(null) }
     var selectingText by remember { mutableStateOf<String?>(null) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -313,7 +314,10 @@ fun ChatScreen(
                 add(copy)
                 add(MenuEntry(Icons.Rounded.TextFields, context.getString(R.string.act_select_text)) { selectingText = msg.text })
             }
-            add(MenuEntry(Icons.Rounded.Edit, context.getString(R.string.act_edit_message)) { editingFor = index })
+            add(MenuEntry(Icons.Rounded.Edit, context.getString(R.string.act_edit_message)) {
+                // Into the composer, as in ChatGPT: the text goes to the input, the message steps aside.
+                if (!state.running) { prefill = msg.text; onStartEdit(index) }
+            })
             // A message left without an answer (it was stopped) can be answered anew.
             if (com.localaiagent.app.canRegenerateUserMessage(state.messages, index)) {
                 add(MenuEntry(Icons.Rounded.Refresh, context.getString(R.string.act_regenerate)) { onRegenerate(index) })
@@ -402,10 +406,14 @@ fun ChatScreen(
                 val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
                 val topClear = topInset + 56.dp
                 // #4: поиск по текущему чату — фильтруем сообщения (кэшируем, чтобы не гонять filter каждую рекомпозицию).
-                val displayed = remember(state.messages, searching, searchQuery) {
-                    if (searching && searchQuery.isNotBlank())
-                        state.messages.filter { it.text.contains(searchQuery, ignoreCase = true) }
-                    else state.messages
+                val displayed = remember(state.messages, searching, searchQuery, state.editing) {
+                    when {
+                        // While a message is edited, it and the answers after it step aside.
+                        state.editing != null -> state.messages.take(state.editing)
+                        searching && searchQuery.isNotBlank() ->
+                            state.messages.filter { it.text.contains(searchQuery, ignoreCase = true) }
+                        else -> state.messages
+                    }
                 }
                 // Following the answer, as in ChatGPT: while the reader is at the bottom the feed keeps
                 // the growing answer in view; the moment they touch the list it lets go and the text
@@ -574,7 +582,7 @@ fun ChatScreen(
                     caps = state.activeCaps,
                     contextTokens = state.contextTokens,
                     contextWindow = state.models.firstOrNull { it.id == state.activeModelId }?.contextWindow ?: 128_000,
-                    onSend = onSend,
+                    onSend = { text -> if (state.editing != null) onSubmitEdit(text) else onSend(text) },
                     onClearAttachment = onClearAttachment,
                     onCamera = onAttachCamera,
                     onPickImage = onPickImageUri,
@@ -591,6 +599,16 @@ fun ChatScreen(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (state.editing != null) {
+                    FloatIcon(Icons.Rounded.Close, stringResource(R.string.edit_cancel)) { prefill = ""; onCancelEdit() }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        stringResource(R.string.edit_message_title), style = MaterialTheme.typography.titleMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    return@Row
+                }
                 FloatIcon(Icons.Rounded.Menu, stringResource(R.string.menu)) { scope.launch { drawerState.open() } }
                 if (PcBridgeFacade.SUPPORTED && state.pcUrl.isNotBlank()) {
                     Spacer(Modifier.width(6.dp))
@@ -689,16 +707,8 @@ fun ChatScreen(
         )
     }
 
-    editingFor?.let { idx ->
-        val msg = state.messages.getOrNull(idx)
-        if (msg == null) { editingFor = null; return@let }
-        EditMessageDialog(
-            initial = msg.text,
-            attachments = msg.userAttachments,
-            onConfirm = { newText, edit -> onEditMessage(idx, newText, edit); editingFor = null },
-            onDismiss = { editingFor = null },
-        )
-    }
+    // Back leaves the edit and puts the conversation back as it was.
+    androidx.activity.compose.BackHandler(enabled = state.editing != null) { prefill = ""; onCancelEdit() }
     selectingText?.let { txt ->
         SelectionSheet(
             text = txt,
@@ -2614,6 +2624,8 @@ private fun ModelsSection(
 ) {
     val actions = LocalModelActions.current
     Text(stringResource(R.string.settings_models), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+    // The model whose context window is being changed (an inline field under its row).
+    var ctxEditFor by remember { mutableStateOf<String?>(null) }
     state.models.forEach { m ->
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             RadioButton(selected = m.id == state.activeModelId, onClick = { onSelect(m.id) })
@@ -2622,7 +2634,10 @@ private fun ModelsSection(
                 val capCtx = androidx.compose.ui.platform.LocalContext.current
                 val caps = if (m.caps.isEmpty()) stringResource(R.string.caps_text_only)
                 else m.caps.mapNotNull { CAP_LABEL[it]?.let(capCtx::getString) }.joinToString(", ")
-                Text("${m.model} · ${formatContextWindow(m.contextWindow)} · $caps", style = MaterialTheme.typography.labelSmall,
+                // The provider's host tells apart same-named models from different providers.
+                val host = runCatching { java.net.URI(m.baseUrl).let { u -> u.host + if (u.port > 0) ":" + u.port else "" } }
+                    .getOrNull().orEmpty()
+                Text("${m.model} · $host · ${formatContextWindow(m.contextWindow)} · $caps", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline)
             }
             // Any other model can stand in while the active one is slow or down.
@@ -2633,8 +2648,34 @@ private fun ModelsSection(
                     fb >= 0,
                 ) { actions.toggleFallback(m.id) }
             }
+            IconButton(onClick = { ctxEditFor = if (ctxEditFor == m.id) null else m.id }) {
+                Icon(Icons.Rounded.Edit, stringResource(R.string.model_edit_ctx), Modifier.size(20.dp))
+            }
             if (state.models.size > 1) {
                 IconButton(onClick = { onDelete(m.id) }) { Icon(Icons.Rounded.Close, stringResource(R.string.action_delete)) }
+            }
+        }
+        if (ctxEditFor == m.id) {
+            // Every chat takes the new window on its next answer: it is read from the model each run.
+            var ctx by remember(m.id) { mutableStateOf(formatContextWindow(m.contextWindow)) }
+            val tokens = parseContextWindow(ctx)
+            Row(
+                Modifier.fillMaxWidth().padding(start = 48.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    ctx, { ctx = it }, Modifier.weight(1f), singleLine = true, isError = tokens == null,
+                    label = { Text(stringResource(R.string.model_context_window)) },
+                )
+                Button(
+                    onClick = {
+                        // Saved in place: the active model stays active.
+                        tokens?.let { actions.saveModel(m.copy(contextWindow = it)) }
+                        ctxEditFor = null
+                    },
+                    enabled = tokens != null,
+                ) { Text(stringResource(R.string.action_save)) }
             }
         }
     }
@@ -2654,7 +2695,7 @@ private fun ModelsSection(
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.model_title)) }, singleLine = true)
             OutlinedTextField(model, { model = it }, label = { Text(stringResource(R.string.model_id)) }, singleLine = true)
-            OutlinedTextField(url, { url = it }, label = { Text("Endpoint") },
+            OutlinedTextField(url, { url = it }, label = { Text(stringResource(R.string.model_endpoint)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), singleLine = true)
             OutlinedTextField(key, { key = it }, label = { Text(stringResource(R.string.api_key)) },
                 visualTransformation = PasswordVisualTransformation(), singleLine = true)
@@ -2715,7 +2756,12 @@ private fun ModelsSection(
 }
 
 /** Model-screen actions that do not belong in ChatScreen's long parameter list. */
-class ModelActions(val toggleFallback: (String) -> Unit = {}, val setEffort: (String) -> Unit = {})
+class ModelActions(
+    val toggleFallback: (String) -> Unit = {},
+    val setEffort: (String) -> Unit = {},
+    /** Updates a saved model in place, without making it the active one. */
+    val saveModel: (ModelProfile) -> Unit = {},
+)
 
 val LocalModelActions = androidx.compose.runtime.staticCompositionLocalOf { ModelActions() }
 

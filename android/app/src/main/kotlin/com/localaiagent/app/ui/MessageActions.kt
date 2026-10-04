@@ -65,68 +65,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.localaiagent.app.ChatMessage
 import java.util.Locale
 
-/** Диалог правки своего сообщения. */
-/**
- * Editing a sent message: the text and its attachments. Any of them can be removed and more can be
- * added; the message is then sent again with what is shown here.
- */
-@Composable
-fun EditMessageDialog(
-    initial: String,
-    attachments: List<com.localaiagent.app.LibraryItem> = emptyList(),
-    onConfirm: (String, com.localaiagent.app.ChatViewModel.AttachEdit?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var value by remember { mutableStateOf(TextFieldValue(initial)) }
-    var keep by remember { mutableStateOf(attachments) }
-    var added by remember { mutableStateOf(listOf<android.net.Uri>()) }
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris -> added = (added + uris).distinct().take(com.localaiagent.app.MAX_ATTACHMENTS - keep.size) }
-    fun kindOf(uri: android.net.Uri): String {
-        val mime = ctx.contentResolver.getType(uri).orEmpty()
-        return when { mime.startsWith("image/") -> "image"; mime.startsWith("video/") -> "video"; mime.startsWith("audio/") -> "audio"; else -> "file" }
-    }
-    val total = keep.size + added.size
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.edit_title)) },
-        text = {
-            Column {
-                if (total > 0) {
-                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-                        items(keep.size) { i ->
-                            val a = keep[i]
-                            ComposerAttachment(a.path, a.name, a.kind, onOpen = {}, onRemove = { keep = keep.toMutableList().apply { removeAt(i) } })
-                        }
-                        items(added.size) { i ->
-                            val u = added[i]
-                            ComposerAttachment(u.toString(), u.lastPathSegment?.substringAfterLast('/') ?: "file", kindOf(u),
-                                onOpen = {}, onRemove = { added = added.toMutableList().apply { removeAt(i) } })
-                        }
-                    }
-                    Spacer(Modifier.size(6.dp))
-                }
-                if (total < com.localaiagent.app.MAX_ATTACHMENTS) {
-                    TextButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text(stringResource(R.string.attach_add)) }
-                }
-                OutlinedTextField(
-                    value = value, onValueChange = { value = it },
-                    modifier = Modifier.fillMaxWidth(), minLines = 2,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (value.text.isNotBlank() || total > 0) {
-                    onConfirm(value.text.trim(), com.localaiagent.app.ChatViewModel.AttachEdit(keep, added))
-                }
-            }) { Text(stringResource(R.string.edit_redo)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
-    )
-}
 
 /**
  * Лист выделения текста: показываем сообщение в нативном TextView с текстовым

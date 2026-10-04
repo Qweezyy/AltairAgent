@@ -196,7 +196,16 @@ private fun AlertBlock(node: MdNode.Alert, color: Color, spacing: Float) {
         Box(Modifier.width(3.dp).heightIn(min = 40.dp).background(accent))
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(
-                node.kind.lowercase().replaceFirstChar { it.uppercase() }, color = accent,
+                stringResource(
+                    when (node.kind) {
+                        "TIP" -> R.string.md_alert_tip
+                        "IMPORTANT" -> R.string.md_alert_important
+                        "WARNING" -> R.string.md_alert_warning
+                        "CAUTION" -> R.string.md_alert_caution
+                        else -> R.string.md_alert_note
+                    },
+                ),
+                color = accent,
                 fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge,
             )
             Text(node.text, color = color, style = MaterialTheme.typography.bodyMedium.spaced(spacing))
@@ -213,7 +222,7 @@ private fun DetailsBlock(node: MdNode.Details, color: Color, spacing: Float) {
             .border(1.dp, color.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
     ) {
         Text(
-            (if (open) "▾  " else "▸  ") + node.summary,
+            (if (open) "▾  " else "▸  ") + node.summary.ifBlank { stringResource(R.string.md_details) },
             color = color, fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.bodyLarge.spaced(spacing),
             modifier = Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -292,7 +301,7 @@ private fun CodeBlock(code: String, lang: String = "") {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                lang.ifBlank { "code" }, style = MaterialTheme.typography.labelSmall,
+                lang.ifBlank { stringResource(R.string.code_block_label) }, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { clipboard.setText(AnnotatedString(body)) }, modifier = Modifier.size(34.dp)) {
@@ -590,7 +599,8 @@ private fun splitBlocks(text: String): List<Block> {
                         .find(raw)?.groupValues?.get(1)?.trim().orEmpty()
                     val body = raw.replace(Regex("<summary>.*?</summary>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
                         .replace(Regex("</?details[^>]*>", RegexOption.IGNORE_CASE), "").trim()
-                    blocks += Block.Details(summary.ifBlank { "Details" }, body)
+                    // A missing summary is labelled on screen, in the user's language.
+                    blocks += Block.Details(summary, body)
                     i = j + 1
                 }
             }

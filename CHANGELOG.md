@@ -58,6 +58,17 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   to the right opens the history, which is ordered by each chat's newest message.
 
 ### Fixed
+- Android: after a restart or switching to an older chat, the model got none of the conversation — only
+  the new message. The chat history is now loaded into the model before the next answer.
+- Android: switching between answer versions (‹ 1/3 ›) now changes what the model continues from; before,
+  it kept answering after the last generated version.
+- Android: editing a message works as in ChatGPT — the message goes back into the input (with its
+  attachments) under an "Edit message" bar, its answer steps aside, and ✕ or Back restores everything.
+- Android: the context window of a saved model can be changed (pencil next to it); every chat picks it up
+  on its next answer, and switching to a model with the same window keeps the cached prompt. The model
+  list shows each model's provider host.
+- Android: the last English-only labels (endpoint field, code block, alert and details titles) are
+  translated.
 - Android: video, audio and PDFs reach the model itself when its profile accepts them (Video / Audio /
   Files), sent as "file" parts — the form GateYourWay passes on (it refuses media in image_url and drops
   video_url/audio_url). Before, only photos went in and the model got a bare file path, so Gemini could

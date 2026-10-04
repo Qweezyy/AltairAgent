@@ -375,4 +375,15 @@
     <string name="ctx_info">Контекст %1$s из %2$s</string>
     <string name="ctx_cache">кэш %1$d%%</string>
     <string name="ctx_window_only">Окно контекста %1$s</string>
+    <string name="edit_message_title">Редактировать сообщение</string>
+    <string name="edit_cancel">Отменить редактирование</string>
+    <string name="model_edit_ctx">Изменить окно контекста</string>
+    <string name="model_endpoint">Адрес API</string>
+    <string name="code_block_label">код</string>
+    <string name="md_details">Подробнее</string>
+    <string name="md_alert_note">Заметка</string>
+    <string name="md_alert_tip">Совет</string>
+    <string name="md_alert_important">Важно</string>
+    <string name="md_alert_warning">Внимание</string>
+    <string name="md_alert_caution">Осторожно</string>
 </resources>

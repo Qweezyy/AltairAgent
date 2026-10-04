@@ -376,4 +376,15 @@
     <string name="ctx_info">Context %1$s of %2$s</string>
     <string name="ctx_cache">cache %1$d%%</string>
     <string name="ctx_window_only">Context window %1$s</string>
+    <string name="edit_message_title">Edit message</string>
+    <string name="edit_cancel">Cancel editing</string>
+    <string name="model_edit_ctx">Change context window</string>
+    <string name="model_endpoint">Endpoint</string>
+    <string name="code_block_label">code</string>
+    <string name="md_details">Details</string>
+    <string name="md_alert_note">Note</string>
+    <string name="md_alert_tip">Tip</string>
+    <string name="md_alert_important">Important</string>
+    <string name="md_alert_warning">Warning</string>
+    <string name="md_alert_caution">Caution</string>
 </resources>

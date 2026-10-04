@@ -118,7 +118,7 @@ class MainActivity : ComponentActivity() {
                   com.localaiagent.app.ui.LocalUiScale provides (state.uiScale to vm::setUiScale),
                   com.localaiagent.app.ui.LocalAnswerSpacing provides (state.answerSpacing to vm::setAnswerSpacing),
                   com.localaiagent.app.ui.LocalModelActions provides androidx.compose.runtime.remember {
-                      com.localaiagent.app.ui.ModelActions(vm::toggleFallback, vm::setReasoningEffort)
+                      com.localaiagent.app.ui.ModelActions(vm::toggleFallback, vm::setReasoningEffort) { vm.saveModel(it, makeActive = false) }
                   },
                   com.localaiagent.app.ui.LocalRefreshPresence provides vm::refreshPresence,
               ) {
@@ -147,7 +147,9 @@ class MainActivity : ComponentActivity() {
                     onSaveChatMemory = vm::saveChatMemory,
                     chatItemsProvider = vm::currentChatItems,
                     searchProvider = vm::searchAllChats,
-                    onEditMessage = vm::editUserMessage,
+                    onStartEdit = vm::startEdit,
+                    onCancelEdit = vm::cancelEdit,
+                    onSubmitEdit = vm::submitEdit,
                     onRegenerate = vm::regenerateAt,
                     onContinueAnswer = vm::continueAnswer,
                     onRevert = vm::revertToMessage,

@@ -234,6 +234,8 @@ data class ChatUiState(
     val fallbackIds: List<String> = emptyList(),
     /** The prompt-cache share of the last answer. */
     val cacheStat: CacheStat? = null,
+    /** The user's message being edited in the composer (it and what follows are hidden meanwhile). */
+    val editing: Int? = null,
     /** Доска-коллекция текущего чата: собранные сниппеты (закреплённая заметка). */
     val board: List<String> = emptyList(),
     /** Живое присутствие ПК по мосту (для плашки среды у плавающих кнопок). */
@@ -607,13 +609,46 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val m = msgs[i]
         if (m.versions.size < 2) return
         val ni = (m.verIndex + delta).coerceIn(0, m.versions.size - 1)
-        if (ni == m.verIndex) return
+        if (ni == m.verIndex || _ui.value.running) return
         msgs[i] = m.copy(
             text = m.versions[ni],
             replyQuote = m.versionReplies.getOrNull(ni)?.ifBlank { null },
             verIndex = ni,
         )
         setMessages(msgs)
+        // The model continues from the version on screen, not from the last one generated.
+        session.loadHistory(toHistory(msgs))
+    }
+
+    /** Attachments the composer held before an edit started; they come back when it ends. */
+    private var pendingBeforeEdit: List<LibraryItem> = emptyList()
+
+    /**
+     * Starts editing the user's message #index in the composer, as in ChatGPT: its attachments move
+     * into the composer (the screen puts its text there) and it is hidden with what follows it until
+     * the edit is sent or cancelled.
+     */
+    fun startEdit(index: Int) {
+        val msg = _ui.value.messages.getOrNull(index) ?: return
+        if (_ui.value.running || !msg.fromUser) return
+        if (_ui.value.editing == null) pendingBeforeEdit = _ui.value.pendingAttachments
+        _ui.value = _ui.value.copy(editing = index, pendingAttachments = msg.userAttachments.take(MAX_ATTACHMENTS))
+    }
+
+    /** Cancels the edit: the message and the answers after it are back as they were. */
+    fun cancelEdit() {
+        if (_ui.value.editing == null) return
+        _ui.value = _ui.value.copy(editing = null, pendingAttachments = pendingBeforeEdit)
+        pendingBeforeEdit = emptyList()
+    }
+
+    /** Sends the edited message: the conversation is redone from it with the new text and attachments. */
+    fun submitEdit(text: String) {
+        val index = _ui.value.editing ?: return
+        val keep = _ui.value.pendingAttachments
+        _ui.value = _ui.value.copy(editing = null, pendingAttachments = pendingBeforeEdit)
+        pendingBeforeEdit = emptyList()
+        editUserMessage(index, text, AttachEdit(keep))
     }
 
     /** #6: реакция пользователя на ответ ИИ. 😕 → переобъяснить проще; 🔖 → в память чата. */
@@ -951,6 +986,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun summarizeChat() {
         if (_ui.value.running) return
         if (_ui.value.messages.none { !it.fromUser && it.text.isNotBlank() }) return
+        ensureHistory()
         val userMsg = ChatMessage(true, ("📋 " + tr(R.string.chat_summary)))
         setMessages(_ui.value.messages + userMsg + ChatMessage(false, ""))
         val task = "Make a brief summary of our conversation: 1) key decisions, 2) important facts, " +
@@ -1533,10 +1569,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * A chat read from disk (after a restart) or switched to starts with an empty model memory: the
+     * conversation is loaded into it before the next run, or the model would answer without any of it.
+     */
+    private fun ensureHistory() {
+        if (session.messages.isEmpty() && _ui.value.messages.isNotEmpty()) {
+            session.loadHistory(toHistory(_ui.value.messages))
+        }
+    }
+
     fun send(text: String) {
         val atts = _ui.value.pendingAttachments
         val task = text.trim().ifEmpty { defaultPrompt(atts) }
         if (task.isEmpty() || _ui.value.running) return
+        ensureHistory()
         val quote = _ui.value.pendingQuote
         // Only what the user typed is shown; the default prompt for bare attachments stays hidden.
         // A quote is shown in the bubble as «> …» above the text.
@@ -1755,6 +1802,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Continues the broken last answer in the same bubble, from where it stopped. */
     fun continueAnswer() {
         if (_ui.value.running) return
+        ensureHistory()
         val msgs = _ui.value.messages.toMutableList()
         val idx = msgs.indexOfLast { !it.fromUser && it.imageUrl == null }
         if (idx < 0 || msgs[idx].error == null) return
