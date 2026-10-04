@@ -121,17 +121,27 @@ async def test_watch_timer_is_durable_and_does_not_block(ctx: ToolContext):
     assert [r.id for r in fired] == [items[0].id]
 
 
+async def _fired_within(store: ReminderStore, seconds: float = 15.0) -> list:
+    """Polls until a watch fires: a slow CI runner may take seconds to start or end a process."""
+    deadline = time.monotonic() + seconds
+    while True:
+        fired = store.fire_due(time.time(), None, job_state)
+        if fired or time.monotonic() > deadline:
+            return fired
+        await asyncio.sleep(0.2)
+
+
 async def test_watch_background_completion_fires(ctx: ToolContext):
+    # 2 s of work: long enough to still be running at the first check even on a slow runner.
     await RunBackgroundTool().run(
-        RunBackgroundTool.Args(command='python -c "import time; time.sleep(0.5); print(42)"', name="job", wait_sec=0.1),
+        RunBackgroundTool.Args(command='python -c "import time; time.sleep(2); print(42)"', name="job", wait_sec=0.1),
         ctx,
     )
     res = await WatchBackgroundTool().run(WatchBackgroundTool.Args(background="job", note="look at the result"), ctx)
     assert "watching" in res.content.lower()
     store = ReminderStore(ctx.settings.data_dir)
     assert store.fire_due(time.time(), None, job_state) == []      # still running
-    await asyncio.sleep(1.5)
-    fired = store.fire_due(time.time(), None, job_state)
+    fired = await _fired_within(store)
     assert len(fired) == 1
     text = fired[0].fired_text()
     assert "'job' finished successfully" in text and "42" in text and "look at the result" in text
@@ -149,7 +159,7 @@ async def test_run_background_notify_and_a_job_gone_after_restart(ctx: ToolConte
     # The same name under another pid (the app restarted and a new job took the name) is not it.
     assert job_state("slow", "1") == (True, job_state("missing-job", "")[1])
     get_manager().shutdown()
-    fired = store.fire_due(time.time(), None, job_state)
+    fired = await _fired_within(store)
     assert len(fired) == 1 and "is gone" in fired[0].fired_text()
 
 
