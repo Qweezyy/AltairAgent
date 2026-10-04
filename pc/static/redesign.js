@@ -160,6 +160,13 @@ function fileLinkTarget(href, baseDir = "") {
   }
   return out.join("/");
 }
+async function openExternal(href) {
+  try {
+    const r = await (await fetch("/api/open-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: href }) })).json();
+    if (r.ok) return;
+  } catch {}
+  window.open(href, "_blank", "noopener");
+}
 function openFileTarget(path) {
   if (!path) { toast(T("link.unavailable"), "error"); return; }
   if (/^[a-zA-Z]:\/|^\//.test(path)) {
@@ -2647,6 +2654,49 @@ async function openWorkspaceMenu(anchor) {
 }
 
 // ------------------------------------------------------------------ обновления
+// How the update is going, polled while it runs: the download is ~150 MB, and the stages after it
+// (signature, unpacking) take a while too — the window says which one and how far it got.
+function updateLine(j) {
+  const mb = (b) => (b / 1e6).toFixed(1);  // decimal MB, as GitHub shows the package size
+  if (j.stage === "checking") return T("upd.st.checking");
+  if (j.stage === "downloading") {
+    const pct = j.total ? Math.floor((100 * j.done) / j.total) : 0;
+    let s = j.total ? T("upd.st.downloading", { done: mb(j.done), total: mb(j.total), pct }) : T("upd.st.downloadingNoSize", { done: mb(j.done) });
+    if (j.speed) s += ` · ${T("upd.st.speed", { speed: mb(j.speed) })}`;
+    if (j.resumes) s += ` · ${T("upd.st.resumed", { n: j.resumes })}`;
+    return s;
+  }
+  return T("upd.st." + j.stage, { error: j.error || "" });
+}
+function followUpdate(ov, btn) {
+  let box = $(".upd-progress", ov);
+  if (!box) {
+    box = el(`<div class="upd-progress"><div class="upd-bar"><div class="upd-fill"></div></div><div class="upd-line muted"></div></div>`);
+    ($(".modal-body", ov) || ov).prepend(box);
+  }
+  const fill = $(".upd-fill", box), line = $(".upd-line", box);
+  clearInterval(state.updatePoll);
+  const tick = async () => {
+    let j;
+    try { j = await (await fetch("/api/update/progress")).json(); } catch { return; }
+    state.updateStage = j.stage;
+    const pct = j.stage === "downloading" && j.total ? (100 * j.done) / j.total : { checking: 2, verifying: 100, unpacking: 100, applying: 100, ready: 100 }[j.stage] || 0;
+    fill.style.width = `${pct}%`;
+    box.classList.toggle("is-error", j.stage === "error");
+    box.classList.toggle("is-busy", ["verifying", "unpacking", "applying", "checking"].includes(j.stage));
+    line.textContent = updateLine(j);
+    if (j.stage === "ready") {
+      clearInterval(state.updatePoll);
+      // The swap waits for the app to close; the window closes it (and the backend with it).
+      setTimeout(() => { if (state.appWin) state.appWin.close(); else toast(T("upd.closeToFinish")); }, 1200);
+    } else if (j.stage === "error") {
+      clearInterval(state.updatePoll);
+      if (btn) btn.disabled = false;
+    }
+  };
+  tick();
+  state.updatePoll = setInterval(tick, 500);
+}
 async function checkUpdate() {
   try { const d = await (await fetch("/api/update/check")).json(); state.updateInfo = d; const dot = $("#upd-dot"); if (dot) dot.hidden = !d.available; } catch {}
 }
@@ -2666,15 +2716,16 @@ function openUpdate() {
         // waits stay scheduled, the task can be continued after the restart).
         const busy = (state.sessionList || []).filter((x) => x.running).length + (state.running ? 1 : 0);
         if (busy && !confirm(T("upd.busy", { n: busy }))) return;
-        e.currentTarget.disabled = true; toast(T("upd.installing"));
+        const btn = e.currentTarget;
+        btn.disabled = true;
         try {
           const r = await (await fetch("/api/update/install", { method: "POST" })).json();
-          if (!r.ok) { toast(r.error || T("t.error"), "error"); e.currentTarget.disabled = false; return; }
-          toast(T("upd.restarting"));
-          // The swap waits for the app to close; the window closes it (and the backend with it).
-          setTimeout(() => { if (state.appWin) state.appWin.close(); else toast(T("upd.closeToFinish")); }, 800);
-        } catch { toast(T("upd.installErr"), "error"); e.currentTarget.disabled = false; }
+          if (!r.ok) { toast(r.error || T("t.error"), "error"); btn.disabled = false; return; }
+          followUpdate(ov, btn);
+        } catch { toast(T("upd.installErr"), "error"); btn.disabled = false; }
       });
+      // Reopened while an update is already on its way: show where it is.
+      if (["checking", "downloading", "verifying", "unpacking", "applying"].includes(state.updateStage)) followUpdate(ov, $("#upd-install", ov));
     } });
 }
 
@@ -2957,12 +3008,17 @@ function init() {
   // or to another scheme) is opened as a file, or the web page in a browser, instead.
   document.addEventListener("click", (e) => {
     const a = e.target.closest?.("a[href]");
-    if (!a || e.defaultPrevented || a.target === "_blank" || a.hasAttribute("download")) return;
+    if (!a || e.defaultPrevented || a.hasAttribute("download")) return;
     const href = a.getAttribute("href") || "";
     if (href.startsWith("#") || href.startsWith("javascript:void")) return;
     let url; try { url = new URL(a.href, location.href); } catch { return; }
+    const external = /^https?:$/.test(url.protocol) && url.origin !== location.origin;
+    // In the desktop app a web link goes to the system browser through the backend: the
+    // webview itself does nothing with target=_blank (the release notes' links did nothing).
+    if (external && window.__TAURI__) { e.preventDefault(); openExternal(url.href); return; }
+    if (a.target === "_blank") return;
     e.preventDefault();
-    if (/^https?:$/.test(url.protocol) && url.origin !== location.origin) { window.open(url.href, "_blank", "noopener"); return; }
+    if (external) { window.open(url.href, "_blank", "noopener"); return; }
     openFileTarget(fileLinkTarget(href) || "");
   }, true);
   els.chatTitle.addEventListener("dblclick", () => {

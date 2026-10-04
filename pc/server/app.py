@@ -14,11 +14,13 @@ import json
 import os
 import string
 import tempfile
+import time
 import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket
 from fastapi.exception_handlers import http_exception_handler
@@ -1181,23 +1183,67 @@ def create_app() -> FastAPI:
         info = await Updater(app.state.settings).check()
         return info.to_dict()
 
+    # The update runs in the background and the window polls its state: the download alone
+    # is ~150 MB, and one silent request for all of it left the user staring at a toast.
+    app.state.update_job = {"stage": "idle"}
+
+    async def _run_update() -> None:
+        job = app.state.update_job
+        started = time.monotonic()
+
+        def progress(stage: str, done: int, total: int, resumes: int) -> None:
+            job["stage"] = stage
+            if stage == "downloading":  # later stages keep the download's final numbers
+                elapsed = max(time.monotonic() - started, 0.001)
+                job.update(done=done, total=total, resumes=resumes, speed=round(done / elapsed))
+
+        updater = Updater(app.state.settings)
+        try:
+            job.update(stage="checking")
+            info = await updater.check()
+            if not info.installable:
+                job.update(stage="error", error=info.error or tr("api.update_unavailable"))
+                return
+            job["version"] = info.version
+            archive = await updater.download(info, progress)
+            job.update(stage="unpacking")
+            folder = await asyncio.to_thread(updater.unpack, archive)
+            job.update(stage="applying")
+            await asyncio.to_thread(updater.apply, folder)
+            job.update(stage="ready")
+        except asyncio.CancelledError:
+            job.update(stage="error", error="cancelled")
+            raise
+        except Exception as exc:  # noqa: BLE001 - причину показываем пользователю
+            logger.exception("Update failed")
+            job.update(stage="error", error=str(exc))
+
     @app.post("/api/update/install")
     async def install_update() -> dict:
-        """Скачивает и ставит обновление, затем перезапускает приложение."""
-        updater = Updater(app.state.settings)
-        info = await updater.check()
-        if not info.installable:
-            return {"ok": False, "error": info.error or tr("api.update_unavailable")}
+        """Starts downloading and installing the update; /api/update/progress tells how it goes."""
+        job = app.state.update_job
+        if job.get("stage") in ("checking", "downloading", "verifying", "unpacking", "applying"):
+            return {"ok": True, "started": False}
+        app.state.update_job = {"stage": "checking", "done": 0, "total": 0, "resumes": 0, "speed": 0}
+        app.state.update_task = asyncio.create_task(_run_update(), name="update-install")
+        return {"ok": True, "started": True}
 
-        try:
-            archive = await updater.download(info)
-            folder = await asyncio.to_thread(updater.unpack, archive)
-            await asyncio.to_thread(updater.apply, folder)
-        except Exception as exc:  # noqa: BLE001 - причину показываем пользователю
-            logger.exception("Установка обновления не удалась")
-            return {"ok": False, "error": str(exc)}
+    @app.get("/api/update/progress")
+    async def update_progress() -> dict:
+        return dict(app.state.update_job)
 
-        return {"ok": True, "version": info.version}
+    @app.post("/api/open-url")
+    async def open_url(request: Request, payload: dict) -> dict:
+        """Opens a web link in the system browser. The app window cannot do it by itself: a
+        link with target=_blank in the desktop webview opened nothing."""
+        _local_only(request)
+        url = str(payload.get("url") or "")
+        if urlparse(url).scheme not in ("http", "https"):
+            return {"ok": False, "error": "only http(s) links"}
+        import webbrowser
+
+        opened = await asyncio.to_thread(webbrowser.open, url)
+        return {"ok": bool(opened)}
 
     @app.get("/api/browse")
     async def browse_folders(path: str = "") -> dict:

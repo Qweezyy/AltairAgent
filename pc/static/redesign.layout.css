@@ -1311,3 +1311,14 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 .alti-empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-4); color: var(--text-3); text-align: center; font-size: var(--fs-sm); }
 .rs-alti { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; }
 .card-head .alti-mascot { flex: none; }
+
+/* The update's progress in its dialog. */
+.upd-progress { margin: 0 0 var(--sp-4); }
+.upd-bar { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.upd-fill { height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width 0.4s ease; }
+.upd-progress.is-busy .upd-fill { animation: upd-pulse 1.2s ease-in-out infinite; }
+.upd-progress.is-error .upd-fill { background: var(--danger); }
+.upd-line { margin-top: 8px; font-size: var(--fs-sm); }
+.upd-progress.is-error .upd-line { color: var(--danger); }
+@keyframes upd-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .upd-progress.is-busy .upd-fill { animation: none; } }

@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
@@ -48,6 +49,16 @@ logger = get_logger("updater")
 
 #: No bigger than this: the app weighs a hundred-odd megabytes, not gigabytes.
 MAX_PACKAGE_BYTES = 500 * 1024 * 1024
+
+#: A download that sends nothing for this long is taken as stalled: a new connection
+#: continues it from where it stopped (seen: one connection froze at 16 of 148 MB while a
+#: fresh one ran at 9 MB/s).
+STALL_SECONDS = 20.0
+#: How many times a stalled or dropped download is continued before giving up.
+MAX_RESUMES = 8
+
+#: Called with (stage, done_bytes, total_bytes, resumes) while an update is fetched.
+Progress = Callable[[str, int, int, int], None]
 
 #: Where updates come from when UPDATE_URL is empty.
 DEFAULT_SOURCE = "github:Qweezyy/AltairAgent"
@@ -227,28 +238,22 @@ class Updater:
 
     # ------------------------------------------------------------ installing
 
-    async def download(self, info: UpdateInfo) -> Path:
-        """Downloads the package into a temporary folder and checks its checksum."""
+    async def download(self, info: UpdateInfo, on_progress: Progress | None = None) -> Path:
+        """Downloads the package into a temporary folder and checks its checksum.
+
+        A connection that stalls or drops is continued from where it stopped (HTTP Range), so a
+        frozen connection costs seconds instead of a download that never ends."""
         target = Path(tempfile.gettempdir()) / f"Altair-{info.version}-update.zip"
+        report = on_progress or (lambda *_: None)
 
         if urlparse(info.url).scheme in ("http", "https"):
-            handle = await asyncio.to_thread(open, target, "wb")
-            try:
-                async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
-                    async with client.stream("GET", info.url) as response:
-                        response.raise_for_status()
-                        total = 0
-                        async for chunk in response.aiter_bytes(65536):
-                            total += len(chunk)
-                            if total > MAX_PACKAGE_BYTES:
-                                raise ValueError("the update package is suspiciously large")
-                            await asyncio.to_thread(handle.write, chunk)
-            finally:
-                await asyncio.to_thread(handle.close)
+            await self._fetch(info.url, target, report)
         else:
             # Copying from a network share can take minutes: off the event loop.
+            report("downloading", 0, 0, 0)
             await asyncio.to_thread(_copy_local, info.url, target)
 
+        report("verifying", 0, 0, 0)
         if info.sha256:
             digest = await asyncio.to_thread(_sha256, target)
             if digest != info.sha256:
@@ -258,6 +263,48 @@ class Updater:
             raise ValueError("the signed release gives no checksum for the package")
 
         return target
+
+    async def _fetch(self, url: str, target: Path, report: Progress) -> None:
+        done, total, resumes = 0, 0, 0
+        timeout = httpx.Timeout(connect=20.0, read=STALL_SECONDS, write=20.0, pool=20.0)
+        handle = await asyncio.to_thread(open, target, "wb")
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                while True:
+                    headers = {"Range": f"bytes={done}-"} if done else {}
+                    try:
+                        async with client.stream("GET", url, headers=headers) as response:
+                            response.raise_for_status()
+                            if done and response.status_code != 206:
+                                # The server ignored the range: start over from the first byte.
+                                done = 0
+                                await asyncio.to_thread(handle.seek, 0)
+                                await asyncio.to_thread(handle.truncate)
+                            length = int(response.headers.get("content-length") or 0)
+                            total = done + length if length else total
+                            if total > MAX_PACKAGE_BYTES:
+                                raise ValueError("the update package is suspiciously large")
+                            report("downloading", done, total, resumes)
+                            async for chunk in response.aiter_bytes(256 * 1024):
+                                done += len(chunk)
+                                if done > MAX_PACKAGE_BYTES:
+                                    raise ValueError("the update package is suspiciously large")
+                                await asyncio.to_thread(handle.write, chunk)
+                                report("downloading", done, total, resumes)
+                        if not total or done >= total:
+                            return
+                        raise httpx.RemoteProtocolError("the connection closed before the end")
+                    except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                        resumes += 1
+                        if resumes > MAX_RESUMES:
+                            raise ValueError(f"the download kept stalling ({exc.__class__.__name__}); "
+                                             "check the connection and try again") from exc
+                        logger.warning("update download stalled at %d of %d bytes (%s): continuing",
+                                       done, total, exc.__class__.__name__)
+                        report("downloading", done, total, resumes)
+                        await asyncio.sleep(min(2 * resumes, 10))
+        finally:
+            await asyncio.to_thread(handle.close)
 
     def unpack(self, archive: Path) -> Path:
         """Unpacks the package and returns the folder of the new version."""

@@ -14,6 +14,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+### Fixed
+- Installing an update showed "downloading started" and then nothing: the dialog now shows each
+  stage — the download in MB and percent with its speed, the signature check, unpacking — and the
+  reason if it fails.
+- An update download whose connection froze never finished (seen: stuck at 16 of 148 MB). A
+  download that sends nothing for 20 s is continued from where it stopped on a new connection.
+- Web links in the desktop window (the release notes' "English · Русский", links in answers)
+  could do nothing: they now open in the system browser.
+
 ## [0.2.1] — 2026-10-04
 
 Steadier and cheaper answers: a set reasoning level, honest failures and backup models — and an Android
