@@ -276,6 +276,7 @@ class ChatState:
                     "duration_ms": event.duration_ms,
                     "usage": event.usage,
                     "cost_usd": event.cost_usd,
+                    "checks": event.checks,
                     "run_id": event.run_id,  # for "roll back the run" from the history
                     "ts": event.ts,
                 }

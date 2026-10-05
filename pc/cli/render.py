@@ -307,14 +307,26 @@ class Renderer:
     def _on_research_progress(self, m: dict[str, Any]) -> None:
         self.detail = tools_view.one_line(m.get("text") or "", 60)
 
+    def _checks_text(self, checks: dict[str, Any] | None) -> Text:
+        """The run's checks after its summary: shown when the agent changed code."""
+        if not checks or not checks.get("attempted"):
+            return Text("")
+        if not checks.get("executed"):
+            return Text(" · " + self.t("ck.not_run"), style=theme.WARN)
+        if checks.get("passed"):
+            return Text(" · " + self.t("ck.passed"), style=theme.OK)
+        return Text(" · " + self.t("ck.failed"), style=theme.ERR)
+
     def _done_line(self, m: dict[str, Any]) -> Text:
         sec = round((m.get("duration_ms") or 0) / 1000, 1)
         cost = float(m.get("cost_usd") or 0.0)
         cost_text = f" · {money(cost)}" if cost > 0 else ""
-        return Text(
+        line = Text(
             f"{theme.STAR} " + self.t("done", sec=sec, steps=m.get("steps", 0), cost=cost_text),
             style=theme.FAINT,
         )
+        line.append_text(self._checks_text(m.get("checks")))
+        return line
 
     def _on_run_finished(self, m: dict[str, Any]) -> None:
         self._end_segment()

@@ -188,6 +188,11 @@ class AgentRunner:
         #: Имена инструментов, вызванных за этот запуск — для «ворот проверки».
         self._called_tools = set()
         self._changed_tools = set()
+        # What the run can honestly claim about checks (RunFinished.checks): did they run, did
+        # they pass, and acceptance — whether the requested behaviour itself was checked; no step
+        # checks that yet, so it stays "unknown" (the acceptance step is planned).
+        self._checks: dict[str, Any] = {"executed": False, "passed": None, "acceptance": "unknown"}
+        gate_unknown_noted = False
         nudged_verify = False
         gate_cycles = 0  # сколько раз health-gate возвращал агента чинить проверки
         # Свежий запуск не наследует фоновые уведомления/наблюдатели прошлого.
@@ -280,7 +285,23 @@ class AgentRunner:
                     # если так и не позеленело — по желанию откатываем весь прогон и
                     # честно докладываем. Это делает «оставить одного» правдой.
                     if edited and self.settings.health_gate:
+                        self._checks["attempted"] = True
                         ran, ok, report = await self._run_health_checks()
+                        if ran:
+                            self._checks.update(executed=True, passed=ok)
+                        if not ran and not ok and not gate_unknown_noted:
+                            # The check could not even be started: its result is unknown, which
+                            # is not "there is nothing to check". The agent checks by hand or
+                            # says plainly that the work is unverified; no rollback for this.
+                            gate_unknown_noted = True
+                            self._checks.update(executed=False, passed=None)
+                            self.session.add_note(
+                                "The automatic check could not be started, so whether the code works "
+                                "is UNKNOWN. Run the checks yourself (run_tests, run_lint) or, if you "
+                                "cannot, say plainly in your answer that the result is unverified. Do "
+                                "not claim it works.\n\n" + report[:2000]
+                            )
+                            continue
                         if ran and not ok:
                             if gate_cycles < self.settings.health_gate_max_cycles:
                                 gate_cycles += 1
@@ -719,11 +740,14 @@ class AgentRunner:
         )
 
     async def _run_health_checks(self) -> tuple[bool, bool, str]:
-        """Автоматически прогоняет тесты проекта перед завершением.
+        """Runs the project's tests before the agent may finish.
 
-        Возвращает (ran, ok, отчёт): ran=False — автотестов не нашлось (не наша
-        забота решать «зелено/красно»); ok — прошли ли. Любой сбой самого запуска
-        безопасно трактуется как «не прогнали» (ran=False), чтобы не ронять задачу.
+        Returns (ran, ok, report):
+        * (False, True, "") — the project has no tests to run automatically;
+        * (False, False, why) — the check could not be started: the state is unknown, and that
+          is not the same as "nothing to check" (a launch failure used to pass for it);
+        * (True, ok, report) — the checks ran; ok also requires the output not to report
+          failures behind a zero exit code (see quality.build_report).
         """
         try:
             from core.quality import build_report, detect_test_commands
@@ -744,7 +768,7 @@ class AgentRunner:
             return (True, report.ok, f"Команда: {command.display}\n\n{report.render()}")
         except Exception as exc:  # noqa: BLE001 — health-gate не должен ронять прогон
             await self._log(tr("log.gate_error", error=exc), "warning")
-            return (False, True, "")
+            return (False, False, f"Could not start the check: {exc}")
 
     async def _wrap_up(
         self,
@@ -791,6 +815,7 @@ class AgentRunner:
                 duration_ms=duration,
                 usage=dict(usage),
                 cost_usd=round(cost.usd, 6),
+                checks=dict(getattr(self, "_checks", {}) or {}),
             )
         )
         logger.info(

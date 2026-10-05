@@ -1361,6 +1361,11 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 .reconnect .alti-mascot { flex: none; }
 .toast .alti-mascot { flex: none; margin-right: 2px; }
 .empty .alti-mascot, .pal-empty .alti-mascot { margin: 0 auto var(--sp-2); }
+/* The checks of a run, by its answer: ran and passed / failed / could not run. */
+.checks-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: var(--fs-xs, 11px); border: 1px solid var(--border); color: var(--text-2); white-space: nowrap; }
+.checks-chip.ck-ok { color: var(--success, #3aa76d); border-color: color-mix(in srgb, var(--success, #3aa76d) 40%, transparent); }
+.checks-chip.ck-bad { color: var(--danger, #e5484d); border-color: color-mix(in srgb, var(--danger, #e5484d) 40%, transparent); }
+.checks-chip.ck-unknown { color: var(--warning, #e5a13a); border-color: color-mix(in srgb, var(--warning, #e5a13a) 40%, transparent); }
 /* Where Alti appears: empty places, the running status, cards that need you. */
 .alti-empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-4); color: var(--text-3); text-align: center; font-size: var(--fs-sm); }
 .rs-alti { display: inline-grid; place-items: center; width: 26px; height: 26px; flex: none; }

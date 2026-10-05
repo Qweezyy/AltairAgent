@@ -848,12 +848,14 @@ function addAnswerFooter(node, m, turn) {
   const rollback = m.run_id
     ? `<button class="btn-icon small" data-a="rollback" data-tip="${escAttr(T("a.rollbackRun"))}">${iconSvg("undo", "icon icon-sm")}</button>`
     : "";
+  const checks = checksChip(m.checks);
   const foot = el(`<div class="msg-actions msg-actions-agent">
     <button class="btn-icon small" data-a="copy" data-tip="${escAttr(T("a.copy"))}">${iconSvg("copy", "icon icon-sm")}</button>
     <button class="btn-icon small" data-a="fork" data-tip="${escAttr(T("a.forkHere"))}">${iconSvg("branch", "icon icon-sm")}</button>
     <button class="btn-icon small" data-a="pin" data-tip="${escAttr(T("a.pin"))}">${iconSvg("pin", "icon icon-sm")}</button>
     <button class="btn-icon small" data-a="speak" data-tip="${escAttr(T("a.speak"))}">${iconSvg("volume", "icon icon-sm")}</button>
     ${rollback}
+    ${checks}
     <span class="ma-time"${cacheShare ? ` data-tip="${escAttr(T("a.cacheTip", { cached: fmtTokens(u.cached_tokens), total: fmtTokens(u.prompt_tokens) }))}"` : ""}>${dur}${cache}</span>
   </div>`);
   $('[data-a="copy"]', foot).addEventListener("click", () => { navigator.clipboard?.writeText(text); toast(T("t.copied")); });
@@ -866,6 +868,15 @@ function addAnswerFooter(node, m, turn) {
     }
   });
   node.appendChild(foot);
+}
+// What the run may honestly say about its checks: they ran / they passed / acceptance. Shown
+// only when the agent changed code (the gate was due); acceptance is "not checked" until an
+// acceptance step exists, and the tooltip says so.
+function checksChip(c) {
+  if (!c || !c.attempted) return "";
+  const [cls, key] = !c.executed ? ["ck-unknown", "ck.notRun"] : c.passed ? ["ck-ok", "ck.passed"] : ["ck-bad", "ck.failed"];
+  const tip = `${T(key + ".tip")} ${T("ck.acceptance")}`;
+  return `<span class="checks-chip ${cls}" data-tip="${escAttr(tip)}">${esc(T(key))}</span>`;
 }
 // Озвучка ответа (Web Speech API), повторное нажатие — стоп.
 function speak(text, btn) {
@@ -1017,7 +1028,7 @@ function renderTimeline(entries, turn0) {
     else if (e.kind === "image") { closeGroup(); frag.appendChild(mediaFigure({ ...e, kind: "image" })); }
     else if (e.kind === "media") { closeGroup(); frag.appendChild(mediaFigure({ ...e, kind: e.media_kind || "file" })); }
     else if (e.kind === "widget") { closeGroup(); frag.appendChild(widgetFigure(e.html, e.widget_kind, e.caption)); }
-    else if (e.kind === "answer") { closeGroup(); const n = el(`<div class="msg-agent">${(e.text || "").trim() ? `<div class="answer-body md"></div>` : ""}</div>`); if ((e.text || "").trim()) renderFinal($(".answer-body", n), e.text); addAnswerFooter(n, { text: e.full || e.text, duration_ms: e.duration_ms || 0, run_id: e.run_id }, turn - 1); frag.appendChild(n); }
+    else if (e.kind === "answer") { closeGroup(); const n = el(`<div class="msg-agent">${(e.text || "").trim() ? `<div class="answer-body md"></div>` : ""}</div>`); if ((e.text || "").trim()) renderFinal($(".answer-body", n), e.text); addAnswerFooter(n, { text: e.full || e.text, duration_ms: e.duration_ms || 0, run_id: e.run_id, checks: e.checks }, turn - 1); frag.appendChild(n); }
     else if (e.kind === "wake") { closeGroup(); frag.appendChild(reminderLine(e.text)); }
     else if (e.kind === "error") { closeGroup(); frag.appendChild(el(`<div class="card"><div class="card-head">${iconSvg("alert")} ${esc(T("ev.error"))}</div><div class="card-body"><div class="muted">${esc(e.text)}</div></div></div>`)); }
   }

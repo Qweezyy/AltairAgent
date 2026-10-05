@@ -40,6 +40,21 @@ GATEWAY_ERROR_PHRASES = (
 )
 
 
+#: What a reply may hold besides gateway phrases and still be the gateway's own text (a code, a
+#: request id). More than that is a real answer that happens to quote such a phrase.
+GATEWAY_REST_CHARS = 40
+
+
+def _gateway_only(low: str) -> bool:
+    """The reply is a gateway's error text and nothing else: with its gateway phrases taken out,
+    hardly any words are left. A short real answer quoting the phrase ("the request could not be
+    completed — the file was locked, so I closed the editor and ran it again") keeps its words."""
+    rest = low
+    for phrase in GATEWAY_ERROR_PHRASES:
+        rest = rest.replace(phrase, " ")
+    return sum(ch.isalnum() for ch in rest) <= GATEWAY_REST_CHARS
+
+
 class BadTurn(Exception):
     """A reply that is not a real answer; the client retries it like a dropped connection."""
 
@@ -96,7 +111,8 @@ def judge_turn(turn: AssistantTurn, messages: list[dict[str, Any]], tools: list[
 
     * cut — the stream hit our loop guard (the model was thinking or repeating without end);
     * empty — neither text nor a tool call;
-    * gateway — a short reply that is a gateway's error text;
+    * gateway — a short reply that is nothing but a gateway's error text (a reply that only
+      quotes such a phrase among its own words is a real answer);
     * unprocessed — the provider counted far fewer prompt tokens than the request holds, so it
       did not run the model on it (seen with the "could not be completed" replies).
     """
@@ -108,7 +124,7 @@ def judge_turn(turn: AssistantTurn, messages: list[dict[str, Any]], tools: list[
     if not text:
         return "empty"
     low = text.lower()
-    if len(text) < 400 and any(p in low for p in GATEWAY_ERROR_PHRASES):
+    if len(text) < 400 and any(p in low for p in GATEWAY_ERROR_PHRASES) and _gateway_only(low):
         return "gateway"
     prompt = (turn.usage or {}).get("prompt_tokens") or 0
     expected = _text_chars(messages, tools) / 4.5

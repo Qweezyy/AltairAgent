@@ -195,6 +195,10 @@ class RunFinished(BaseEvent):
     usage: dict[str, int] = Field(default_factory=dict)
     #: Стоимость задачи в долларах (0, если цена модели неизвестна).
     cost_usd: float = 0.0
+    #: What the run can claim about checks: {"executed": bool, "passed": bool | None,
+    #: "acceptance": "unknown"} — "checks ran", "checks passed" and "the requested behaviour was
+    #: accepted" are three different things, and only the first two are checked today.
+    checks: dict[str, Any] = Field(default_factory=dict)
 
 
 class ShowImage(BaseEvent):

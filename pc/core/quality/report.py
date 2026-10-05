@@ -28,6 +28,8 @@ class CheckReport:
     details: str = ""
     counts: dict[str, int] = field(default_factory=dict)
     timed_out: bool = False
+    #: The command exited with 0 while its output reported failures.
+    exit_code_lied: bool = False
 
     def render(self, limit: int = 4000) -> str:
         lines = [f"[{self.tool}] {'успех' if self.ok else 'ЕСТЬ ПРОБЛЕМЫ'}"]
@@ -123,9 +125,40 @@ def parse_generic(tool: str, stdout: str, stderr: str, returncode: int, timed_ou
     return report
 
 
+#: What test runners print when something failed, whatever exit code a wrapper returns.
+_FAILURE_SUMMARIES = (
+    re.compile(r"\b([1-9]\d*) (?:failed|errors?)\b.*\bin \d", re.IGNORECASE),        # pytest
+    re.compile(r"^FAILED \((?:failures|errors)=([1-9]\d*)", re.MULTILINE),                # unittest
+    re.compile(r"^\s*Tests?(?: Files)?:?\s+.*?\b([1-9]\d*) failed", re.MULTILINE),      # jest, vitest
+    re.compile(r"^\s*([1-9]\d*) failing\b", re.MULTILINE),                              # mocha
+    re.compile(r"^test result: FAILED\.\s+\d+ passed; ([1-9]\d*) failed", re.MULTILINE),  # cargo
+    re.compile(r"^(--- FAIL):", re.MULTILINE),                                           # go
+)
+
+
+def failures_in_output(text: str) -> str:
+    """The line where a test runner says something failed ("" when none does)."""
+    for pattern in _FAILURE_SUMMARIES:
+        match = pattern.search(text)
+        if match:
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            line_end = text.find("\n", match.end())
+            return text[line_start:line_end if line_end != -1 else None].strip()[:200]
+    return ""
+
+
 def build_report(tool: str, stdout: str, stderr: str, returncode: int, timed_out: bool) -> CheckReport:
     if tool == "pytest":
-        return parse_pytest(stdout, stderr, returncode, timed_out)
-    if tool in ("ruff", "eslint", "mypy", "tsc"):
+        report = parse_pytest(stdout, stderr, returncode, timed_out)
+    elif tool in ("ruff", "eslint", "mypy", "tsc"):
         return parse_lint(tool, stdout, stderr, returncode, timed_out)
-    return parse_generic(tool, stdout, stderr, returncode, timed_out)
+    else:
+        report = parse_generic(tool, stdout, stderr, returncode, timed_out)
+    # The verdict is the exit code, but a wrapper can lie with it ("pytest || true", a script that
+    # swallows the result). When the runner's own summary says something failed, that wins.
+    said = failures_in_output(f"{stdout}\n{stderr}") if report.ok else ""
+    if said:
+        report.ok = False
+        report.exit_code_lied = True
+        report.failures.insert(0, f"The exit code was 0, but the output says: {said}")
+    return report

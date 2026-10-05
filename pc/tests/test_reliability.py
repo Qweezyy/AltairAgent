@@ -87,6 +87,26 @@ def test_failures_in_disguise_are_named():
     assert judge_turn(_turn("Sure.", prompt=3000), BIG, None) == "unprocessed"
 
 
+def test_a_short_real_answer_quoting_a_gateway_phrase_is_not_an_error():
+    """From a reader (dev.to): a short legitimate reply that quotes the gateway's phrase was taken
+    for the gateway's error, retried and in the end failed."""
+    real = ("The request could not be completed the first time: the file was locked by the editor. "
+            "I closed it and ran the script again, it works now.")
+    assert len(real) < 400
+    assert judge_turn(_turn(real), BIG, None) is None
+    # The gateway's own text, with a code or an id at most, is still caught.
+    assert judge_turn(_turn("Upstream request failed (502, id 7f3a)."), BIG, None) == "gateway"
+
+
+def test_a_long_gateway_error_is_caught_by_the_token_count():
+    """A gateway error with a long diagnostic dump slips past the phrase rule (over 400 chars);
+    the provider still did not run the model on the request, and that is what gives it away."""
+    dump = "The request could not be completed.\n" + "\n".join(
+        f"  at upstream.pool.call (pool.js:{i}:17) retry={i} backend=10.0.3.{i}" for i in range(12))
+    assert len(dump) > 400
+    assert judge_turn(_turn(dump, prompt=2100), BIG, None) == "unprocessed"
+
+
 def test_no_false_alarms_on_normal_replies():
     long_reply = "Here is why: " + "the request could not be completed because… " * 20
     assert judge_turn(_turn(long_reply), BIG, None) is None  # long: a real answer about errors

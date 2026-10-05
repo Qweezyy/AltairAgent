@@ -40,6 +40,17 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   the messages stay in the chat, the model sees the summary.
 
 ### Fixed
+- **The health gate no longer believes a lying exit code.** A test command that exits with 0 while
+  its output says something failed (`pytest || true`, a wrapper script) is now red: the summary of
+  pytest, unittest, jest/vitest, mocha, cargo or go wins over the exit code.
+- **A check that could not even start is "unknown", not "no tests".** The agent is told to verify by
+  hand or to say plainly that the change is unverified, instead of finishing quietly.
+- **Three states by every answer that changed code:** the checks ran / they passed / acceptance — the
+  last one is honestly "not checked" until an acceptance step exists. A chip by the answer in the
+  window and the summary line in the terminal show them.
+- A short real answer that quotes a gateway's error phrase was taken for the gateway's error and
+  retried until it failed; now only a reply that is nothing but such a phrase counts. The warning
+  about a rejected reply also logs the provider's finish_reason and prompt tokens.
 - `altair` was "not recognized" unless the app was installed with install.ps1: the app now puts its
   `bin` on the user's PATH when it starts (Linux/macOS: a link in `~/.local/bin`), and drops a dead
   entry left by a moved copy. `CLI_ON_PATH=false` turns this off.
