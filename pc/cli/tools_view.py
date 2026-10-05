@@ -79,6 +79,60 @@ def tool_hint(args: dict[str, Any]) -> str:
     return ""
 
 
+#: What kind of work a tool is, for the live status (its glyph) and the mascot's pose.
+_ACTIVITY = {
+    "read": (
+        "read_file",
+        "read_document",
+        "list_directory",
+        "view_image",
+        "code_map",
+        "find_symbol",
+        "memory_read",
+        "recall",
+        "tool_output",
+        "git_log",
+        "git_blame",
+        "git_status",
+        "git_diff",
+    ),
+    "write": (
+        "write_file",
+        "edit_file",
+        "apply_patch",
+        "delete_path",
+        "remember",
+        "memory_edit",
+        "create_skill",
+    ),
+    "shell": (
+        "execute_command",
+        "run_python",
+        "run_tests",
+        "run_lint",
+        "type_check",
+        "run_background",
+        "start_dev_server",
+        "git_commit",
+        "test_coverage",
+    ),
+    "search": ("grep_search", "find_files", "ast_search", "search_chats", "tool_search", "find_images"),
+    "web": ("web_search", "fetch_url", "browse_page", "http_request", "download_file", "deep_research"),
+    "plan": ("update_plan", "write_plan"),
+    "agent": ("spawn_subagent",),
+}
+
+
+def activity(name: str) -> str:
+    """read | write | shell | search | web | plan | agent | browser | tool."""
+    if name.startswith("browser_"):
+        return "web"
+    for kind, names in _ACTIVITY.items():
+        if name in names:
+            return kind
+    return "tool"
+
+
 def label_of(name: str, args: dict[str, Any]) -> tuple[str, str]:
     label, key = LABELS.get(name, (name, ""))
     hint = (

@@ -27,6 +27,29 @@ PROMPT = "›"
 #: The working indicator: the star breathes.
 SPINNER = ("·", "✧", "✦", "✶", "✦", "✧")
 
+#: A glyph per kind of work, before the live status (tools_view.activity).
+ACTIVITY = {
+    "think": "✧",
+    "read": "≡",
+    "write": "✎",
+    "shell": "❯",
+    "search": "⌕",
+    "web": "◍",
+    "plan": "☰",
+    "agent": "◈",
+    "tool": "⚙",
+    "answer": "✎",
+    "retry": "↻",
+    "compact": "⇲",
+}
+
+#: The shimmer that runs over the status words: from the dim gold to almost white.
+SHIMMER_FROM = (184, 134, 46)
+SHIMMER_TO = (255, 243, 207)
+
+#: The burst shown for a moment when a task is done.
+BURST = ("✦", "✧ ✦ ✧", "·  ✧ ✦ ✧  ·", " ·   ✦   · ", "     ✦     ")
+
 #: A mode's chip in the status line: (label key, style).
 MODE_STYLE = {
     "manual": ("mode.manual", MUTED),
@@ -64,3 +87,32 @@ PT_STYLE = {
     "select.keys": FAINT,
     "select.checked": OK,
 }
+
+
+#: Markdown and tables in Altair's colours instead of rich's defaults (magenta headings, cyan
+#: table heads, inline code on black).
+RICH_STYLES = {
+    "markdown.code": f"{GOLD} on #2b2620",
+    "markdown.code_block": "",
+    "markdown.h1": f"bold {GOLD}",
+    "markdown.h1.border": GOLD_DIM,
+    "markdown.h2": f"bold {GOLD}",
+    "markdown.h3": f"bold {INK}",
+    "markdown.h4": f"bold {MUTED}",
+    "markdown.link": f"underline {INFO}",
+    "markdown.link_url": INFO,
+    "markdown.item.bullet": GOLD,
+    "markdown.item.number": GOLD,
+    "markdown.block_quote": f"italic {MUTED}",
+    "markdown.hr": FAINT,
+    "markdown.strong": f"bold {INK}",
+    "table.header": f"bold {GOLD}",
+    "markdown.table.header": f"bold {GOLD}",
+    "markdown.table.border": FAINT,
+}
+
+
+def rich_theme():
+    from rich.theme import Theme
+
+    return Theme(RICH_STYLES)

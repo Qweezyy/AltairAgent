@@ -455,7 +455,9 @@ async def print_chats(client: Client, limit: int = 30) -> None:
 
 async def amain(args: argparse.Namespace) -> int:
     texts = Texts()
-    console = Console(highlight=False, stderr=args.output_format != "text")
+    from cli.theme import rich_theme
+
+    console = Console(highlight=False, stderr=args.output_format != "text", theme=rich_theme())
     task = " ".join(args.prompt).strip()
     if args.print_mode and (not task or task == "-") and not sys.stdin.isatty():
         task = sys.stdin.read().strip()

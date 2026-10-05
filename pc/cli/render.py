@@ -17,14 +17,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich import box
 from rich.markdown import CodeBlock, Markdown, TableElement
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from cli import media, theme, tools_view
+from cli import mascot, media, theme, tools_view
 from cli.texts import Texts
 
 CODE_THEME = "ansi_dark"
@@ -122,6 +122,8 @@ class Renderer:
         self._blank = True  # the last printed line was empty: no second gap
         self._last_plan: list[dict[str, Any]] = []
         self.workspace = ""  # where relative paths of the tools point (for line numbers)
+        self.activity = "think"  # the kind of work going on (tools_view.activity)
+        self.finished_at = 0.0
         self.media_dir: Path | None = None  # where widgets are saved as pages
         self.last_shown: Path | None = None  # what /open opens
         # --- what the status line shows ---
@@ -219,14 +221,14 @@ class Renderer:
         self._first_block = True
 
     def _on_step_started(self, m: dict[str, Any]) -> None:
-        self.phase, self.detail = "thinking", ""
+        self.phase, self.detail, self.activity = "thinking", "", "think"
 
     def _on_text_delta(self, m: dict[str, Any]) -> None:
-        self.phase, self.detail = "writing", ""
+        self.phase, self.detail, self.activity = "writing", "", "answer"
         self.text(m.get("text") or "")
 
     def _on_reasoning_delta(self, m: dict[str, Any]) -> None:
-        self.phase, self.detail = "reasoning", ""
+        self.phase, self.detail, self.activity = "reasoning", "", "think"
         if self.thinking:
             if self._text:
                 self._end_segment()
@@ -234,6 +236,7 @@ class Renderer:
 
     def _on_tool_pending(self, m: dict[str, Any]) -> None:
         self.phase = "pending"
+        self.activity = tools_view.activity(str(m.get("name") or ""))
         label, _ = tools_view.label_of(str(m.get("name") or ""), {})
         chars = int(m.get("chars") or 0)
         self.detail = f"{label} · {human_tokens(chars)} chars" if chars else label
@@ -244,6 +247,7 @@ class Renderer:
         self._args[m.get("call_id", "")] = args
         label, hint = tools_view.label_of(str(m.get("name") or ""), args)
         self.phase, self.detail = "tool", f"{label}({hint})" if hint else label
+        self.activity = tools_view.activity(str(m.get("name") or ""))
 
     def _on_tool_finished(self, m: dict[str, Any]) -> None:
         self._end_segment()
@@ -317,14 +321,22 @@ class Renderer:
         self.session_usd += float(m.get("cost_usd") or 0.0)
         self.last_run_id = str(m.get("run_id") or self.run_id)
         self.phase, self.detail = "", ""
+        self.finished_at = time.monotonic()  # the status line shows a short burst
         self.print(self._done_line(m), gap=True)
 
     def _on_run_failed(self, m: dict[str, Any]) -> None:
         self._end_segment()
         self.phase, self.detail = "", ""
-        self.print(
-            Text(f"{theme.DOT} " + self.t("failed", message=m.get("message", "")), style=theme.ERR), gap=True
-        )
+        text = Text(self.t("failed", message=m.get("message", "")), style=theme.ERR)
+        if self.rich:
+            # Alti is upset too: a failed task is the one place worth a picture.
+            grid = Table.grid(padding=(0, 2))
+            grid.add_column(no_wrap=True)
+            grid.add_column(ratio=1)
+            grid.add_row(mascot.small("sad"), Group(Text(""), Text(""), Text(""), text))
+            self.print(grid, gap=True)
+        else:
+            self.print(Text(f"{theme.DOT} ") + text, gap=True)
 
     def _on_run_cancelled(self, m: dict[str, Any]) -> None:
         self._end_segment()

@@ -526,3 +526,48 @@ def test_a_pickers_preview_keeps_its_lines(tmp_path):
         for part in to_formatted_text(tui._ansi([Text("● Update(a.py)"), Text("2 - old"), Text("2 + new")]))
     )
     assert text.splitlines()[:3] == ["● Update(a.py)", "2 - old", "2 + new"]
+
+
+# ------------------------------------------------------------------ Alti in the terminal
+
+
+def test_alti_is_drawn_with_its_face_in_every_mood():
+    from cli import mascot
+
+    for mood in mascot.MOODS:
+        small = mascot.small(mood)
+        assert len(small.plain.splitlines()) == 7
+        # The eyes are there: the ink colour is used (as a foreground, see the next test).
+        assert any("#241608" in str(span.style) for span in small.spans), mood
+    big = mascot.art(12, "idle")
+    assert len(big.plain.splitlines()) == 12 and "▀" in big.plain
+
+
+def test_dark_pixels_are_drawn_as_the_foreground():
+    """A dark background colour got lost in the pickers and Alti had no eyes there."""
+    from cli import mascot
+
+    for span in mascot.small("idle").spans:
+        style = str(span.style)
+        if " on " in style:
+            assert not style.split(" on ")[1].startswith("#241608"), style
+
+
+def test_every_tool_has_a_kind_of_work():
+    assert tools_view.activity("read_file") == "read"
+    assert tools_view.activity("edit_file") == "write"
+    assert tools_view.activity("execute_command") == "shell"
+    assert tools_view.activity("grep_search") == "search"
+    assert tools_view.activity("browser_click") == "web"
+    assert tools_view.activity("some_mcp_tool") == "tool"
+    from cli import theme
+
+    assert {"read", "write", "shell", "search", "web", "tool", "think"} <= set(theme.ACTIVITY)
+
+
+def test_the_status_words_shimmer(tmp_path):
+    tui = _tui(tmp_path)
+    tui._spin = 10
+    parts = tui._shimmer("Thinking…")
+    assert "".join(t for _, t in parts) == "Thinking…"
+    assert len({style for style, _ in parts}) > 2, "the light runs over the words: several shades at once"

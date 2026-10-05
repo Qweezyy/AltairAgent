@@ -45,7 +45,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from cli import media, theme, tools_view
+from cli import mascot, media, theme, tools_view
 from cli.app import MODES, Client
 from cli.render import human_tokens, money
 from cli.texts import Texts
@@ -166,7 +166,9 @@ class TuiClient(Client):
 class Tui:
     def __init__(self, backend: Any, args: Any, texts: Texts) -> None:
         self.t = texts
-        self.console = FitConsole(file=_Out(), force_terminal=True, highlight=False, soft_wrap=False)
+        self.console = FitConsole(
+            file=_Out(), force_terminal=True, highlight=False, soft_wrap=False, theme=theme.rich_theme()
+        )
         self.client = TuiClient(backend, args, texts, self.console, tui=self)
         self.r = self.client.render
         self.args = args
@@ -307,11 +309,27 @@ class Tui:
                 facts.append(f"↓ {human_tokens(self.r.tokens)}")
             if self.running:
                 facts.append(self.t("esc_stop"))
-            verb = tools_view.one_line(self._verb(), max(self._width() - 40, 20))
+            verb = tools_view.one_line(self._verb(), max(self._width() - 40, 20)) + "…"
+            kind = (
+                "compact"
+                if self.r.phase == "compacting"
+                else "retry"
+                if self.r.phase == "retry"
+                else self.r.activity
+            )
             parts += [
                 ("class:spinner", f"{frame} "),
-                ("class:verb", verb + "…"),
+                ("class:verb", f"{theme.ACTIVITY.get(kind, theme.STAR)} "),
+                *self._shimmer(verb),
                 ("class:dim", f"  ({' · '.join(facts)})"),
+                ("", "\n"),
+            ]
+        elif time.monotonic() - self.r.finished_at < 1.6:
+            # Done: a short burst where the status was, then the plain input again.
+            step = min(int((time.monotonic() - self.r.finished_at) / 0.32), len(theme.BURST) - 1)
+            parts += [
+                ("class:spinner", f"  {theme.BURST[step]}  "),
+                ("class:verb", self.t("st.done")),
                 ("", "\n"),
             ]
         if self.attachments:
@@ -323,6 +341,18 @@ class Tui:
             ]
         parts.append(("class:rule", "─" * self._width()))
         return FormattedText(parts)
+
+    def _shimmer(self, text: str) -> list[tuple[str, str]]:
+        """The status words with a light running over them, the way a live thing glints."""
+        span = len(text) + 10
+        pos = (self._spin * 0.9) % span - 5
+        out = []
+        a, b = theme.SHIMMER_FROM, theme.SHIMMER_TO
+        for i, ch in enumerate(text):
+            k = max(0.0, 1.0 - abs(i - pos) / 4.5)
+            rgb = tuple(round(a[j] + (b[j] - a[j]) * k) for j in range(3))
+            out.append((f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}", ch))
+        return out
 
     def _toolbar(self) -> FormattedText:
         width = self._width()
@@ -607,7 +637,7 @@ class Tui:
             )
         shown: list[Any] = [
             Text(""),
-            tools_view.header(name, args, None),
+            self._with_alti("help", [tools_view.header(name, args, None)]),
             *tools_view.preview(name, args, self.t, start),
         ]
         reason = str(m.get("reason") or "").strip()
@@ -631,6 +661,14 @@ class Tui:
         self.r.print(line, gap=True)
         return scope
 
+    def _with_alti(self, mood: str, beside: list[Any]) -> Any:
+        """Alti on the left, the given lines on the right, level with its face."""
+        grid = Table.grid(padding=(0, 2))
+        grid.add_column(no_wrap=True)
+        grid.add_column(ratio=1)
+        grid.add_row(mascot.small(mood), Group(Text(""), Text(""), Text(""), *beside))
+        return grid
+
     async def questions(self, m: dict[str, Any]) -> dict[str, list[str]]:
         self.r.pause()
         answers: dict[str, list[str]] = {}
@@ -647,7 +685,15 @@ class Tui:
             multi = q.get("kind") in ("multiple", "ranking")
             default = next((n for n, o in enumerate(options) if o.recommended), 0)
             picked = await self.select(
-                str(q.get("question") or ""), options, multi=multi, allow_text=True, default=default
+                str(q.get("question") or ""),
+                options,
+                multi=multi,
+                allow_text=True,
+                default=default,
+                preview=[
+                    Text(""),
+                    self._with_alti("think" if i else "help", [Text(self.t("q_asks"), style="bold")]),
+                ],
             )
             if picked is None:
                 labels: list[str] = []
@@ -694,19 +740,21 @@ class Tui:
     # ================================================================ the conversation
 
     def welcome(self, profile_name: str = "") -> None:
-        star = Text("\n  ╷\n──✦──\n  ╵", style=f"bold {theme.GOLD}", justify="center")
+        star = mascot.art(12, "happy" if profile_name else "idle")
         info = Table.grid(padding=(0, 2))
         info.add_column(style=theme.MUTED, no_wrap=True)
         info.add_column()
         hello = self.t("welcome_name", name=profile_name) if profile_name else self.t("welcome")
-        info.add_row("", Text(hello, style="bold"))
+        for _ in range(3):  # level with Alti's face
+            info.add_row("", "")
+        info.add_row("", Text(hello, style=f"bold {theme.INK}"))
         info.add_row(self.t("w.model"), Text(self.model or "—", style=theme.GOLD))
         info.add_row(self.t("w.folder"), self.workspace)
         title = self.chat_title()
         if title:
             info.add_row(self.t("w.chat"), Text(title))
         grid = Table.grid(padding=(0, 3))
-        grid.add_column(width=7)
+        grid.add_column(width=24, no_wrap=True)
         grid.add_column()
         grid.add_row(star, info)
         tips = Text(self.t("tips"), style=theme.FAINT)
@@ -723,6 +771,14 @@ class Tui:
         for w in warnings[:3]:
             self.console.print(Text(f"  ! {w}", style=theme.WARN))
         self.console.print()
+
+    def goodbye(self) -> None:
+        """Leaving: the chat stays, and how to come back to it."""
+        sid = str(self.client.session.get("id") or "")
+        lines: list[Any] = [Text(self.t("bye"), style=f"bold {theme.INK}")]
+        if sid and (self.client.session.get("timeline") or self.r.last_run_id):
+            lines.append(Text(self.t("bye_resume", id=sid), style=theme.FAINT))
+        self.r.print(self._with_alti("happy", lines), gap=True)
 
     def echo_user(self, text: str, attachments: list[str] | None = None) -> None:
         self.r.pause()
@@ -1311,6 +1367,8 @@ class Tui:
                         self.r.print(Text(self.t("unknown_cmd", name=text[1:]), style=theme.WARN), gap=True)
                         continue
                     await self.submit(text)
+                if not self._closed:
+                    self.goodbye()
             finally:
                 pump.cancel()
                 if self._bg is not None:
