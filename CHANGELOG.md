@@ -25,8 +25,17 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   `/reasoning`, `/context`, `/cost`, `/diff`, `/undo`, `/init`, `/memory`, `/skills`, `/mcp`,
   `/secret`, `/out`, `/history`, `/rename`, and the quick commands from the settings. Pipes, `-p`
   and `ALTAIR_PLAIN=1` keep the plain line mode.
+- **Files and pictures in the terminal.** `@file` and a file dropped on the terminal go to the agent as
+  attachments (a picture it looks at, a document's text), Alt+V attaches a copied picture or copied
+  files. Pictures the agent shows are drawn in the terminal; interactive widgets are saved as a page
+  to open with Ctrl+click or `/open`.
+- **`/compact`** folds the conversation into a summary on demand (optionally: what to keep above all);
+  the messages stay in the chat, the model sees the summary.
 
 ### Fixed
+- `altair` was "not recognized" unless the app was installed with install.ps1: the app now puts its
+  `bin` on the user's PATH when it starts (Linux/macOS: a link in `~/.local/bin`), and drops a dead
+  entry left by a moved copy. `CLI_ON_PATH=false` turns this off.
 - Installing an update showed "downloading started" and then nothing: the dialog now shows each
   stage — the download in MB and percent with its speed, the signature check, unpacking — and the
   reason if it fails.

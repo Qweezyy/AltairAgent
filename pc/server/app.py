@@ -122,6 +122,13 @@ async def lifespan(app: FastAPI):
 
     app.state.settings = settings
     app.state.registry = registry
+    # `altair` reachable from any new terminal, wherever the app was unpacked or moved.
+    from core.cli_path import ensure_on_path
+
+    try:
+        await asyncio.to_thread(ensure_on_path, settings.cli_on_path)
+    except OSError as exc:
+        logger.warning("altair PATH: %s", exc)
     # Папки открытых чатов: превью должно работать сразу после выбора папки,
     # не дожидаясь, пока чат сохранится на диск.
     app.state.active_workspaces = {str(settings.workspace)}

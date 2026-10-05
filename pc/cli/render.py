@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
@@ -23,10 +24,26 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from cli import theme, tools_view
+from cli import media, theme, tools_view
 from cli.texts import Texts
 
 CODE_THEME = "ansi_dark"
+
+#: Tools whose result the conversation already shows through their own event (the plan, the
+#: question picker, the picture, the widget, the file): their tool line would repeat it.
+SHOWN_BY_EVENTS = frozenset(
+    {
+        "update_plan",
+        "write_plan",
+        "ask",
+        "show_image",
+        "show_graphic",
+        "show_interactive",
+        "show_ui",
+        "show_file",
+        "attach_file",
+    }
+)
 
 
 class _Code(CodeBlock):
@@ -105,6 +122,8 @@ class Renderer:
         self._blank = True  # the last printed line was empty: no second gap
         self._last_plan: list[dict[str, Any]] = []
         self.workspace = ""  # where relative paths of the tools point (for line numbers)
+        self.media_dir: Path | None = None  # where widgets are saved as pages
+        self.last_shown: Path | None = None  # what /open opens
         # --- what the status line shows ---
         self.phase = ""  # "" idle | thinking | reasoning | writing | tool | pending | retry
         self.detail = ""
@@ -235,7 +254,7 @@ class Renderer:
         self.last_tool = {"name": name, "args": args, "output": output, "ok": ok}
         if not self._args:
             self.phase, self.detail = "thinking", ""
-        if name in ("update_plan", "write_plan", "ask") and ok:
+        if name in SHOWN_BY_EVENTS and ok:
             return  # shown by plan.updated / the question picker
         if self.rich:
             start = 1
@@ -316,6 +335,29 @@ class Renderer:
     def _on_state(self, m: dict[str, Any]) -> None:
         if m.get("state") == "idle":
             self.phase, self.detail = "", ""
+        elif m.get("state") == "compacting":
+            self.phase, self.detail = "compacting", ""
+            self.run_started = time.monotonic()
+
+    def _on_compacted(self, m: dict[str, Any]) -> None:
+        self._end_segment()
+        self.phase, self.detail = "", ""
+        if m.get("error") or not m.get("folded"):
+            text = m.get("error") or m.get("message") or ""
+            self.print(
+                Text(f"  {theme.ELBOW}  {text}", style=theme.WARN if m.get("error") else theme.MUTED),
+                gap=True,
+            )
+            return
+        before, after = int(m.get("before") or 0), int(m.get("after") or 0)
+        head = Text(f"{theme.STAR} ", style=theme.GOLD)
+        head.append(
+            self.t("compacted", n=m["folded"], before=human_tokens(before), after=human_tokens(after))
+        )
+        self.print(head, gap=True)
+        summary = str(m.get("summary") or "").strip()
+        if summary:
+            self.print(Text(f"  {theme.ELBOW}  {summary}", style=theme.MUTED))
 
     def _on_log(self, m: dict[str, Any]) -> None:
         level = m.get("level")
@@ -336,23 +378,57 @@ class Renderer:
     def _on_model_routed(self, m: dict[str, Any]) -> None:
         self.print(Text(f"  → {m.get('model')}", style=theme.FAINT))
 
-    def _file_line(self, path: str, caption: str = "") -> None:
+    def _file_line(self, path: str, caption: str = "", *, picture: bool = False) -> None:
+        """A file the agent showed: a link to open it (ctrl+click in most terminals, or /open)
+        and, for a picture, the picture itself."""
         self._end_segment()
+        target = media.absolute(path, self.workspace)
+        self.last_shown = target
         line = Text(f"{theme.DOT} ", style=theme.INFO)
-        line.append(path, style=f"underline {theme.INFO}")
+        try:
+            line.append(path, style=f"underline {theme.INFO} link {media.file_uri(target)}")
+        except ValueError:
+            line.append(path, style=f"underline {theme.INFO}")
         if caption:
             line.append(f"  {caption}", style=theme.MUTED)
         self.print(line, gap=True)
+        if picture and self.rich:
+            thumb = media.thumbnail(target)
+            if thumb is not None:
+                self.print(thumb)
 
     def _on_show_image(self, m: dict[str, Any]) -> None:
-        self._file_line(str(m.get("path") or ""), str(m.get("caption") or ""))
+        self._file_line(str(m.get("path") or ""), str(m.get("caption") or ""), picture=True)
 
     def _on_show_file(self, m: dict[str, Any]) -> None:
-        self._file_line(str(m.get("path") or ""), str(m.get("caption") or ""))
+        path = str(m.get("path") or "")
+        self._file_line(
+            path, str(m.get("caption") or ""), picture=Path(path).suffix.lower() in media.IMAGE_SUFFIXES
+        )
 
     def _on_show_html(self, m: dict[str, Any]) -> None:
+        """A widget cannot run in a terminal: it is saved as a page and opened in the browser."""
         self._end_segment()
-        self.print(Text(f"  {theme.ELBOW}  " + self.t("widget"), style=theme.FAINT), gap=True)
+        html = str(m.get("html") or "")
+        if not html or self.media_dir is None:
+            self.print(Text(f"  {theme.ELBOW}  " + self.t("widget"), style=theme.FAINT), gap=True)
+            return
+        try:
+            page = media.save_widget(html, self.media_dir)
+        except OSError:
+            self.print(Text(f"  {theme.ELBOW}  " + self.t("widget"), style=theme.FAINT), gap=True)
+            return
+        self.last_shown = page
+        line = Text(f"{theme.DOT} ", style=theme.INFO)
+        line.append(self.t("widget_saved"), style="bold")
+        caption = str(m.get("caption") or "")
+        if caption:
+            line.append(f"  {caption}", style=theme.MUTED)
+        self.print(line, gap=True)
+        link = Text(f"  {theme.ELBOW}  ", style=theme.FAINT)
+        link.append(str(page), style=f"underline {theme.INFO} link {media.file_uri(page)}")
+        link.append("  " + self.t("open_hint"), style=theme.FAINT)
+        self.print(link)
 
     def _on_run_rollback(self, m: dict[str, Any]) -> None:
         if m.get("error"):

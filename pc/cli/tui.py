@@ -45,7 +45,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from cli import theme, tools_view
+from cli import media, theme, tools_view
 from cli.app import MODES, Client
 from cli.render import human_tokens, money
 from cli.texts import Texts
@@ -189,6 +189,7 @@ class Tui:
         self._started = False
         self.picking = ""  # the title of the picker on screen ("" = none)
         self._bg: asyncio.Task | None = None
+        self.attachments: list[str] = []  # files going with the next message
 
     # ================================================================ state
 
@@ -291,24 +292,33 @@ class Tui:
             "tool": "st.tool",
             "pending": "st.pending",
             "retry": "st.retry",
+            "compacting": "st.compacting",
         }.get(phase, "st.thinking")
         return self.t(key, detail=detail) if detail else self.t(key + ".plain")
 
     def _message(self) -> FormattedText:
         parts: list[tuple[str, str]] = []
-        if self.running:
+        if self.running or self.r.phase == "compacting":
             self._spin = (self._spin + 1) % (len(theme.SPINNER) * 2)
             frame = theme.SPINNER[self._spin // 2]
             elapsed = int(time.monotonic() - self.r.run_started) if self.r.run_started else 0
             facts = [f"{elapsed // 60}m {elapsed % 60:02d}s" if elapsed >= 60 else f"{elapsed}s"]
             if self.r.tokens:
                 facts.append(f"↓ {human_tokens(self.r.tokens)}")
-            facts.append(self.t("esc_stop"))
+            if self.running:
+                facts.append(self.t("esc_stop"))
             verb = tools_view.one_line(self._verb(), max(self._width() - 40, 20))
             parts += [
                 ("class:spinner", f"{frame} "),
                 ("class:verb", verb + "…"),
                 ("class:dim", f"  ({' · '.join(facts)})"),
+                ("", "\n"),
+            ]
+        if self.attachments:
+            names = "  ·  ".join(Path(a).name for a in self.attachments)
+            parts += [
+                ("class:verb", f"  ⧉ {names}"),
+                ("class:faint", "   " + self.t("detach_hint")),
                 ("", "\n"),
             ]
         parts.append(("class:rule", "─" * self._width()))
@@ -360,7 +370,7 @@ class Tui:
         def _(event: KeyPressEvent) -> None:
             event.current_buffer.insert_text("\n")
 
-        @kb.add("escape", eager=True)
+        @kb.add("escape")
         def _(event: KeyPressEvent) -> None:
             buf = event.current_buffer
             if buf.complete_state:
@@ -407,6 +417,13 @@ class Tui:
         @kb.add("c-l")
         def _(event: KeyPressEvent) -> None:
             event.app.renderer.clear()
+
+        @kb.add("escape", "v")
+        @kb.add("c-v")
+        def _(event: KeyPressEvent) -> None:
+            # The terminal itself pastes text (Ctrl+V / right click arrive as text); what comes
+            # here is the key, so the clipboard is checked for an image or copied files.
+            self.paste_files()
 
         @kb.add("?")
         def _(event: KeyPressEvent) -> None:
@@ -459,7 +476,7 @@ class Tui:
             width=self._width(),
             highlight=False,
             soft_wrap=False,
-        ).print(*renderables)
+        ).print(Group(*renderables))  # Group: print(a, b) would join them with a space
         return ANSI(buf.getvalue())
 
     async def select(
@@ -707,7 +724,7 @@ class Tui:
             self.console.print(Text(f"  ! {w}", style=theme.WARN))
         self.console.print()
 
-    def echo_user(self, text: str) -> None:
+    def echo_user(self, text: str, attachments: list[str] | None = None) -> None:
         self.r.pause()
         lines = text.splitlines() or [""]
         out = Text(f"{theme.PROMPT} ", style=f"bold {theme.GOLD}")
@@ -715,6 +732,27 @@ class Tui:
         for line in lines[1:]:
             out.append("\n  " + line, style="bold")
         self.r.print(out, gap=True)
+        for path in attachments or []:
+            line = Text(f"  {theme.ELBOW}  ⧉ ", style=theme.FAINT)
+            line.append(Path(path).name, style=theme.MUTED)
+            self.r.print(line)
+
+    def attach(self, paths: list[str]) -> None:
+        for path in paths:
+            if path not in self.attachments:
+                self.attachments.append(path)
+
+    def paste_files(self) -> None:
+        found = media.clipboard_files(Path(self.client.app_dir) / "cli_paste")
+        if not found:
+            self.r.print(Text("  " + self.t("clipboard_empty"), style=theme.FAINT))
+            return
+        self.attach(found)
+        for path in found:
+            if Path(path).suffix.lower() in media.IMAGE_SUFFIXES:
+                thumb = media.thumbnail(path, cols=36, rows=10)
+                if thumb is not None:
+                    self.r.print(thumb, gap=True)
 
     def show_history(self, everything: bool = False) -> None:
         entries = [
@@ -740,6 +778,7 @@ class Tui:
     async def on_loaded(self) -> None:
         """Another chat was opened (/new, /resume): its name and the end of its conversation."""
         self.r.workspace = self.workspace
+        self.r.media_dir = Path(self.client.app_dir) / "cli_widgets"
         if not self._started:
             return
         self.r.session_usd = 0.0
@@ -758,11 +797,19 @@ class Tui:
         if self.running:
             self.echo_user(text)
             await self.client.send({"type": "run", "task": text})  # a hint to the running task
+            if self.attachments:
+                self.r.print(Text("  " + self.t("attach_later"), style=theme.FAINT))
             return
-        self.echo_user(text)
+        # '@file' mentions and dropped paths go along as attachments: the agent gets the file
+        # itself (a picture to look at, a document's text), not only its name.
+        self.attach(media.mentioned_files(text, self.workspace))
+        files, self.attachments = self.attachments, []
+        self.echo_user(text, files)
         self.r.phase, self.r.run_started, self.r.tokens = "thinking", time.monotonic(), 0
         self.client.running = True
         payload: dict[str, Any] = {"type": "run", "task": text}
+        if files:
+            payload["options"] = {"attachments": files}
         if self.args.model:
             payload["model"] = self.args.model
         await self.client.send(payload)
@@ -812,6 +859,10 @@ class Tui:
         add("mcp", self.c_mcp)
         add("secret", self.c_secret)
         add("out", self.c_out)
+        add("open", self.c_open)
+        add("attach", self.c_attach, args=self._attach_args)
+        add("detach", self.c_detach)
+        add("compact", self.c_compact)
         add("history", self.c_history)
         add("stop", self.c_stop)
         add("exit", self.c_exit, "quit", "q")
@@ -1138,6 +1189,46 @@ class Tui:
         self.r.print(Text(tool["output"] or self.t("tool.no_output"), style=theme.MUTED))
         return False
 
+    async def c_open(self, rest: str) -> bool:
+        target = media.absolute(rest, self.workspace) if rest else self.r.last_shown
+        if target is None or not target.exists():
+            self.r.print(Text(self.t("nothing_to_open"), style=theme.MUTED), gap=True)
+            return False
+        ok = await asyncio.to_thread(media.open_path, target)
+        self.r.print(
+            Text(
+                f"  {theme.ELBOW}  " + self.t("opened" if ok else "open_failed", path=target.name),
+                style=theme.MUTED if ok else theme.WARN,
+            )
+        )
+        return False
+
+    def _attach_args(self) -> list[str]:
+        return self.files()[:2000]
+
+    async def c_attach(self, rest: str) -> bool:
+        if not rest:
+            self.paste_files()
+            return False
+        paths = media.mentioned_files("@" + rest if not rest.startswith("@") else rest, self.workspace)
+        if not paths:
+            self.r.print(Text(self.t("not_a_file", path=rest), style=theme.WARN), gap=True)
+            return False
+        self.attach(paths)
+        return False
+
+    async def c_detach(self, rest: str) -> bool:
+        self.attachments = []
+        return False
+
+    async def c_compact(self, rest: str) -> bool:
+        if self.running:
+            self.r.print(Text(self.t("compact_busy"), style=theme.WARN), gap=True)
+            return False
+        self.r.phase, self.r.run_started = "compacting", time.monotonic()
+        await self.client.send({"type": "compact", "focus": rest})
+        return False
+
     async def c_history(self, rest: str) -> bool:
         sid = self.client.session.get("id")
         data = await self._get(f"/api/sessions/{sid}")
@@ -1186,6 +1277,7 @@ class Tui:
         with patch_stdout(raw=True):
             self.r.ctx_tokens = int(self.client.session.get("context_tokens") or 0)
             self.r.workspace = self.workspace
+            self.r.media_dir = Path(self.client.app_dir) / "cli_widgets"
             self.welcome(profile)
             self.show_history()
             self._started = True
@@ -1292,6 +1384,9 @@ class InputBox:
             refresh_interval=0.12,
             mouse_support=False,
         )
+        # Alt+key arrives as Esc + key: a lone Esc (stop the agent) is told apart by a short
+        # pause after it — short enough not to feel like a delay.
+        self.app.ttimeoutlen = 0.12
 
     def _menu_height(self) -> Dimension:
         """As many rows as there are completions (up to 8): no empty rows under a short list."""

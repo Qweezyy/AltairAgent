@@ -273,6 +273,8 @@ class Connection:
             await self._start_run(message)
         elif kind == "stop":
             await self._stop_run()
+        elif kind == "compact":
+            await self.chat.compact(str(message.get("focus") or "").strip())
         elif kind == "reset":
             self.session.reset()
             await self._save_session()

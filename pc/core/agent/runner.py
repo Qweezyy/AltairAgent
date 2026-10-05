@@ -644,9 +644,7 @@ class AgentRunner:
             old = self.session.peek_prefix(count)
             summary = await self._summarize_history(old)
             if summary:
-                self.session.replace_prefix(
-                    count, f"[Ранее в диалоге (свёрнуто {count} сообщений): {summary}]"
-                )
+                self.session.replace_prefix(count, folded_note(count, summary))
                 await self._log(tr("log.compacted", n=count), "debug")
                 return
 
@@ -657,35 +655,7 @@ class AgentRunner:
 
     async def _summarize_history(self, messages: list[dict[str, Any]]) -> str:
         """Folds the old part of the conversation into a short summary with one model call."""
-        transcript = _format_for_summary(messages)
-        if not transcript.strip():
-            return ""
-        saved_level, self.llm.reasoning = self.llm.reasoning, "minimal"
-        try:
-            turn = await self.llm.complete(
-                [
-                    {"role": "system", "content": "You condense the start of a conversation into a short memo "
-                                                  "for carrying on the work."},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Condense this start of the conversation between the agent and the user into a "
-                            "short summary (5–8 sentences): what the user asked for, what the agent did, and "
-                            "which facts, agreements and decisions matter for carrying on. To the point. "
-                            "Write in the language of the conversation.\n\n" + transcript
-                        ),
-                    },
-                ],
-                # Room for reasoning models: with 600 the thinking used it all and the summary
-                # came back empty, so the oldest part was dropped instead of folded.
-                max_tokens=2500,
-            )
-        except (AgentError, LLMError) as exc:
-            logger.debug("Could not condense the context: %s", exc)
-            return ""
-        finally:
-            self.llm.reasoning = saved_level
-        return (turn.content or "").strip()
+        return await summarize_history(self.llm, messages)
 
     def _app_closing(self) -> bool:
         """The run is being stopped because the app closes, not by the user's stop button."""
@@ -892,6 +862,43 @@ class AgentRunner:
 #: Насколько подрезаем каждое сообщение при формировании выжимки для резюме —
 #: длинные результаты инструментов не должны раздуть сам запрос на сжатие.
 _SUMMARY_MSG_LIMIT = 1500
+
+
+def folded_note(count: int, summary: str) -> str:
+    """What the model sees in place of the folded start of the conversation."""
+    return f"[Earlier in this conversation ({count} messages folded): {summary}]"
+
+
+async def summarize_history(llm: Any, messages: list[dict[str, Any]], focus: str = "") -> str:
+    """Condenses the start of a conversation into a short memo with one model call ("" when it
+    did not work: the caller then keeps the messages or drops them, never folds into nothing).
+    `focus`: what the user wants kept above all (/compact <focus>)."""
+    transcript = _format_for_summary(messages)
+    if not transcript.strip():
+        return ""
+    ask = ("Condense this start of the conversation between the agent and the user into a short summary "
+           "(5–8 sentences): what the user asked for, what the agent did, and which facts, agreements and "
+           "decisions matter for carrying on. To the point. Write in the language of the conversation.")
+    if focus:
+        ask += f" Keep above all: {focus}."
+    saved_level, llm.reasoning = getattr(llm, "reasoning", None), "minimal"
+    try:
+        turn = await llm.complete(
+            [
+                {"role": "system", "content": "You condense the start of a conversation into a short memo "
+                                              "for carrying on the work."},
+                {"role": "user", "content": ask + "\n\n" + transcript},
+            ],
+            # Room for reasoning models: with 600 the thinking used it all and the summary
+            # came back empty, so the oldest part was dropped instead of folded.
+            max_tokens=2500,
+        )
+    except (AgentError, LLMError) as exc:
+        logger.debug("Could not condense the context: %s", exc)
+        return ""
+    finally:
+        llm.reasoning = saved_level
+    return (turn.content or "").strip()
 
 
 def _format_for_summary(messages: list[dict[str, Any]]) -> str:

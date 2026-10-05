@@ -504,7 +504,7 @@ async def test_long_history_is_compacted_into_summary(settings):
 
     # В истории появилась свёрнутая заметка с резюме, старьё ушло.
     joined = " ".join(str(m.get("content")) for m in session.messages if m.get("role") == "system")
-    assert "свёрнуто" in joined
+    assert "messages folded" in joined
     assert "РЕЗЮМЕ" in joined
 
 

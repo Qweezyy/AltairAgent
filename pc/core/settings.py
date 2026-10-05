@@ -164,6 +164,9 @@ class Settings(BaseSettings):
     #: The model names a new chat from its first message (one tiny extra request to the
     #: cheapest configured model). Off: the chat is named after that message's first line.
     chat_titles: bool = True
+    #: The packaged app puts its `altair` terminal command on the user's PATH on start
+    #: (Windows: the user's Path; Linux/macOS: a link in ~/.local/bin).
+    cli_on_path: bool = True
     #: Health-gate: перед завершением, если правился код, АВТОМАТИЧЕСКИ прогнать
     #: автоопределённые тесты проекта. Не прошли — вернуть агенту вывод и попросить
     #: починить (до health_gate_max_cycles попыток); если так и красно — по желанию

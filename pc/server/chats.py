@@ -503,6 +503,37 @@ class ChatState:
             self._finish_wake()
             await self._save_session()
 
+    async def compact(self, focus: str = "") -> None:
+        """Folds the conversation so far into a summary now (/compact), keeping the last few
+        messages as they are. The messages stay in the chat; the model sees the summary."""
+        if self.running:
+            await self.send({"type": "log", "level": "warning", "text": tr("ws.compact_busy")})
+            return
+        from core.agent.runner import folded_note, summarize_history
+
+        count = self.session.overflow_count(0, keep_recent=4)
+        if count <= 0:
+            await self.send({"type": "compacted", "folded": 0, "message": tr("ws.compact_nothing")})
+            return
+        before = self.session.token_estimate()
+        await self.send({"type": "state", "state": "compacting"})
+        try:
+            llm = build_llm_client(model=self.session.model or None)
+            summary = await summarize_history(llm, self.session.peek_prefix(count), focus)
+        except AgentError as exc:
+            summary = ""
+            logger.warning("compact: %s", exc)
+        if not summary:
+            await self._state("idle")
+            await self.send({"type": "compacted", "folded": 0, "error": tr("ws.compact_failed")})
+            return
+        folded = self.session.replace_prefix(count, folded_note(count, summary))
+        await self._save_session()
+        await self._state("idle")
+        await self.send({"type": "compacted", "folded": folded, "before": before,
+                         "after": self.session.token_estimate(), "summary": summary})
+        await self._send_context_usage()
+
     async def stop(self) -> None:
         if self.running:
             self.run_task.cancel()  # type: ignore[union-attr]

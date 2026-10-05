@@ -398,3 +398,131 @@ def test_every_text_has_both_languages():
     missing = [k for k, v in TEXTS.items() if set(v) != {"en", "ru"}]
     assert missing == []
     assert all(set(v) == {"en", "ru"} and len(v["en"]) == len(v["ru"]) for v in PAIRS.values())
+
+
+# ------------------------------------------------------------------ compact, attachments, media
+
+
+async def test_compact_folds_the_conversation_into_a_summary(live, screen):  # noqa: F811
+    live.script(
+        [AssistantTurn(content=f"answer {i}") for i in range(4)]
+        + [AssistantTurn(content="We planned the garden: tomatoes by the fence.")]
+    )
+    async with screen("bypass") as s:
+        for i in range(4):
+            await s.task_line(f"question {i}")
+            await s.idle()
+        await s.type("/compact keep the plants\r")
+        await wait_until(lambda: "Compacted:" in s.out)
+        assert "tomatoes by the fence" in s.out
+        stored = live.store.load(s.tui.client.session["id"])
+        notes = [m for m in stored.messages if m.get("_summary")]
+        assert len(notes) == 1 and "tomatoes by the fence" in notes[0]["content"]
+        assert notes[0]["content"].startswith("[Earlier in this conversation")
+        # Nothing is lost: the folded messages stay in the chat, only hidden from the model.
+        assert sum(1 for m in stored.messages if m.get("_hidden")) >= 4
+        assert [e["text"] for e in stored.timeline if e.get("kind") == "user"] == [
+            f"question {i}" for i in range(4)
+        ]
+
+
+async def test_compact_says_when_there_is_nothing_to_fold(live, screen):  # noqa: F811
+    async with screen("bypass") as s:
+        await s.type("/compact\r")
+        await wait_until(lambda: "Nothing to compact" in s.out)
+
+
+async def test_a_mentioned_file_goes_to_the_model_as_an_attachment(live, settings, screen, monkeypatch):  # noqa: F811
+    (Path(settings.workspace) / "notes.txt").write_text("the secret word is heliotrope", encoding="utf-8")
+    llm = ScriptedLLM([AssistantTurn(content="read it")])
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None, **kw: llm)
+    async with screen("bypass") as s:
+        await s.task_line("what does @notes.txt say?")
+        await s.idle()
+        assert "heliotrope" in str(llm.calls[0]["messages"])
+        assert "⧉ notes.txt" in s.out
+
+
+async def test_alt_v_attaches_the_clipboard_picture(live, settings, screen, monkeypatch, tmp_path):  # noqa: F811
+    from PIL import Image
+
+    import cli.media as media
+
+    picture = tmp_path / "paste.png"
+    Image.new("RGB", (8, 8), (255, 0, 0)).save(picture)
+    monkeypatch.setattr(media, "clipboard_files", lambda folder: [str(picture)])
+    llm = ScriptedLLM([AssistantTurn(content="a red square")])
+    monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None, **kw: llm)
+    async with screen("bypass") as s:
+        await s.type("\x1bv")
+        await wait_until(lambda: s.tui.attachments == [str(picture)])
+        await s.task_line("what is this?")
+        await s.idle()
+        user = [m for m in llm.calls[0]["messages"] if m.get("role") == "user"][-1]
+        assert isinstance(user["content"], list) and any(
+            p.get("type") == "image_url" for p in user["content"]
+        )
+        assert s.tui.attachments == []
+
+
+def test_mentions_and_dropped_paths_are_found(tmp_path):
+    from cli.media import mentioned_files
+
+    (tmp_path / "a.py").write_text("", encoding="utf-8")
+    spaced = tmp_path / "my notes.md"
+    spaced.write_text("", encoding="utf-8")
+    found = mentioned_files(
+        f'look at @a.py and @"my notes.md", also "{spaced}" and @missing.txt', str(tmp_path)
+    )
+    assert found == [str(tmp_path / "a.py"), str(spaced)]
+    assert mentioned_files("mail me at me@example.com", str(tmp_path)) == []
+
+
+def test_a_picture_is_drawn_in_colour_half_blocks(tmp_path):
+    from PIL import Image
+
+    from cli.media import thumbnail
+
+    path = tmp_path / "two.png"
+    img = Image.new("RGB", (4, 2))
+    img.putpixel((0, 0), (255, 0, 0))
+    img.putpixel((0, 1), (0, 0, 255))
+    img.save(path)
+    thumb = thumbnail(path)
+    assert thumb is not None and "▀" in thumb.plain
+    buf = io.StringIO()
+    Console(file=buf, force_terminal=True, color_system="truecolor", width=80).print(thumb)
+    assert "38;2;255;0;0" in buf.getvalue() and "48;2;0;0;255" in buf.getvalue()  # top red, bottom blue
+    assert thumbnail(tmp_path / "missing.png") is None
+
+
+def test_a_widget_is_saved_as_a_page_and_opened(tmp_path, monkeypatch):
+    import cli.media as media
+
+    buf = io.StringIO()
+    r = Renderer(Texts("en"), Console(file=buf, force_terminal=True, color_system=None, width=200))
+    r.media_dir = tmp_path / "widgets"
+    r.event({"type": "show_html", "html": "<h1>Calculator</h1>", "caption": "a calculator"})
+    pages = list((tmp_path / "widgets").glob("*.html"))
+    assert len(pages) == 1 and pages[0].read_text(encoding="utf-8") == "<h1>Calculator</h1>"
+    assert r.last_shown == pages[0] and "Interactive widget" in buf.getvalue()
+
+    opened: list[Path] = []
+    monkeypatch.setattr(media, "open_path", lambda p: opened.append(p) or True)
+    tui = _tui(tmp_path)
+    tui.r = r
+    asyncio.run(tui.c_open(""))
+    assert opened == [pages[0]]
+
+
+def test_a_pickers_preview_keeps_its_lines(tmp_path):
+    """Found live: the diff shown in an approval came out as one line (print(a, b) joins with a space)."""
+    from prompt_toolkit.formatted_text import to_formatted_text
+    from rich.text import Text
+
+    tui = _tui(tmp_path)
+    text = "".join(
+        part[1]
+        for part in to_formatted_text(tui._ansi([Text("● Update(a.py)"), Text("2 - old"), Text("2 + new")]))
+    )
+    assert text.splitlines()[:3] == ["● Update(a.py)", "2 - old", "2 + new"]

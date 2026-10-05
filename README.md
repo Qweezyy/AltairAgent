@@ -172,7 +172,9 @@ python main.py --server
 
 ## Terminal (`altair`)
 
-The same agent and the same chats in a terminal. `install.ps1` puts `altair` on your PATH.
+The same agent and the same chats in a terminal. The app puts `altair` on your PATH when it starts
+(Windows: the user's Path; Linux/macOS: a link in `~/.local/bin`; `CLI_ON_PATH=false` to skip) — open a
+new terminal after the first start.
 
 ```bash
 altair                          # talk in a new chat; the folder is the current directory
@@ -205,13 +207,19 @@ goes to it as a hint.
 | `Shift+Tab` | approval mode: ask → auto → no approvals |
 | `Ctrl+C` | clear the input, stop the task; twice on an empty line exits |
 | `Ctrl+T` | show the model's reasoning |
+| `Alt+V` | attach a copied picture (or files copied in the file manager) |
 | `↑` `↓` `→` | earlier messages, accept the grey suggestion |
-| `/` · `@` | commands · mention a file (both complete with Tab) |
+| `/` · `@` | commands · attach a file (both complete with Tab) |
+
+`@file` sends the file itself along (a picture for the model to look at, a document's text), and so
+does a file dropped on the terminal. Pictures the agent shows are drawn right in the terminal;
+interactive widgets are saved as a page — Ctrl+click the link or `/open`.
 
 Commands: `/new`, `/resume` (a picker of chats, also those from the window), `/rename`, `/model`,
-`/mode`, `/reasoning`, `/context`, `/cost`, `/diff` (uncommitted changes), `/undo` (roll back the
-last task's file changes), `/init` (write AGENTS.md), `/memory`, `/skills`, `/mcp`, `/secret NAME`
-(hidden input, saved to the folder's `.env`), `/out` (the last tool's full output), `/history`,
+`/mode`, `/reasoning`, `/context`, `/compact [what to keep]` (fold the conversation into a summary now),
+`/cost`, `/diff` (uncommitted changes), `/undo` (roll back the last task's file changes), `/init` (write
+AGENTS.md), `/attach`, `/detach`, `/open`, `/memory`, `/skills`, `/mcp`, `/secret NAME` (hidden input,
+saved to the folder's `.env`), `/out` (the last tool's full output), `/history`,
 `/help`, `/exit` — and your quick commands from the settings (`/tests`, …). A pipe, `-p` or
 `ALTAIR_PLAIN=1` gives the plain line mode.
 
