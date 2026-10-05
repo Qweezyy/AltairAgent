@@ -187,10 +187,33 @@ altair --chats                  # list chats (those working in the background ar
 The terminal is one more window onto the app, not a second app: when the desktop app runs, `altair`
 joins it and a chat started in one shows up live in the other; otherwise it starts the backend in the
 background and stops it on exit. Settings, model keys, skills, memory and reminders are shared.
-Ctrl+C stops the task (twice exits); a line typed while the agent works goes to it as a hint.
 `--mode manual|auto|bypass` sets the chat's approval mode, `--output-format json|stream-json` gives
 machine-readable output. Exit codes: 0 done, 1 failed or stopped, 2 needed a person (an approval or a
 question) with nobody at the terminal to answer.
+
+In a terminal the conversation flows into the scrollback (scroll, search and copy as usual) and the
+input stays at the bottom with a status line: the model, the approval mode, how full the context is
+and what the chat cost. Answers are Markdown with highlighted code; an edit shows its diff with the
+file's line numbers, a command shows its last lines of output, the plan is a checklist. Approvals
+and the agent's questions are picked with the arrows (or a digit). A line typed while the agent works
+goes to it as a hint.
+
+| Key | |
+|---|---|
+| `Enter` / `Alt+Enter`, `Ctrl+J` | send / new line (a pasted text keeps its lines) |
+| `Esc` | stop the agent |
+| `Shift+Tab` | approval mode: ask → auto → no approvals |
+| `Ctrl+C` | clear the input, stop the task; twice on an empty line exits |
+| `Ctrl+T` | show the model's reasoning |
+| `↑` `↓` `→` | earlier messages, accept the grey suggestion |
+| `/` · `@` | commands · mention a file (both complete with Tab) |
+
+Commands: `/new`, `/resume` (a picker of chats, also those from the window), `/rename`, `/model`,
+`/mode`, `/reasoning`, `/context`, `/cost`, `/diff` (uncommitted changes), `/undo` (roll back the
+last task's file changes), `/init` (write AGENTS.md), `/memory`, `/skills`, `/mcp`, `/secret NAME`
+(hidden input, saved to the folder's `.env`), `/out` (the last tool's full output), `/history`,
+`/help`, `/exit` — and your quick commands from the settings (`/tests`, …). A pipe, `-p` or
+`ALTAIR_PLAIN=1` gives the plain line mode.
 
 ## Native Windows app
 

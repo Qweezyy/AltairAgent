@@ -115,15 +115,15 @@ class AskTool(Tool):
 
         if not replies:
             raise ToolError(
-                "Пользователь не ответил на вопрос. Прими решение сам, "
-                "исходя из здравого смысла, и скажи, какое допущение принял."
+                "The user did not answer. Decide yourself, by common sense, "
+                "and say which assumption you made."
             )
         return format_answers(args.questions, replies)
 
 
 def format_answers(questions: list[AskQuestion], replies: dict) -> str:
-    """Собирает ответ для модели: что спросили и что выбрали."""
-    lines: list[str] = ["Ответы пользователя:"]
+    """The answer for the model: what was asked and what was picked."""
+    lines: list[str] = ["The user's answers:"]
 
     for index, question in enumerate(questions):
         chosen = replies.get(str(index)) or replies.get(index) or []
@@ -132,7 +132,7 @@ def format_answers(questions: list[AskQuestion], replies: dict) -> str:
 
         lines.append(f"\n{index + 1}. {question.question}")
         if not chosen:
-            lines.append("   (без ответа)")
+            lines.append("   (no answer)")
             continue
 
         if question.kind == "ranking":
@@ -142,5 +142,5 @@ def format_answers(questions: list[AskQuestion], replies: dict) -> str:
             for label in chosen:
                 lines.append(f"   - {label}")
 
-    lines.append("\nДействуй согласно выбранному и не переспрашивай то же самое.")
+    lines.append("\nAct on these choices and do not ask the same again.")
     return "\n".join(lines)

@@ -14,6 +14,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 
 _Changes landing on `main` but not yet part of a tagged release go here._
 
+### Added
+- **`altair` became a full terminal agent.** The conversation flows into the terminal's scrollback and
+  the input stays at the bottom with a status line (model, approval mode, context, cost) and a live
+  indicator of what the agent is doing. Answers are Markdown with highlighted code, an edit shows its
+  diff with the file's line numbers, a command its last lines of output, the plan a checklist.
+  Approvals and the agent's questions are picked with the arrow keys, with the change shown in the
+  picker. `/` completes commands, `@` files of the folder; history, multi-line input, Esc stops the
+  agent, Shift+Tab switches the approval mode. New commands: `/resume` (a picker), `/model`, `/mode`,
+  `/reasoning`, `/context`, `/cost`, `/diff`, `/undo`, `/init`, `/memory`, `/skills`, `/mcp`,
+  `/secret`, `/out`, `/history`, `/rename`, and the quick commands from the settings. Pipes, `-p`
+  and `ALTAIR_PLAIN=1` keep the plain line mode.
+
 ### Fixed
 - Installing an update showed "downloading started" and then nothing: the dialog now shows each
   stage — the download in MB and percent with its speed, the signature check, unpacking — and the

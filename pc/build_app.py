@@ -162,6 +162,8 @@ def build_cli(folder: Path) -> Path:
         *app_icon(),
         # rich loads its unicode tables by name; websockets picks its client lazily.
         "--collect-submodules", "rich", "--collect-submodules", "websockets",
+        # The interactive input; its key and layout modules are partly imported lazily.
+        "--collect-submodules", "prompt_toolkit",
         # `altair --version` and the backend handshake read the product version from it.
         "--add-data", f"{ROOT.parent / 'VERSION'}{SEP}.",
         "--exclude-module", "tkinter", "--exclude-module", "numpy", "--exclude-module", "playwright",

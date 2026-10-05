@@ -68,6 +68,9 @@ class Client:
         self.events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.lines: asyncio.Queue[str | None] = asyncio.Queue()
         self.session: dict[str, Any] = {}
+        self.workspace = ""
+        self.mode = ""
+        self.warnings: list[str] = []
         self.running = False
         self.needs_human = False
         self.last: dict[str, Any] = {}
@@ -84,6 +87,7 @@ class Client:
         self._reader = asyncio.create_task(self._read())
         ready = await self._wait_for("ready")
         self.session = ready.get("session") or {}
+        self.warnings = [str(w) for w in ready.get("warnings") or []]
         await self.send({"type": "ui_lang", "lang": self.t.lang})
 
     async def _read(self) -> None:
@@ -124,7 +128,13 @@ class Client:
         async with httpx.AsyncClient(timeout=15) as http:
             return (await http.get(f"{self.backend.http}/api/sessions")).json().get("sessions", [])
 
-    async def pick_chat(self) -> None:
+    @property
+    def app_dir(self) -> str:
+        from core.settings import get_settings
+
+        return str(get_settings().app_dir)
+
+    async def pick_chat(self, quiet: bool = False) -> None:
         """New chat in the folder, the latest one (-c) or the one asked for (-r)."""
         if self.args.cont or self.args.resume:
             chats = await self.chats()
@@ -140,17 +150,15 @@ class Client:
             await self.send({"type": "load_session", "session_id": chosen["id"]})
         else:
             await self.send({"type": "new_session", "workspace": self.args.cwd})
-        loaded = await self._wait_for("session.loaded")
-        self.session = loaded.get("session") or {}
-        self.running = bool(loaded.get("running"))
+        self._apply_loaded(await self._wait_for("session.loaded"))
         if self.args.mode:
             await self.send({"type": "set_mode", "mode": self.args.mode})
             await self._wait_for("mode.updated")
-        if self.fmt == "text":
+        if self.fmt == "text" and not quiet:
             title = self.session.get("title") or ""
             self.console.print(Text(self.t("chat", title=title, id=self.session.get("id", "")), style="dim"))
-            self.console.print(Text(self.t("folder", path=loaded.get("workspace", "")), style="dim"))
-            self.console.print(Text(self.t("mode", mode=self.args.mode or loaded.get("mode", "")), style="dim"))
+            self.console.print(Text(self.t("folder", path=self.workspace), style="dim"))
+            self.console.print(Text(self.t("mode", mode=self.mode), style="dim"))
 
     # ------------------------------------------------------------ one event
 
@@ -172,8 +180,44 @@ class Client:
             await self._approve(m)
         elif kind == "question.asked":
             await self._answer(m)
+        elif kind == "browser.handoff":
+            await self._handoff(m)
+        elif kind == "secret.requested":
+            await self._secret(m)
+        elif kind == "session.loaded":
+            self._apply_loaded(m)
+            await self.on_loaded(m)
+        elif kind == "mode.updated":
+            self.mode = str(m.get("mode") or self.mode)
         elif kind == "session.title" and m.get("session_id") == self.session.get("id"):
             self.session["title"] = m.get("title")
+
+    def _apply_loaded(self, m: dict[str, Any]) -> None:
+        self.session = m.get("session") or {}
+        self.workspace = str(m.get("workspace") or "")
+        self.mode = str(m.get("mode") or "")
+        self.running = bool(m.get("running"))
+
+    async def on_loaded(self, m: dict[str, Any]) -> None:
+        """A chat was opened (at the start, /new, /resume)."""
+        return None
+
+    async def _handoff(self, m: dict[str, Any]) -> None:
+        """The agent needs a person in the shared browser (a captcha, a sign-in)."""
+        self.render.pause()
+        if self.fmt == "text":
+            self.console.print(Text(self.t("handoff", reason=m.get("reason", "")), style="yellow"))
+        if sys.stdin.isatty():
+            self.console.print(Text(self.t("handoff_enter"), style="yellow"))
+            await self._ask_line()
+        else:
+            self.needs_human = True
+        await self.send({"type": "handoff_done", "request_id": m["request_id"]})
+
+    async def _secret(self, m: dict[str, Any]) -> None:
+        if self.fmt == "text":
+            self.render.pause()
+            self.console.print(Text(self.t("secret_hint", name=m.get("name", "")), style="yellow"))
 
     async def _ask_line(self) -> str | None:
         """The next line the user types (None: no terminal or stdin closed)."""
@@ -427,6 +471,17 @@ async def amain(args: argparse.Namespace) -> int:
     if args.output_format == "text" and joined and not args.print_mode:
         console.print(Text(texts("joined"), style="dim"))
 
+    if use_tui(args):
+        from cli.tui import run_tui
+
+        try:
+            return await run_tui(backend, args, texts, task or None)
+        except (LookupError, ConnectionError, TimeoutError, OSError) as exc:
+            console.print(Text(str(exc), style="red"))
+            return 1
+        finally:
+            await asyncio.to_thread(backend.stop)
+
     client = Client(backend, args, texts, console)
     loop = asyncio.get_running_loop()
     previous = signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(client.on_sigint))
@@ -455,6 +510,16 @@ async def amain(args: argparse.Namespace) -> int:
         signal.signal(signal.SIGINT, previous)
         await client.close()
         await asyncio.to_thread(backend.stop)
+
+
+def use_tui(args: argparse.Namespace) -> bool:
+    """The full-screen-free interactive UI needs a real terminal on both ends; pipes and
+    `ALTAIR_PLAIN=1` get the plain line mode."""
+    if args.print_mode or args.chats or args.output_format != "text":
+        return False
+    if os.environ.get("ALTAIR_PLAIN", "").strip() in ("1", "true", "yes"):
+        return False
+    return sys.stdin.isatty() and sys.stdout.isatty()
 
 
 def _connect_quietly(texts: Texts, console: Console) -> tuple[Backend, bool]:

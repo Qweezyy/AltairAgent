@@ -22,6 +22,10 @@ pywinpty>=2.0,<4; sys_platform == "win32"
 # Linux and macOS: the terminal panel runs on a POSIX pty.
 ptyprocess>=0.7,<1; sys_platform != "win32"
 
+# --- The terminal (altair): output and the interactive input ---
+rich>=13.7,<16
+prompt_toolkit>=3.0.48,<4
+
 # --- Глубокое исследование ---
 # Без этих пакетов агент работает, но deep_research не прочитает PDF и Excel,
 # а browse_page не откроет страницы, которые рисуются скриптами.

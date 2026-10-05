@@ -86,12 +86,12 @@ def test_answers_are_formatted_for_the_model():
 
     assert "Стек?" in text and "- FastAPI" in text
     assert "1. Простота" in text and "2. Скорость" in text
-    assert "не переспрашивай" in text
+    assert "do not ask the same again" in text
 
 
 def test_unanswered_question_is_marked():
     questions = [AskQuestion(question="Стек?", options=[{"label": "А"}, {"label": "Б"}])]
-    assert "(без ответа)" in format_answers(questions, {})
+    assert "(no answer)" in format_answers(questions, {})
 
 
 # --------------------------------------------------------- работа инструмента
@@ -126,7 +126,7 @@ async def test_agent_is_told_to_decide_when_user_skips(ctx):
     result = await AskTool().invoke(SIMPLE, ctx)
 
     assert not result.ok
-    assert "Прими решение сам" in result.content
+    assert "Decide yourself" in result.content
 
 
 async def test_waiting_can_be_cancelled(ctx):

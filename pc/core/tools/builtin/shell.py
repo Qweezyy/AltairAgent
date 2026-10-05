@@ -166,7 +166,7 @@ class ExecuteCommandTool(Tool):
         if shadow is not None and before_sha is not None:
             await _register_command_checkpoints(ctx, shadow, before_sha)
 
-        parts = [f"Код возврата: {result.returncode}"]
+        parts = [f"Exit code: {result.returncode}"]
         if outside:
             parts.insert(0, f"(ran in {cwd}, outside the workspace — no rollback there)")
         if result.stdout.strip():
@@ -174,7 +174,7 @@ class ExecuteCommandTool(Tool):
         if result.stderr.strip():
             parts.append(f"stderr:\n{result.stderr.strip()}")
         if not result.stdout.strip() and not result.stderr.strip():
-            parts.append("(вывод пуст)")
+            parts.append("(no output)")
 
         return ToolResult(content="\n\n".join(parts), ok=result.ok)
 
