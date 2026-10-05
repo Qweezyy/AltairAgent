@@ -8,6 +8,9 @@
      size       — пиксели (число или CSS-строка), по умолчанию 96.
      satellites — рисовать 2 звезды-спутника (ПК/телефон/сервер), по умолчанию true.
      mood       — "idle" | "think" | "happy" | "help" | "sleep" | "sad" (eyes and motion).
+     act        — what Alti is busy with: "read" | "write" | "shell" | "search" | "web" | "plan" |
+                  "agent" | "think" | "tool" | "answer" — a prop in its hands and a motion of its
+                  own (see .alti-act-* in redesign.layout.css). Mascot.act(toolName) picks one.
      id         — суффикс для уникальных id градиентов (несколько маскотов на странице).
 */
 (function () {
@@ -42,11 +45,68 @@
               <rect x="${ex2 - w / 2}" y="${ey - 1.4}" width="${w}" height="${h}" rx="${r}" fill="#241608"/>
               <circle cx="${ex1 + 0.4}" cy="${ey - 0.9}" r="0.42" fill="#fff" opacity="0.9"/>`;
     }
+    if (mood === "read") {
+      // Reading: the eyes slide along a line (the .alti-act-read motion moves the pupils).
+      return `<g class="alti-pupils"><rect x="${ex1 - w / 2 + 0.5}" y="${ey - h / 2 + 0.3}" width="${w}" height="${h * 0.85}" rx="${r}" fill="#241608"/>
+              <rect x="${ex2 - w / 2 + 0.5}" y="${ey - h / 2 + 0.3}" width="${w}" height="${h * 0.85}" rx="${r}" fill="#241608"/></g>`;
+    }
+    if (mood === "focus") {
+      // At work: eyes a little lower and narrowed, looking at what it holds.
+      return `<rect x="${ex1 - w / 2 + 0.3}" y="${ey - 0.6}" width="${w}" height="${h * 0.62}" rx="${r}" fill="#241608"/>
+              <rect x="${ex2 - w / 2 + 0.3}" y="${ey - 0.6}" width="${w}" height="${h * 0.62}" rx="${r}" fill="#241608"/>
+              <circle cx="${ex1 + 0.75}" cy="${ey - 0.15}" r="0.32" fill="#fff" opacity="0.85"/>
+              <circle cx="${ex2 + 0.75}" cy="${ey - 0.15}" r="0.32" fill="#fff" opacity="0.85"/>`;
+    }
     const eh = mood === "think" ? h * 0.7 : h;
     return `<rect x="${ex1 - w / 2}" y="${ey - eh / 2}" width="${w}" height="${eh}" rx="${r}" fill="#241608"/>
             <rect x="${ex2 - w / 2}" y="${ey - eh / 2}" width="${w}" height="${eh}" rx="${r}" fill="#241608"/>
             <circle cx="${ex1 + 0.45}" cy="${ey - eh / 2 + 0.55}" r="0.42" fill="#fff" opacity="0.9"/>
             <circle cx="${ex2 + 0.45}" cy="${ey - eh / 2 + 0.55}" r="0.42" fill="#fff" opacity="0.9"/>`;
+  }
+
+  // What Alti holds while it works, drawn by its lower right point (24×24 box). Each prop has
+  // its own class, so the motion is CSS and the drawing stays put.
+  const PROPS = {
+    read: `<g class="alti-prop alti-prop-doc"><rect x="16.2" y="14.6" width="6" height="7.6" rx="1" fill="#fbf6ea" stroke="#c9761a" stroke-width="0.45"/>
+             <path d="M17.4 16.6h3.6M17.4 18.1h3.6M17.4 19.6h2.4" stroke="#c9a46a" stroke-width="0.5" stroke-linecap="round"/></g>`,
+    write: `<g class="alti-prop alti-prop-pen"><g transform="rotate(38 19.5 18)"><rect x="18.7" y="13.4" width="1.7" height="7.6" rx="0.4" fill="#ffcf5a" stroke="#b8862e" stroke-width="0.35"/>
+             <path d="M18.7 21 L19.55 22.6 L20.4 21 Z" fill="#3a2a1a"/><rect x="18.7" y="13.4" width="1.7" height="1.2" fill="#e98a8a"/></g></g>`,
+    shell: `<g class="alti-prop alti-prop-term"><rect x="15.4" y="15.6" width="7.6" height="5.8" rx="1.1" fill="#1d1a24" stroke="#c9761a" stroke-width="0.45"/>
+             <path d="M16.9 17.4 l1.2 1 l-1.2 1" fill="none" stroke="#ffc247" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+             <rect class="alti-caret" x="18.9" y="19.2" width="1.9" height="0.6" rx="0.2" fill="#ffc247"/></g>`,
+    search: `<g class="alti-prop alti-prop-lens"><circle cx="19" cy="17.6" r="2.4" fill="rgba(180,220,255,0.35)" stroke="#c9761a" stroke-width="0.7"/>
+             <path d="M20.7 19.3 L22.8 21.4" stroke="#8a5a1a" stroke-width="1" stroke-linecap="round"/></g>`,
+    web: `<g class="alti-prop alti-prop-globe"><circle cx="19.4" cy="18.4" r="3" fill="#7fb8ff" stroke="#2f6fb8" stroke-width="0.45"/>
+             <ellipse class="alti-meridian" cx="19.4" cy="18.4" rx="1.3" ry="3" fill="none" stroke="#e8f3ff" stroke-width="0.4"/>
+             <path d="M16.5 18.4h5.8M17 16.9h4.8M17 19.9h4.8" stroke="#e8f3ff" stroke-width="0.35"/></g>`,
+    plan: `<g class="alti-prop alti-prop-plan"><rect x="16" y="14.8" width="6.4" height="7.4" rx="1" fill="#fbf6ea" stroke="#c9761a" stroke-width="0.45"/>
+             <path d="M17.2 16.8l0.6 0.6l1-1.1M17.2 18.8l0.6 0.6l1-1.1" fill="none" stroke="#3aa76d" stroke-width="0.45" stroke-linecap="round"/>
+             <path d="M19.4 16.9h2M19.4 18.9h2M17.3 20.7h4.1" stroke="#c9a46a" stroke-width="0.45" stroke-linecap="round"/></g>`,
+    tool: `<g class="alti-prop alti-prop-gear"><circle cx="19.4" cy="18.4" r="2.2" fill="none" stroke="#9aa4b2" stroke-width="1.5" stroke-dasharray="0.9 0.75"/>
+             <circle cx="19.4" cy="18.4" r="1.6" fill="#c4ccd6" stroke="#7d8794" stroke-width="0.35"/><circle cx="19.4" cy="18.4" r="0.6" fill="#5b6370"/></g>`,
+    think: `<g class="alti-prop alti-prop-sparks"><path class="alti-spark s1" d="M20.5 3.4 l0.35 1 l1 0.35 l-1 0.35 l-0.35 1 l-0.35 -1 l-1 -0.35 l1 -0.35 Z" fill="#fff0c2"/>
+             <path class="alti-spark s2" d="M3.4 5.2 l0.28 0.8 l0.8 0.28 l-0.8 0.28 l-0.28 0.8 l-0.28 -0.8 l-0.8 -0.28 l0.8 -0.28 Z" fill="#ffe08a"/>
+             <path class="alti-spark s3" d="M21.6 15.6 l0.25 0.7 l0.7 0.25 l-0.7 0.25 l-0.25 0.7 l-0.25 -0.7 l-0.7 -0.25 l0.7 -0.25 Z" fill="#fff6d8"/></g>`,
+  };
+  PROPS.answer = PROPS.write;
+
+  // Which kind of work a tool is (the same groups as the terminal's cli/tools_view.py).
+  const ACT = {
+    read: ["read_file", "read_document", "list_directory", "view_image", "code_map", "find_symbol", "memory_read",
+      "recall", "tool_output", "git_log", "git_blame", "git_status", "git_diff", "read_skill", "list_skills"],
+    write: ["write_file", "edit_file", "apply_patch", "delete_path", "remember", "memory_edit", "create_skill"],
+    shell: ["execute_command", "run_python", "run_tests", "run_lint", "type_check", "run_background",
+      "start_dev_server", "git_commit", "test_coverage"],
+    search: ["grep_search", "find_files", "ast_search", "search_chats", "tool_search", "find_images"],
+    web: ["web_search", "fetch_url", "browse_page", "http_request", "download_file", "deep_research"],
+    plan: ["update_plan", "write_plan"],
+    agent: ["spawn_subagent"],
+  };
+  function act(name) {
+    name = String(name || "");
+    if (name.startsWith("browser_")) return "web";
+    for (const k in ACT) if (ACT[k].includes(name)) return k;
+    return "tool";
   }
 
   function mini(id, tx, ty, s) {
@@ -63,8 +123,12 @@
     const size = opts.size == null ? 96 : opts.size;
     const sizeCss = typeof size === "number" ? size + "px" : size;
     const satellites = opts.satellites !== false;
-    const mood = opts.mood || "idle";
-    const cls = "alti-mascot alti-" + mood + (opts.still ? " alti-still" : "") + (opts.class ? " " + opts.class : "");
+    const act = opts.act || "";
+    // Busy: the face that goes with the work (reading eyes, a squint while writing…).
+    const mood = opts.mood || ({ think: "think", agent: "think", read: "read", search: "read", web: "read",
+      write: "focus", answer: "focus", shell: "focus", plan: "think", tool: "focus" }[act] || "idle");
+    const cls = "alti-mascot alti-" + mood + (act ? " alti-busy alti-act-" + act : "") + (opts.still ? " alti-still" : "") + (opts.class ? " " + opts.class : "");
+    const prop = act && PROPS[act] ? PROPS[act] : "";
 
     // По референсу: крупный спутник справа-сверху, маленький — слева-снизу.
     const sat = satellites
@@ -103,8 +167,9 @@
         <g class="alti-eyes">${eyes(mood)}</g>
       </g>
       ${mood === "sleep" ? `<text class="alti-z" x="17.6" y="6.6" font-size="4.2" font-weight="700" fill="currentColor">z</text>` : ""}
+      ${prop}
     </svg>`;
   }
 
-  window.Mascot = { svg };
+  window.Mascot = { svg, act };
 })();

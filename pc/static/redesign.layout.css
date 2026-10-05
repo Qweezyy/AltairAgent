@@ -1307,9 +1307,63 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 @media (prefers-reduced-motion: reduce) {
   .alti-eyes, .alti-z, .alti-sleep .alti-core, .alti-happy .alti-core, .alti-sad .alti-core, .alti-help .alti-core, .alti-mascot:hover .alti-core { animation: none; }
 }
+/* Alti at work: a prop for the kind of work and a motion of its own (mascot.js: opts.act). */
+.alti-prop { transform-box: fill-box; transform-origin: center; }
+.alti-busy .alti-core { animation: alti-busy 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+@keyframes alti-busy { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3%); } }
+/* Reading: the eyes slide along a line and jump back; the page sways a little. */
+.alti-act-read .alti-pupils, .alti-act-search .alti-pupils, .alti-act-web .alti-pupils { animation: alti-scan 1.8s steps(1, end) infinite, alti-scan-slide 1.8s ease-in-out infinite; transform-box: fill-box; }
+@keyframes alti-scan-slide { 0% { transform: translateX(-6%); } 70% { transform: translateX(10%); } 85%, 100% { transform: translateX(-6%); } }
+@keyframes alti-scan { 0%, 100% { opacity: 1; } }
+.alti-prop-doc { animation: alti-sway 2.6s ease-in-out infinite; }
+@keyframes alti-sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+/* Writing: the pencil scribbles, Alti leans into it. */
+.alti-prop-pen { animation: alti-scribble 0.55s ease-in-out infinite; }
+@keyframes alti-scribble { 0%, 100% { transform: translate(0, 0) rotate(0); } 25% { transform: translate(-6%, 4%) rotate(-6deg); } 50% { transform: translate(4%, 0) rotate(3deg); } 75% { transform: translate(-3%, -4%) rotate(-3deg); } }
+.alti-act-write .alti-core, .alti-act-answer .alti-core { animation: alti-lean 1.1s ease-in-out infinite; }
+@keyframes alti-lean { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(4deg) translateY(1%); } }
+/* A command: the caret blinks, Alti bobs to the keystrokes. */
+.alti-caret { animation: alti-caret 0.9s steps(1, end) infinite; }
+@keyframes alti-caret { 50% { opacity: 0; } }
+.alti-act-shell .alti-core { animation: alti-type 0.42s ease-in-out infinite; }
+@keyframes alti-type { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(2.5%) scale(1.01, 0.985); } }
+/* Searching: the lens goes round. */
+.alti-prop-lens { animation: alti-orbit-small 1.6s linear infinite; }
+@keyframes alti-orbit-small { from { transform: rotate(0) translateX(6%) rotate(0); } to { transform: rotate(360deg) translateX(6%) rotate(-360deg); } }
+/* The web: the globe turns. */
+.alti-meridian { animation: alti-turn 1.8s linear infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes alti-turn { 0% { transform: scaleX(1); } 50% { transform: scaleX(0.1); } 100% { transform: scaleX(1); } }
+/* Thinking: the satellites circle, sparks come and go. */
+.alti-act-think .alti-sat, .alti-act-agent .alti-sat, .alti-think .alti-sat { transform-box: view-box; transform-origin: 12px 12px; animation: alti-sats 3.2s linear infinite; }
+.alti-act-think .alti-sat-b, .alti-act-agent .alti-sat-b, .alti-think .alti-sat-b { animation-duration: 4.4s; animation-direction: reverse; }
+@keyframes alti-sats { to { transform: rotate(360deg); } }
+.alti-act-think .alti-core, .alti-act-agent .alti-core { animation: alti-ponder 2.2s ease-in-out infinite; }
+@keyframes alti-ponder { 0%, 100% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.05); filter: brightness(1.12); } }
+.alti-spark { transform-box: fill-box; transform-origin: center; animation: alti-twinkle 1.6s ease-in-out infinite; }
+.alti-spark.s2 { animation-delay: 0.5s; } .alti-spark.s3 { animation-delay: 1s; }
+@keyframes alti-twinkle { 0%, 100% { opacity: 0; transform: scale(0.4); } 50% { opacity: 1; transform: scale(1.15) rotate(45deg); } }
+/* A tool of other kinds: the gear turns. */
+.alti-prop-gear { animation: alti-spin 2.4s linear infinite; }
+@keyframes alti-spin { to { transform: rotate(360deg); } }
+/* Planning: the card nods. */
+.alti-prop-plan { animation: alti-sway 1.8s ease-in-out infinite; }
+/* Done: one happy hop with a burst (the answer's footer). */
+.alti-done .alti-core { animation: alti-hop 1s cubic-bezier(0.32, 0.72, 0, 1) 2; }
+.alti-done-wrap { position: relative; display: inline-grid; place-items: center; }
+.alti-done-wrap::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 1.5px solid var(--accent); opacity: 0; animation: alti-burst 0.9s ease-out 0.15s 1; pointer-events: none; }
+@keyframes alti-burst { 0% { opacity: 0.8; transform: scale(0.4); } 100% { opacity: 0; transform: scale(1.6); } }
+@media (prefers-reduced-motion: reduce) {
+  .alti-busy .alti-core, .alti-pupils, .alti-prop, .alti-caret, .alti-meridian, .alti-sat, .alti-spark, .alti-done .alti-core, .alti-done-wrap::after { animation: none !important; }
+}
+/* The running status: Alti at work, then what exactly it is doing. */
+.run-status .rs-phase { transition: opacity 0.2s ease; }
+.run-status .rs-what { color: var(--text-1); font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reconnect .alti-mascot { flex: none; }
+.toast .alti-mascot { flex: none; margin-right: 2px; }
+.empty .alti-mascot, .pal-empty .alti-mascot { margin: 0 auto var(--sp-2); }
 /* Where Alti appears: empty places, the running status, cards that need you. */
 .alti-empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-4); color: var(--text-3); text-align: center; font-size: var(--fs-sm); }
-.rs-alti { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; }
+.rs-alti { display: inline-grid; place-items: center; width: 26px; height: 26px; flex: none; }
 .card-head .alti-mascot { flex: none; }
 
 /* The update's progress in its dialog. */

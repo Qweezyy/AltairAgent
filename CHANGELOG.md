@@ -29,6 +29,13 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   attachments (a picture it looks at, a document's text), Alt+V attaches a copied picture or copied
   files. Pictures the agent shows are drawn in the terminal; interactive widgets are saved as a page
   to open with Ctrl+click or `/open`.
+- **Alti works alongside you.** In the window the mascot takes up what the agent is doing — a page
+  while it reads, a pencil while it edits, a terminal for a command, a lens for a search, a globe on
+  the web, circling satellites while it thinks — and the status under the answer says what exactly.
+  It hops when an answer is done and shows up in empty places, loading views, errors, the plan and
+  the reconnect line. In the terminal Alti is drawn in colour (the welcome, approvals, questions, a
+  failed task, goodbye), the live status shimmers with a glyph for the kind of work, and a short
+  burst marks a finished task.
 - **`/compact`** folds the conversation into a summary on demand (optionally: what to keep above all);
   the messages stay in the chat, the model sees the summary.
 

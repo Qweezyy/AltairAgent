@@ -85,8 +85,19 @@ function finishThinking() {
 }
 function endTurn() { finishRound(); finishThinking(); state.answerEl = null; state.turnHadInline = false; clearActivity(); }
 // Alti, the mascot, in a place: a mood ("idle", "think", "happy", "help", "sleep", "sad") and a size.
-function alti(mood, size, extra = "") {
-  return window.Mascot ? window.Mascot.svg({ mood, size, satellites: size >= 40, class: "alti-inline " + extra }) : "";
+function alti(mood, size, extra = "", act = "") {
+  if (!window.Mascot) return "";
+  // Busy Alti keeps its satellites even small: they are what circles while it thinks.
+  return window.Mascot.svg({ mood: act ? undefined : mood, act, size, satellites: size >= 40 || !!act, class: "alti-inline " + extra });
+}
+// Alti at work, sized for a line of text: what the agent is doing right now.
+function altiAt(act, size = 24) { return alti("", size, "", act || "think"); }
+// One happy hop where an answer just finished; the previous answer's Alti steps aside.
+function altiCelebrate(node) {
+  const foot = node && node.querySelector(".msg-actions-agent");
+  if (!foot || !window.Mascot) return;
+  $$(".alti-done-wrap", els.feedInner).forEach((x) => x.remove());
+  foot.insertAdjacentHTML("afterbegin", `<span class="alti-done-wrap" data-tip="${escAttr(T("st.done"))}">${alti("happy", 18, "alti-done")}</span>`);
 }
 function altiEmpty(text, mood = "sleep", size = 56) {
   return `<div class="alti-empty">${alti(mood, size)}<div>${esc(text)}</div></div>`;
@@ -98,18 +109,43 @@ function statusStart() {
   if (state.statusEl) return;
   state.runStart = Date.now();
   state.statusMode = "wait"; state.statusModeStart = Date.now();
-  state.statusEl = append(el(`<div class="run-status"><span class="rs-alti">${alti("think", 18)}</span><span class="rs-phase"></span><span class="rs-time"></span></div>`));
+  state.statusAct = "think"; state.statusWhat = ""; state.toolsOpen = 0;
+  state.statusEl = append(el(`<div class="run-status"><span class="rs-alti">${altiAt("think")}</span><span class="rs-phase"></span><span class="rs-what"></span><span class="rs-time"></span></div>`));
   statusPaint();
   clearInterval(state.statusTimer);
   state.statusTimer = setInterval(statusPaint, 1000);
 }
-function statusMode(mode) { if (state.statusEl && state.statusMode !== mode) { state.statusMode = mode; state.statusModeStart = Date.now(); statusPaint(); } }
+function statusMode(mode) {
+  if (mode !== "tool") statusAct(mode === "answer" ? "answer" : "think", "");
+  if (state.statusEl && state.statusMode !== mode) { state.statusMode = mode; state.statusModeStart = Date.now(); statusPaint(); }
+}
+// What Alti is busy with: its pose follows the work (reading, writing, a command, the web…).
+function statusAct(act, what) {
+  state.statusWhat = what || "";
+  if (!state.statusEl) return;
+  if (state.statusAct !== act) {
+    state.statusAct = act;
+    $(".rs-alti", state.statusEl).innerHTML = altiAt(act);
+  }
+  $(".rs-what", state.statusEl).textContent = state.statusWhat;
+}
+// A tool started (or is being written by the model): the status says which and Alti takes it up.
+function statusTool(name, args) {
+  const act = window.Mascot ? window.Mascot.act(name) : "tool";
+  const a = args || {};
+  const what = String(a.path || a.file_path || a.command || a.query || a.url || a.pattern || a.name || "").replace(/\s+/g, " ").slice(0, 80);
+  statusAct(act, what);
+  if (state.statusEl && state.statusMode !== "tool") { state.statusMode = "tool"; state.statusModeStart = Date.now(); }
+  statusPaint();
+}
 function statusPaint() {
   if (!state.statusEl) return;
   const elapsed = Math.round((Date.now() - state.runStart) / 1000);
   const inMode = (Date.now() - state.statusModeStart) / 1000;
   let phase;
   if (state.statusMode === "think") phase = inMode > 25 ? T("st.thinkAlmost") : inMode > 12 ? T("st.thinkMore") : T("st.thinking");
+  else if (state.statusMode === "tool") phase = T("st.act." + (state.statusAct || "tool"));
+  else if (state.statusMode === "answer") phase = T("st.act.answer");
   else phase = T("st.waiting");
   $(".rs-phase", state.statusEl).textContent = phase;
   $(".rs-time", state.statusEl).textContent = `· ${elapsed} ${T("u.sec")}`;
@@ -695,7 +731,7 @@ const HANDLERS = {
   "mode.updated"(m) { updateMode(m.mode); },
   "run.started"() { clearWelcome(); endTurn(); setRunning(true); statusStart(); state.browserAutoOpened = false; },
   "step.started"() {},
-  "tool.pending"() {},
+  "tool.pending"(m) { if (!state.toolsOpen) statusTool(m.name, {}); },
   "reasoning.delta"(m) {
     if (!state.thinkingEl) {
       const box = append(el(`<div class="thinking"><button class="thinking-row" type="button"><span class="thinking-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="thinking-label">${esc(T("st.thinkingDots"))}</span></button><div class="thinking-body" hidden></div></div>`));
@@ -715,15 +751,18 @@ const HANDLERS = {
     roundAddTool(m.call_id, m.name, m.args);
     // Агент пошёл в браузер — показываем это пользователю в реальном времени (#3).
     if (String(m.name || "").startsWith("browser_") && m.name !== "browser_downloads") autoOpenBrowser();
-    statusMode("wait");
+    state.toolsOpen = (state.toolsOpen || 0) + 1;
+    statusTool(m.name, m.args);
   },
   "tool.finished"(m) {
     // Событие finished не содержит args — берём сохранённые из started (для диффов/подписей).
     roundFinishTool(m.call_id, m.name, state.stepArgs.get(m.call_id) || m.args || {}, m.ok, m.output);
+    state.toolsOpen = Math.max(0, (state.toolsOpen || 1) - 1);
+    if (!state.toolsOpen) statusMode("wait");
     // Native tabs update by themselves; the screencast fallback needs fresh tabs/address.
     if (String(m.name || "").startsWith("browser_") && paneVisible("browser") && !window.BrowserPanel?.isEmbedded()) send({ type: "browser_state" });
   },
-  "text.delta"(m) { finishRound(); finishThinking(); ensureAnswer(); state.answerText += m.text; scheduleAnswerRender(); statusMode("wait"); },
+  "text.delta"(m) { finishRound(); finishThinking(); ensureAnswer(); state.answerText += m.text; scheduleAnswerRender(); statusMode("answer"); },
   "plan.updated"(m) { renderPlan(m.steps); },
   "question.asked"(m) { renderQuestion(m); },
   "approval.requested"(m) { renderApproval(m); },
@@ -749,7 +788,7 @@ const HANDLERS = {
     const task = m.task
       ? `<div class="muted" style="margin-top:6px">${esc(T("ev.taskLabel", { task: String(m.task).slice(0, 200) }))}</div>`
       : "";
-    const node = append(el(`<div class="card"><div class="card-head">${iconSvg("alert")} ${esc(T("ev.interrupted"))}${esc(step)}</div><div class="card-body"><div>${esc(T("ev.interruptedBody"))}${task}<div class="row" style="gap:8px;margin-top:12px"><button class="btn" data-i="resume">${esc(T("a.continue"))}</button><button class="btn-icon small" data-i="dismiss" data-tip="${escAttr(T("a.hide"))}">${iconSvg("x", "icon icon-sm")}</button></div></div></div>`));
+    const node = append(el(`<div class="card"><div class="card-head">${alti("help", 24)} ${esc(T("ev.interrupted"))}${esc(step)}</div><div class="card-body"><div>${esc(T("ev.interruptedBody"))}${task}<div class="row" style="gap:8px;margin-top:12px"><button class="btn" data-i="resume">${esc(T("a.continue"))}</button><button class="btn-icon small" data-i="dismiss" data-tip="${escAttr(T("a.hide"))}">${iconSvg("x", "icon icon-sm")}</button></div></div></div>`));
     $('[data-i="resume"]', node).addEventListener("click", () => { send({ type: "resume_run" }); node.remove(); });
     $('[data-i="dismiss"]', node).addEventListener("click", () => { send({ type: "dismiss_interrupted" }); node.remove(); });
   },
@@ -767,8 +806,10 @@ const HANDLERS = {
       else if (state.answerEl) state.answerEl.remove();
       const host = tail && state.answerEl ? state.answerEl : append(el(`<div class="msg-agent"></div>`));
       addAnswerFooter(host, m);
+      altiCelebrate(host);
     } else {
       ensureAnswer(); renderFinal($(".answer-body", state.answerEl), m.text || state.answerText); addAnswerFooter(state.answerEl, m);
+      altiCelebrate(state.answerEl);
     }
     endTurn(); setRunning(false); refreshSessions();
   },
@@ -845,7 +886,7 @@ function forkFrom(turn) {
   toast(T("t.branching"));
 }
 function showReconnect(m) {
-  if (!state.reconnectEl) { clearActivity(); state.reconnectEl = append(el(`<div class="reconnect"><span class="spin">${iconSvg("refresh", "icon icon-sm")}</span><span class="rc-txt"></span></div>`)); }
+  if (!state.reconnectEl) { clearActivity(); state.reconnectEl = append(el(`<div class="reconnect">${alti("help", 22)}<span class="rc-txt"></span></div>`)); }
   $(".rc-txt", state.reconnectEl).textContent = T("ev.reconnect", { a: m.attempt, max: m.max_attempts, delay: m.delay_s ? T("ev.reconnectDelay", { s: m.delay_s }) : "" });
   scrollFeed();
 }
@@ -870,7 +911,8 @@ function showResearchProgress(m) {
 function renderPlan(steps) {
   const rows = steps.map((s, i) => `<div class="plan-step ${s.status}"><span class="plan-dot"></span><span class="plan-num">${i + 1}</span><span class="plan-txt grow">${esc(s.title)}</span></div>`).join("");
   const done = steps.filter((s) => s.status === "completed").length;
-  const html = `<div class="plan" id="live-plan"><div class="plan-head">${esc(T("plan.title"))} · ${done}/${steps.length}</div>${rows}</div>`;
+  const head = done === steps.length ? alti("happy", 18) : altiAt("plan", 18);
+  const html = `<div class="plan" id="live-plan"><div class="plan-head">${head} ${esc(T("plan.title"))} · ${done}/${steps.length}</div>${rows}</div>`;
   const cur = $("#live-plan"); if (cur) cur.replaceWith(el(html)); else append(el(html));
 }
 const RISK_TIERS = {
@@ -1210,11 +1252,11 @@ async function _refreshFilesTree(gen) {
   if (state.filesFilter) {
     let files = [];
     try { files = (await (await fetch(`/api/files/list?workspace=${encodeURIComponent(state.workspace)}&q=${encodeURIComponent(state.filesFilter)}&limit=200`)).json()).files || []; } catch {}
-    if (!files.length) next.innerHTML = `<div class="empty small">${esc(T("files.none"))}</div>`;
+    if (!files.length) next.innerHTML = altiEmpty(T("files.none"), "sad", 40);
     for (const p of files) next.appendChild(fileRow({ name: p.split("/").pop(), path: p, dir: false, size: 0 }, 0));
   } else {
     await filesRenderChildren(next, "", 0);
-    if (!next.firstChild) next.innerHTML = `<div class="empty small">${esc(T("files.empty"))}</div>`;
+    if (!next.firstChild) next.innerHTML = altiEmpty(T("files.empty"), "sleep", 40);
   }
   // A newer refresh started meanwhile: its tree wins; callers still get a finished tree.
   if (gen !== _treeGen) { await _treeLatest; return; }
@@ -1420,10 +1462,10 @@ function openPanel(view) { openPane(view); }
 function switchPanel(view) { openPane(view); }
 async function openPreviewFile(path) {
   openPanel("preview"); state.previewPath = path;
-  const v = $("#view-preview"); v.innerHTML = `<div class="empty">${esc(T("prev.loading"))}</div>`;
+  const v = $("#view-preview"); v.innerHTML = `<div class="alti-empty">${altiAt("read", 48)}<div>${esc(T("prev.loading"))}</div></div>`;
   try {
     const r = await fetch(`/api/file?path=${encodeURIComponent(absPath(path))}`);
-    if (!r.ok) { v.innerHTML = `<div class="empty">${esc(T("prev.openFail"))}</div>`; return; }
+    if (!r.ok) { v.innerHTML = altiEmpty(T("prev.openFail"), "sad", 48); return; }
     const info = await r.json(); const raw = `/files/${absPath(path)}`;
     // The server reports a .md file as text in the markdown language: show it as a document.
     const isMd = info.kind === "markdown" || info.language === "markdown";
@@ -1438,13 +1480,13 @@ async function openPreviewFile(path) {
     else postProcess(v);
     $("#pv-copy", v)?.addEventListener("click", () => { navigator.clipboard?.writeText(info.content || ""); toast(T("t.copied")); });
     $$("#pv-mode button", v).forEach((b) => b.addEventListener("click", () => { state.previewMode = b.dataset.m; openPreviewFile(path); }));
-  } catch { v.innerHTML = `<div class="empty">${esc(T("prev.loadErr"))}</div>`; }
+  } catch { v.innerHTML = altiEmpty(T("prev.loadErr"), "sad", 48); }
 }
 async function loadDiff() {
-  const v = $("#view-diff"); v.innerHTML = `<div class="empty">${esc(T("diff.loading"))}</div>`;
+  const v = $("#view-diff"); v.innerHTML = `<div class="alti-empty">${altiAt("read", 48)}<div>${esc(T("diff.loading"))}</div></div>`;
   try {
     const d = await (await fetch(`/api/git/diff?workspace=${encodeURIComponent(state.workspace)}`)).json();
-    if (!d.available) { v.innerHTML = `<div class="empty">${iconSvg("git", "icon")}<div>${esc(d.reason || T("diff.noRepo"))}</div></div>`; return; }
+    if (!d.available) { v.innerHTML = altiEmpty(d.reason || T("diff.noRepo"), "help", 56); return; }
     const head = `<div class="preview-tools"><span class="chip">${iconSvg("git", "icon icon-sm")} ${esc(d.branch || "")}</span><span class="grow"></span><button class="btn btn-outline" id="diff-refresh">${iconSvg("refresh", "icon icon-sm")} ${esc(T("a.refresh"))}</button></div>`;
     if (!d.diff?.trim() && !(d.untracked || []).length) { v.innerHTML = head + altiEmpty(T("diff.noChanges"), "happy", 56); }
     else { v.innerHTML = head + `<div class="diff">${renderDiff(d.diff || "")}${(d.untracked || []).map((f) => `<div class="diff-line diff-add">＋ ${esc(T("diff.newFile", { f }))}</div>`).join("")}</div>`; }
@@ -1895,7 +1937,7 @@ async function openPalette() {
     if (active >= view.length) active = Math.max(0, view.length - 1);
     listEl.innerHTML = view.length
       ? view.map((it, i) => `<div class="pal-row${i === active ? " active" : ""}" data-i="${i}"><span class="pal-ico">${iconSvg(it.icon, "icon icon-sm")}</span><span class="pal-label grow truncate">${esc(it.label)}</span><span class="pal-hint">${esc(it.hint)}</span></div>`).join("")
-      : `<div class="pal-empty dim">${esc(T("pal.empty"))}</div>`;
+      : `<div class="pal-empty dim">${alti("sad", 32)}<div>${esc(T("pal.empty"))}</div></div>`;
     const act = $(".pal-row.active", listEl); if (act) act.scrollIntoView({ block: "nearest" });
   };
   const move = (d) => { if (!view.length) return; active = (active + d + view.length) % view.length; render(); };
@@ -2731,7 +2773,7 @@ function openUpdate() {
 
 // ------------------------------------------------------------------ toasts
 function toast(text, kind = "") {
-  const t = el(`<div class="toast ${kind}">${kind === "error" ? iconSvg("alert") : ""}<span>${esc(text)}</span></div>`);
+  const t = el(`<div class="toast ${kind}">${kind === "error" ? alti("sad", 20) || iconSvg("alert") : ""}<span>${esc(text)}</span></div>`);
   els.toasts.appendChild(t); setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 200); }, 4200);
   return t;
 }
