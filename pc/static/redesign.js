@@ -702,6 +702,7 @@ const HANDLERS = {
     let restoreId = "";
     if (prevId && prevHadContent) restoreId = prevId;                 // реконнект — не терять чат
     else if (!prevId) { try { restoreId = LS.get("last_session_id", ""); } catch {} }  // старт — последний чат
+    state.freshSession = m.session;   // what to show if the chat to restore is gone
     if (restoreId && restoreId !== m.session_id) { send({ type: "load_session", session_id: restoreId }); }
     else { loadSession(m.session); }
     if ((m.warnings || []).some((w) => /LLM_API_KEY/i.test(w))) toast(T("ev.noApiKey"), "error");
@@ -725,6 +726,11 @@ const HANDLERS = {
     setWorkspace(m.workspace); if (m.mode) updateMode(m.mode); state.autoWorkspace = !!m.auto_workspace; loadSession(m.session); if (state.jumpTo) setTimeout(jumpToMatch, 60); else refreshSessions();
   },
   "chat.activity"() { refreshSessions(); },
+  // The chat asked for is gone: forget it and show the new chat the connection opened with.
+  "session.missing"(m) {
+    try { if (LS.get("last_session_id", "") === m.session_id) LS.set("last_session_id", ""); } catch {}
+    if (state.freshSession) loadSession(state.freshSession); else showWelcome();
+  },
   "session.title"(m) { applySessionTitle(m); },
   "workspace.updated"(m) { setWorkspace(m.workspace); toast(T("ev.wsUpdated")); },
   "workspace.error"(m) { toast(m.message, "error"); },
@@ -922,8 +928,9 @@ function showResearchProgress(m) {
 function renderPlan(steps) {
   const rows = steps.map((s, i) => `<div class="plan-step ${s.status}"><span class="plan-dot"></span><span class="plan-num">${i + 1}</span><span class="plan-txt grow">${esc(s.title)}</span></div>`).join("");
   const done = steps.filter((s) => s.status === "completed").length;
-  const head = done === steps.length ? alti("happy", 18) : altiAt("plan", 18);
-  const html = `<div class="plan" id="live-plan"><div class="plan-head">${head} ${esc(T("plan.title"))} · ${done}/${steps.length}</div>${rows}</div>`;
+  // No Alti here: the working Alti lives in the status at the end of the message, and a second
+  // animated one in the plan looked as if it had moved into it.
+  const html = `<div class="plan" id="live-plan"><div class="plan-head">${esc(T("plan.title"))} · ${done}/${steps.length}</div>${rows}</div>`;
   const cur = $("#live-plan"); if (cur) cur.replaceWith(el(html)); else append(el(html));
 }
 const RISK_TIERS = {
@@ -1082,6 +1089,9 @@ function showWelcome() {
   const st = STARTERS.map((s) => `<button class="starter" data-text="${escAttr(T(s.key))}">${iconSvg(s.icon, "icon icon-sm")}<span>${esc(T(s.key))}</span></button>`).join("");
   const mark = window.Mascot ? window.Mascot.svg({ mood: "idle", size: 96, satellites: true }) : ALTAIR_STAR;
   els.feedInner.innerHTML = `<div class="welcome"><span class="w-mark w-mark-mascot">${mark}</span><h1>${esc(T("welcome.title"))}</h1><p>${esc(T("welcome.subtitle"))}</p><div class="welcome-starters">${st}</div></div>`;
+  // The welcome Alti: reacts to a click, follows the pointer with its eyes, lives a little.
+  const wm = $(".w-mark-mascot", els.feedInner);
+  if (wm && window.Mascot) { window.Mascot.clickable(wm, "Alti"); window.Mascot.follow(wm); window.Mascot.idle(wm); }
   $$(".starter", els.feedInner).forEach((b) => b.addEventListener("click", () => { els.input.value = b.dataset.text; autoGrow(); els.input.focus(); updateSendBtn(); }));
   // Живой космический фон на всё рабочее полотно — только на приветствии (до первого
   // сообщения). Стиль выбирается в «Настройки → Внешний вид» и следует за темой.
@@ -2966,7 +2976,10 @@ function init() {
   window.I18N?.apply(document);
   // Звёздочку-бренд в рельсе заменяем на маскота Альти (статичный, без анимации).
   const brandMark = $(".brand-mark");
-  if (brandMark && window.Mascot) brandMark.innerHTML = window.Mascot.svg({ size: 22, satellites: false, still: true, id: "brand" });
+  if (brandMark && window.Mascot) {
+    brandMark.innerHTML = window.Mascot.svg({ size: 22, satellites: false, id: "brand" });
+    window.Mascot.clickable(brandMark, "Alti");
+  }
   applyTheme(LS.get(THEME_KEY, ""));
   loadAccent();
   loadAppIcon();

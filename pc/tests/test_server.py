@@ -231,6 +231,16 @@ def test_websocket_new_and_load_session(client, settings):
         assert loaded["session"]["title"] == "Новый чат 1"
 
 
+def test_a_missing_chat_is_reported_so_the_window_opens_a_new_one(client):
+    """A window restoring its last chat (deleted meanwhile, or from another data folder) got only
+    an error line and kept an empty feed; the typed event lets it fall back to a new chat."""
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # ready
+        ws.send_json({"type": "load_session", "session_id": "gone-chat-123"})
+        missing = _drain_until(ws, {"session.missing"})
+        assert missing["session_id"] == "gone-chat-123"
+
+
 def test_websocket_rejects_empty_task(client):
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()  # ready

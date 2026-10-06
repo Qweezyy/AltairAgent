@@ -164,12 +164,122 @@
         <path d="${STAR}" fill="url(#alti-fill-${id})" stroke="url(#alti-rim-${id})" stroke-width="0.5"/>
         <path d="${STAR}" fill="url(#alti-gloss-${id})"/>
         <ellipse cx="9.6" cy="8.7" rx="2.7" ry="1.7" fill="#fff" opacity="0.35" transform="rotate(-24 9.6 8.7)"/>
-        <g class="alti-eyes">${eyes(mood)}</g>
+        <g class="alti-gaze"><g class="alti-eyes">${eyes(mood)}</g></g>
       </g>
       ${mood === "sleep" ? `<text class="alti-z" x="17.6" y="6.6" font-size="4.2" font-weight="700" fill="currentColor">z</text>` : ""}
       ${prop}
     </svg>`;
   }
 
-  window.Mascot = { svg, act };
+  // ---------------------------------------------------------------- reactions and small lives
+  const reduced = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const FX = ["hop", "twirl", "wink", "giggle", "sparkle"];
+  const IDLE = ["look", "blink2", "twirl", "sparkle", "stretch"];
+  const PARTICLES = { hop: ["♥", "♡", "♥"], sparkle: ["✦", "✧", "✦", "✧", "✦"], twirl: ["✧", "✦"], wink: ["✦"], giggle: ["♪", "✧"] };
+
+  // Little hearts and stars fly out of Alti: a layer over the page, removed when they land.
+  function burst(svgEl, kind) {
+    const glyphs = PARTICLES[kind] || ["✦"];
+    const r = svgEl.getBoundingClientRect();
+    if (!r.width) return;
+    let layer = document.getElementById("alti-particles");
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.id = "alti-particles";
+      document.body.appendChild(layer);
+    }
+    glyphs.forEach((g, i) => {
+      const p = document.createElement("span");
+      p.className = "alti-particle" + (g === "♥" || g === "♡" ? " heart" : "");
+      p.textContent = g;
+      const angle = (-90 + (i - (glyphs.length - 1) / 2) * 34 + (Math.random() * 16 - 8)) * Math.PI / 180;
+      const dist = r.width * (0.55 + Math.random() * 0.35) + 12;
+      p.style.left = r.left + r.width / 2 + "px";
+      p.style.top = r.top + r.height * 0.35 + "px";
+      p.style.setProperty("--dx", Math.cos(angle) * dist + "px");
+      p.style.setProperty("--dy", Math.sin(angle) * dist + "px");
+      p.style.setProperty("--s", String(Math.max(0.6, Math.min(1.6, r.width / 60))));
+      p.style.animationDelay = i * 45 + "ms";
+      layer.appendChild(p);
+      setTimeout(() => p.remove(), 1100 + i * 45);
+    });
+  }
+
+  // One short reaction (a click, or a moment of idle life): a class that plays once.
+  function react(svgEl, kind) {
+    if (!svgEl || reduced()) return;
+    kind = kind || FX[Math.floor(Math.random() * FX.length)];
+    [...FX, ...IDLE].forEach((k) => svgEl.classList.remove("alti-fx-" + k));
+    void svgEl.getBoundingClientRect();           // restart the animation if it is the same one
+    svgEl.classList.add("alti-fx-" + kind);
+    if (PARTICLES[kind] && !svgEl.closest(".brand-mark")) burst(svgEl, kind);
+    else if (kind === "hop" || kind === "sparkle") burst(svgEl, kind);
+    clearTimeout(svgEl._fxTimer);
+    svgEl._fxTimer = setTimeout(() => svgEl.classList.remove("alti-fx-" + kind), 1200);
+    return kind;
+  }
+
+  // Alti in a place: clicking it gets a reaction (and the keyboard too, for the ones in focus).
+  function clickable(holder, label) {
+    if (!holder || holder._altiClick) return;
+    holder._altiClick = true;
+    holder.classList.add("alti-clickable");
+    holder.setAttribute("role", "button");
+    holder.setAttribute("tabindex", "0");
+    if (label) holder.setAttribute("aria-label", label);
+    const go = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const svgEl = holder.querySelector(".alti-mascot");
+      // Clicked again before the last one ended: it giggles instead of repeating itself.
+      const busy = svgEl && [...svgEl.classList].some((c) => c.startsWith("alti-fx-"));
+      react(svgEl, busy ? "giggle" : undefined);
+    };
+    holder.addEventListener("click", go);
+    holder.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") go(e); });
+    // The window can be dragged by its title: a press on Alti must stay a click.
+    holder.addEventListener("mousedown", (e) => e.stopPropagation());
+  }
+
+  // Now and then Alti does something on its own (looks around, blinks twice, twirls): only while
+  // the page is visible and the mascot is on screen, never with reduced motion.
+  function idle(holder, minMs = 7000, maxMs = 15000) {
+    if (!holder || holder._altiIdle) return;
+    holder._altiIdle = true;
+    const tick = () => {
+      if (!holder.isConnected) return;
+      const svgEl = holder.querySelector(".alti-mascot");
+      if (svgEl && document.visibilityState === "visible" && !reduced() && svgEl.getBoundingClientRect().width) {
+        const busy = [...svgEl.classList].some((c) => c.startsWith("alti-fx-"));
+        if (!busy) react(svgEl, IDLE[Math.floor(Math.random() * IDLE.length)]);
+      }
+      holder._altiIdleTimer = setTimeout(tick, minMs + Math.random() * (maxMs - minMs));
+    };
+    holder._altiIdleTimer = setTimeout(tick, minMs + Math.random() * (maxMs - minMs));
+  }
+
+  // The eyes follow the pointer (the welcome Alti): a small shift of the gaze group, at most a
+  // quarter of an eye, so the face never leaves its place.
+  function follow(holder) {
+    if (!holder || holder._altiFollow || reduced()) return;
+    holder._altiFollow = true;
+    let raf = 0, lastX = 0, lastY = 0;
+    const move = (e) => {
+      lastX = e.clientX; lastY = e.clientY;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (!holder.isConnected) { window.removeEventListener("pointermove", move); return; }
+        const gaze = holder.querySelector(".alti-gaze");
+        const r = holder.getBoundingClientRect();
+        if (!gaze || !r.width) return;
+        const dx = lastX - (r.left + r.width / 2), dy = lastY - (r.top + r.height / 2);
+        const d = Math.hypot(dx, dy) || 1;
+        const k = Math.min(1, d / 260);
+        gaze.setAttribute("transform", `translate(${((dx / d) * 0.9 * k).toFixed(2)} ${((dy / d) * 0.7 * k).toFixed(2)})`);
+      });
+    };
+    window.addEventListener("pointermove", move, { passive: true });
+  }
+
+  window.Mascot = { svg, act, react, clickable, idle, follow };
 })();

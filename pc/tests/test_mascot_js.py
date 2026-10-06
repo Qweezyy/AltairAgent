@@ -79,3 +79,60 @@ def test_the_status_names_every_kind_in_both_languages():
     i18n = (STATIC / "i18n.js").read_text(encoding="utf-8")
     for act in ACTS:
         assert i18n.count(f'"st.act.{act}"') == 2, act
+
+
+def test_alti_reacts_and_the_plan_has_no_second_alti():
+    """Clicking Alti (the welcome one, the one by "New chat") gets a short reaction; the plan card
+    has no working Alti of its own: it looked as if the status Alti moved into the plan."""
+    mascot_js = (STATIC / "mascot.js").read_text(encoding="utf-8")
+    for name in ("react", "clickable", "idle", "follow"):
+        assert re.search(rf"function {name}\(", mascot_js), name
+    assert "window.Mascot = { svg, act, react, clickable, idle, follow }" in mascot_js
+    assert '<g class="alti-gaze">' in mascot_js
+    css = (STATIC / "redesign.layout.css").read_text(encoding="utf-8")
+    for fx in ("hop", "twirl", "wink", "giggle", "sparkle", "look", "blink2", "stretch"):
+        assert f".alti-fx-{fx}" in css, fx
+    js = (STATIC / "redesign.js").read_text(encoding="utf-8")
+    plan = js[js.index("function renderPlan"):js.index("const RISK_TIERS")]
+    assert "alti(" not in plan.split("const html")[1].split(";")[0] and "altiAt(" not in plan
+    assert "Mascot.clickable(brandMark" in js and "Mascot.clickable(wm" in js
+    assert '"session.missing"(m)' in js
+
+
+@pytest.fixture(scope="module")
+def reacting() -> dict:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    script = r"""
+    // A tiny DOM: enough for react() to set and clear its class and lay out particles.
+    const classes = new Set(["alti-mascot"]);
+    const el = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+                              contains: (c) => classes.has(c), [Symbol.iterator]: () => classes[Symbol.iterator]() },
+                 getBoundingClientRect: () => ({ left: 0, top: 0, width: 96, height: 96 }),
+                 closest: () => null };
+    const appended = [];
+    global.document = { getElementById: () => null, body: { appendChild: (n) => appended.push(n) },
+                        createElement: () => ({ style: { setProperty() {} }, appendChild: (n) => appended.push(n) }) };
+    global.window = { matchMedia: () => ({ matches: false }) };
+    global.setTimeout = () => 0; global.clearTimeout = () => {};
+    require(process.argv[1]);
+    const kinds = [];
+    for (const k of ["hop", "sparkle", undefined]) kinds.push(window.Mascot.react(el, k));
+    console.log(JSON.stringify({ kinds, classes: [...classes], particles: appended.length }));
+    """
+    result = subprocess.run(  # noqa: S603 - our own script against our own file
+        [node, "-e", script, str(STATIC / "mascot.js")],
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_a_click_plays_one_reaction_with_particles(reacting):
+    assert reacting["kinds"][:2] == ["hop", "sparkle"]
+    assert reacting["kinds"][2] in ("hop", "twirl", "wink", "giggle", "sparkle")
+    # One reaction at a time: the last one's class is on, the earlier ones are gone.
+    fx = [c for c in reacting["classes"] if c.startswith("alti-fx-")]
+    assert fx == [f"alti-fx-{reacting['kinds'][2]}"]
+    assert reacting["particles"] > 0

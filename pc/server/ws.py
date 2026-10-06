@@ -348,6 +348,9 @@ class Connection:
         chat, warning = await self.hub.open(session_id, self.registry)
         if chat is None:
             await self.send({"type": "log", "level": "error", "text": tr("ws.session_missing", id=session_id)})
+            # A typed event too: a window that asked for its last chat (deleted meanwhile, or
+            # from another data folder) falls back to a new one instead of an empty feed.
+            await self.send({"type": "session.missing", "session_id": session_id})
             return
         if warning:
             await self.send({"type": "log", "level": "warning", "text": warning})

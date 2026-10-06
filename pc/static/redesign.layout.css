@@ -1355,6 +1355,41 @@ mark.find-hit { background: color-mix(in srgb, var(--accent) 45%, transparent); 
 @media (prefers-reduced-motion: reduce) {
   .alti-busy .alti-core, .alti-pupils, .alti-prop, .alti-caret, .alti-meridian, .alti-sat, .alti-spark, .alti-done .alti-core, .alti-done-wrap::after { animation: none !important; }
 }
+/* Reactions (a click) and moments of idle life: one-shot classes from Mascot.react(). */
+.alti-clickable { cursor: pointer; border-radius: 50%; outline: none; -webkit-tap-highlight-color: transparent; }
+.alti-clickable:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.alti-gaze { transition: transform 0.25s ease-out; }
+.alti-mascot.alti-fx-hop .alti-core { animation: alti-fx-hop 0.9s cubic-bezier(0.32, 0.72, 0, 1) !important; }
+@keyframes alti-fx-hop { 0% { transform: translateY(0) scale(1); } 18% { transform: translateY(2%) scale(1.08, 0.9); } 45% { transform: translateY(-22%) scale(0.94, 1.08); } 70% { transform: translateY(0) scale(1.06, 0.94); } 85% { transform: translateY(-4%) scale(0.98, 1.02); } 100% { transform: translateY(0) scale(1); } }
+.alti-mascot.alti-fx-twirl .alti-core { animation: alti-fx-twirl 0.95s cubic-bezier(0.45, 0, 0.2, 1) !important; }
+@keyframes alti-fx-twirl { 0% { transform: rotate(0) scale(1); } 35% { transform: rotate(200deg) scale(0.88); } 70% { transform: rotate(380deg) scale(1.08); } 100% { transform: rotate(360deg) scale(1); } }
+.alti-mascot.alti-fx-giggle .alti-core { animation: alti-fx-giggle 0.7s ease-in-out !important; }
+@keyframes alti-fx-giggle { 0%, 100% { transform: rotate(0) scale(1); } 15% { transform: rotate(-9deg) scale(1.04, 0.96); } 30% { transform: rotate(8deg) scale(0.97, 1.04); } 45% { transform: rotate(-7deg) scale(1.03, 0.97); } 60% { transform: rotate(6deg); } 80% { transform: rotate(-2deg); } }
+.alti-mascot.alti-fx-giggle .alti-eyes { animation: alti-fx-squint 0.7s ease-in-out !important; }
+@keyframes alti-fx-squint { 0%, 100% { transform: scaleY(1); } 20%, 75% { transform: scaleY(0.35); } }
+.alti-mascot.alti-fx-wink .alti-eyes > :nth-child(2) { transform-box: fill-box; transform-origin: center; animation: alti-fx-wink 0.7s ease-in-out; }
+.alti-mascot.alti-fx-wink .alti-eyes > :nth-child(4) { animation: alti-fx-hide 0.7s ease-in-out; }
+@keyframes alti-fx-wink { 0%, 100% { transform: scaleY(1); } 25%, 70% { transform: scaleY(0.12); } }
+@keyframes alti-fx-hide { 0%, 100% { opacity: 0.9; } 25%, 70% { opacity: 0; } }
+.alti-mascot.alti-fx-wink .alti-core { animation: alti-fx-tilt 0.7s ease-in-out !important; }
+@keyframes alti-fx-tilt { 0%, 100% { transform: rotate(0); } 30%, 70% { transform: rotate(-8deg) translateY(-2%); } }
+.alti-mascot.alti-fx-sparkle .alti-core { animation: alti-fx-glow 0.9s ease-out !important; }
+@keyframes alti-fx-glow { 0% { filter: brightness(1); transform: scale(1); } 30% { filter: brightness(1.35) drop-shadow(0 0 3px #ffe08a); transform: scale(1.1); } 100% { filter: brightness(1); transform: scale(1); } }
+.alti-mascot.alti-fx-sparkle .alti-sat { transform-box: view-box; transform-origin: 12px 12px; animation: alti-fx-sats 0.9s cubic-bezier(0.3, 0.7, 0.2, 1) !important; }
+@keyframes alti-fx-sats { 0% { transform: rotate(0) scale(1); } 50% { transform: rotate(160deg) scale(1.3); } 100% { transform: rotate(360deg) scale(1); } }
+.alti-mascot.alti-fx-look .alti-eyes { transform-box: fill-box; animation: alti-fx-look 1.1s ease-in-out !important; }
+@keyframes alti-fx-look { 0%, 100% { transform: translateX(0); } 25%, 40% { transform: translateX(-22%); } 60%, 75% { transform: translateX(22%); } }
+.alti-mascot.alti-fx-blink2 .alti-eyes { animation: alti-fx-blink2 0.6s ease-in-out !important; }
+@keyframes alti-fx-blink2 { 0%, 40%, 100% { transform: scaleY(1); } 15%, 55% { transform: scaleY(0.1); } }
+.alti-mascot.alti-fx-stretch .alti-core { animation: alti-fx-stretch 1.1s ease-in-out !important; }
+@keyframes alti-fx-stretch { 0%, 100% { transform: scale(1); } 40% { transform: scale(0.94, 1.1) translateY(-3%); } 70% { transform: scale(1.05, 0.95); } }
+#alti-particles { position: fixed; inset: 0; pointer-events: none; z-index: 9999; }
+.alti-particle { position: absolute; transform: translate(-50%, -50%) scale(0.3); color: var(--accent, #ffc247); font-size: calc(14px * var(--s, 1)); line-height: 1; text-shadow: 0 0 6px color-mix(in srgb, var(--accent, #ffc247) 60%, transparent); animation: alti-particle 0.95s cubic-bezier(0.2, 0.7, 0.3, 1) forwards; }
+.alti-particle.heart { color: #ff7a9c; text-shadow: 0 0 6px rgba(255, 122, 156, 0.5); }
+@keyframes alti-particle { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); } 20% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1) rotate(25deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .alti-mascot[class*="alti-fx-"] .alti-core, .alti-mascot[class*="alti-fx-"] .alti-eyes, .alti-particle { animation: none !important; }
+}
 /* The running status: Alti at work, then what exactly it is doing. */
 .run-status .rs-phase { transition: opacity 0.2s ease; }
 .run-status .rs-what { color: var(--text-1); font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
