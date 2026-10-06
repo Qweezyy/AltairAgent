@@ -24,6 +24,10 @@ jobs:
             label: windows-x64
           - os: ubuntu-22.04
             label: linux-x64
+          # Cheap and free servers are often ARM (Oracle Free Tier, Hetzner CAX, Raspberry Pi):
+          # the server agent of 0.3.0 installs this package there. GitHub's free ARM runner.
+          - os: ubuntu-22.04-arm
+            label: linux-arm64
           - os: macos-14
             label: macos-arm64
     env:
@@ -58,8 +62,9 @@ jobs:
           pip install -r requirements.txt pyinstaller
 
       - name: Tests
-        # Windows and Linux pass the whole suite; macOS has not been run yet, so it only reports.
-        continue-on-error: ${{ runner.os == 'macOS' }}
+        # Windows and Linux x64 pass the whole suite; macOS and Linux ARM have not been run yet,
+        # so they only report.
+        continue-on-error: ${{ runner.os == 'macOS' || matrix.label == 'linux-arm64' }}
         shell: bash
         # On the Windows runner the same tests as in ci.yml depend on the machine (an Android SDK
         # is installed there, no pwsh for the pty, slow process start), so they are skipped there.

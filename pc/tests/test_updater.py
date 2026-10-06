@@ -272,7 +272,7 @@ def test_each_system_takes_its_own_package_as_the_build_names_it(system, machine
     if suffix:
         workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "build-desktop.yml").read_text()
         label = suffix.removeprefix("-").removesuffix(".zip")
-        if label in ("windows-x64", "linux-x64", "macos-arm64"):
+        if label in ("windows-x64", "linux-x64", "linux-arm64", "macos-arm64"):
             assert f"label: {label}" in workflow
 
 
