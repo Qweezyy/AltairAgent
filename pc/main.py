@@ -609,6 +609,9 @@ def main() -> int:
         "--parent-pid", type=int, default=None, help="Завершиться вместе с этим процессом (оболочка Tauri)"
     )
     parser.add_argument("--stop-on-stdin-eof", action="store_true", help=argparse.SUPPRESS)
+    # The server installer exchanges keys over SSH with these (core/servers/install.py).
+    parser.add_argument("--body-card", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--trust-body", type=str, default=None, metavar="CARD_JSON", help=argparse.SUPPRESS)
     parser.add_argument("--browser-cdp-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--browser-net-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--browser-dir", type=str, default=None, help=argparse.SUPPRESS)
@@ -633,6 +636,8 @@ def main() -> int:
         configure_embedded(args.browser_cdp_port, Path(args.browser_dir))
 
     settings = get_settings()
+    if args.body_card or args.trust_body:
+        return _body_command(settings, args.body_card, args.trust_body)
     host = args.host or settings.host
     port = args.port or settings.port
 
@@ -667,6 +672,22 @@ def main() -> int:
         return 0
 
     run_desktop(host, port, bind_host=bind_host)
+    return 0
+
+
+def _body_command(settings, card: bool, trust: str | None) -> int:
+    """`--body-card` prints this body's card (making its key on first use); `--trust-body` adds
+    another body's card to the trusted ones. Used by the server installer over SSH."""
+    import json as _json
+
+    from core.bodies import Identity, TrustStore
+
+    folder = settings.data_dir / "identity"
+    if trust:
+        body = TrustStore(folder).add(_json.loads(trust))
+        print(_json.dumps({"trusted": body.id}))
+        return 0
+    print(_json.dumps(Identity(folder, settings.body_kind).card()))
     return 0
 
 

@@ -8,6 +8,7 @@
     altair -r <id|title>        resume a chat (also one started in the window)
     altair --chats              list the chats
     altair --journal [N]        the last N records of the Journal (what the agent did)
+    altair server …             the agent's servers: list, check HOST, add HOST, remove ID (cli/servers.py)
 
 Exit codes: 0 done, 1 failed or stopped, 2 it needed a person (an approval or a question) and
 there was nobody to ask.
@@ -563,6 +564,14 @@ def main(argv: list[str] | None = None) -> int:
                 stream.reconfigure(encoding="utf-8", errors="replace")
             except (OSError, ValueError):
                 continue
+    from cli import servers
+
+    raw = sys.argv[1:] if argv is None else argv
+    if servers.wants(raw):
+        try:
+            return asyncio.run(servers.run(raw))
+        except KeyboardInterrupt:
+            return 130
     args = parse_args(argv)
     args.cwd = os.path.abspath(args.cwd or os.getcwd())  # a new chat's folder
     try:

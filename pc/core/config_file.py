@@ -50,6 +50,7 @@ EDITABLE_KEYS = {
     "TOOL_SEARCH": "tool_search",
     "VERIFICATION_GATE": "verification_gate",
     "CHAT_TITLES": "chat_titles",
+    "BODY_KIND": "body_kind",
     "JOURNAL": "journal",
     "CLI_ON_PATH": "cli_on_path",
     "BROWSER_SNAPSHOT_DIFF": "browser_snapshot_diff",

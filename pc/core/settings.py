@@ -49,8 +49,12 @@ def default_workspace() -> Path:
 
 
 def _env_files() -> list[str]:
-    """Где искать .env: рядом с исходниками, в данных приложения и у exe."""
+    """Where to look for .env: by the sources, in the app's data folder, by the exe — and in the
+    folder APP_PATH names (a server install keeps its data in /var/lib/altair: the settings the
+    app saves go there, so they must be read from there too)."""
     candidates = [PROJECT_ROOT / ".env", default_app_dir() / ".env"]
+    if os.environ.get("APP_PATH"):
+        candidates.append(Path(os.environ["APP_PATH"]).expanduser() / ".env")
     if _is_frozen():
         candidates.append(Path(sys.executable).parent / ".env")
     return [str(path) for path in candidates]
@@ -164,6 +168,9 @@ class Settings(BaseSettings):
     #: The model names a new chat from its first message (one tiny extra request to the
     #: cheapest configured model). Off: the chat is named after that message's first line.
     chat_titles: bool = True
+    #: What kind of body this install is (core/bodies.py): "pc", or "server" for an agent the
+    #: owner installed on a server; the other bodies see it in this body's card.
+    body_kind: Literal["pc", "phone", "server"] = "pc"
     #: The Journal: every action of the agent appended to a hash-chained, read-only log in the
     #: data folder (core/journal.py). What the owner reads to know what happened unattended.
     journal: bool = True

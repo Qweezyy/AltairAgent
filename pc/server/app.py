@@ -15,6 +15,7 @@ import os
 import string
 import tempfile
 import time
+import uuid
 import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -510,7 +511,7 @@ def create_app() -> FastAPI:
     def _gate():
         from core.bodies import get_gate
 
-        return get_gate(app.state.settings.data_dir / "identity")
+        return get_gate(app.state.settings.data_dir / "identity", app.state.settings.body_kind)
 
     @app.get("/api/bodies/self")
     async def body_self() -> dict:
@@ -566,6 +567,125 @@ def create_app() -> FastAPI:
         if revoked:
             await _journal_app("body.revoked", body=bid, sessions_ended=ended)
         return {"ok": revoked, "sessions_ended": ended}
+
+    # ---------------------------------------------------------------- servers (core/servers)
+
+    app.state.server_jobs = {}
+
+    def _server_job_public(job: dict) -> dict:
+        return {k: v for k, v in job.items() if not k.startswith("_")}
+
+    def _install_request(payload: dict):
+        from core.servers.install import InstallRequest
+
+        return InstallRequest(
+            host=str(payload.get("host") or "").strip(), user=str(payload.get("user") or "root").strip(),
+            port=int(payload.get("port") or 22), password=str(payload.get("password") or ""),
+            sudo_password=str(payload.get("sudo_password") or ""), name=str(payload.get("name") or "").strip(),
+            mode=str(payload.get("mode") or "owner"), source=str(payload.get("source") or "github"),
+            bring_memory=bool(payload.get("bring_memory", True)),
+        )
+
+    @app.get("/api/servers")
+    async def servers_list(request: Request) -> dict:
+        _local_only(request)
+        from core.servers.registry import ServerStore
+
+        records = await asyncio.to_thread(ServerStore(app.state.settings.data_dir).all)
+        return {"servers": [ServerStore.public(r) for r in records]}
+
+    @app.post("/api/servers/preflight")
+    async def servers_preflight(request: Request, payload: dict) -> dict:
+        """What the server is, before installing anything (read-only commands)."""
+        _local_only(request)
+        from core.servers import remote as remote_module
+        from core.servers.install import login_for
+        from core.servers.preflight import run_preflight
+        from core.servers.registry import ServerStore
+        from core.servers.remote import RemoteError
+
+        req = _install_request(payload)
+        if not req.host:
+            return {"ok": False, "error": tr("srv.need_host")}
+        login, _known = await asyncio.to_thread(login_for, ServerStore(app.state.settings.data_dir), req)
+        try:
+            async with remote_module.SSHRemote(login) as remote:
+                report = await run_preflight(remote)
+        except RemoteError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "report": report.to_dict()}
+
+    @app.post("/api/servers/install")
+    async def servers_install(request: Request, payload: dict) -> dict:
+        """Installs the agent on a server in the background; /api/servers/jobs/{id} follows it."""
+        _local_only(request)
+        from core.servers.install import Installer, InstallError
+
+        req = _install_request(payload)
+        if not req.host:
+            return {"ok": False, "error": tr("srv.need_host")}
+        busy = [j for j in app.state.server_jobs.values() if j.get("host") == req.host and j["state"] == "running"]
+        if busy:
+            return {"ok": True, "job": busy[0]["id"]}
+        job_id = uuid.uuid4().hex[:10]
+        job = {"id": job_id, "kind": "install", "host": req.host, "state": "running", "step": "connect",
+               "detail": "", "pct": 0.0, "steps": [], "error": "", "failed_step": "", "server": None}
+        app.state.server_jobs[job_id] = job
+
+        def progress(step: str, detail: str, pct: float) -> None:
+            if step not in job["steps"]:
+                job["steps"].append(step)
+            job.update(step=step, detail=detail, pct=pct)
+
+        async def work() -> None:
+            try:
+                record = await Installer(app.state.settings, req, progress).run()
+                from core.servers.registry import ServerStore
+
+                job.update(state="done", server=ServerStore.public(record))
+                await _journal_app("server.installed", server=record.id, host=record.host, name=record.name,
+                                   mode=record.mode, version=record.version, body=record.body_id)
+            except InstallError as exc:
+                job.update(state="error", error=str(exc), failed_step=exc.step)
+                await _journal_app("server.install_failed", host=req.host, step=exc.step, error=str(exc))
+            except asyncio.CancelledError:
+                job.update(state="error", error="cancelled")
+                raise
+            except Exception as exc:  # noqa: BLE001 - the reason is shown to the user
+                logger.exception("Server install failed")
+                job.update(state="error", error=str(exc), failed_step=job.get("step", ""))
+            finally:
+                req.password = req.sudo_password = ""   # nothing of the login outlives the install
+
+        job["_task"] = asyncio.create_task(work(), name=f"server-install-{job_id}")
+        return {"ok": True, "job": job_id}
+
+    @app.get("/api/servers/jobs/{job_id}")
+    async def servers_job(request: Request, job_id: str) -> dict:
+        _local_only(request)
+        job = app.state.server_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="no such job")
+        return _server_job_public(job)
+
+    @app.post("/api/servers/{sid}/uninstall")
+    async def servers_uninstall(request: Request, sid: str, payload: dict | None = None) -> dict:
+        """Removes the agent from the server, this PC's key from it and the server from here."""
+        _local_only(request)
+        from core.servers.install import uninstall
+        from core.servers.registry import ServerStore
+        from core.servers.remote import RemoteError
+
+        record = await asyncio.to_thread(ServerStore(app.state.settings.data_dir).get, sid)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such server")
+        keep = bool((payload or {}).get("keep_data"))
+        try:
+            await uninstall(app.state.settings, record, keep_data=keep)
+        except RemoteError as exc:
+            return {"ok": False, "error": str(exc)}
+        await _journal_app("server.removed", server=sid, host=record.host, kept_data=keep)
+        return {"ok": True}
 
     @app.get("/api/journal")
     async def journal_records(request: Request, limit: int = 100, before: int | None = None,

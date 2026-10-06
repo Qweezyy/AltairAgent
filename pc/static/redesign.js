@@ -2378,6 +2378,7 @@ const SETTINGS_NAV = [
   ] },
   { gkey: "set.g.devices", items: [
     { id: "pair", icon: "phone", tkey: "set.i.pair" },
+    { id: "servers", icon: "server", tkey: "set.i.servers" },
   ] },
   { gkey: "set.g.appearance", items: [
     { id: "appearance", icon: "sun", tkey: "set.i.appearance" },
@@ -2629,6 +2630,8 @@ function renderSettingsSection(sec, main, s) {
     });
   } else if (sec === "pair") {
     renderPairSection(main);
+  } else if (sec === "servers") {
+    renderServersSection(main);
   } else if (sec === "profile") {
     renderProfileSection(main);
   } else if (sec === "updates") {
@@ -2719,6 +2722,135 @@ async function renderSecretsSection(main, prefill) {
   $("#sec-save", main).addEventListener("click", async () => { const name = $("#sec-name", main).value.trim(); const value = $("#sec-val", main).value; if (!name || !value) { toast(T("sec.needNameVal"), "error"); return; } const d = await (await fetch("/api/secrets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, value, workspace: state.workspace }) })).json(); if (d.ok) { $("#sec-name", main).value = $("#sec-val", main).value = ""; renderList(); } else toast(d.error || T("t.error"), "error"); });
 }
 // Связывание телефона: QR + ссылка altair://pair. Телефон сканирует камерой.
+// ------------------------------------------------------------------ servers (bodies on a VPS)
+// The agent installs itself on a server from an SSH login: check first (read-only), then install
+// with live steps. The password goes to this PC's backend once and is not kept anywhere.
+const SRV_STEPS = ["connect", "preflight", "key", "packages", "download", "unpack", "configure", "identity", "service", "health"];
+const SRV_MODES = ["owner", "autopilot", "careful"];
+async function renderServersSection(main) {
+  main.innerHTML = `<div class="settings-section"><h2>${esc(T("srv.title"))}</h2><p class="sr-desc" style="margin-bottom:16px">${esc(T("srv.desc"))}</p>
+    <div id="srv-list" class="srv-list"></div>
+    <button class="btn btn-outline" id="srv-add" style="margin-top:12px">${iconSvg("plus", "icon icon-sm")} ${esc(T("srv.add"))}</button>
+    <div id="srv-form" hidden></div></div>`;
+  const list = $("#srv-list", main);
+  const drawList = async () => {
+    let servers = [];
+    try { servers = (await (await fetch("/api/servers")).json()).servers || []; } catch { list.innerHTML = `<div class="dim">${esc(T("t.error"))}</div>`; return; }
+    if (!servers.length) { list.innerHTML = `<div class="srv-empty dim">${esc(T("srv.none"))}</div>`; return; }
+    list.innerHTML = "";
+    servers.forEach((s) => {
+      const card = el(`<div class="prov-card srv-card">
+        <div class="row"><span class="srv-dot"></span><div class="grow" style="min-width:0"><div class="sr-title truncate">${esc(s.name || s.host)}</div>
+          <div class="sr-desc mono truncate">${esc(`${s.user}@${s.host}:${s.port}`)}</div></div>
+          <span class="srv-chip">${esc(T(`srv.mode.${s.mode}`))}</span></div>
+        <div class="srv-facts"><span>${esc(s.system || "")}</span><span>${esc(s.arch || "")}</span><span>Altair ${esc(s.version || "")}</span></div>
+        <div class="srv-fp mono" data-tip="${escAttr(T("srv.fpTip"))}">${iconSvg("shield", "icon icon-sm")} ${esc(s.host_key_fingerprint || "")}</div>
+        <div class="row srv-actions"><label class="cap-check"><input type="checkbox" data-keep /> ${esc(T("srv.keepData"))}</label><span class="grow"></span>
+          <button class="btn btn-outline btn-sm" data-remove>${iconSvg("trash", "icon icon-sm")} ${esc(T("srv.remove"))}</button></div>
+      </div>`);
+      $("[data-remove]", card).addEventListener("click", async (e) => {
+        const keep = $("[data-keep]", card).checked;
+        const ok = await confirmDialog({ title: T("srv.removeTitle", { name: s.name || s.host }), message: T(keep ? "srv.removeMsgKeep" : "srv.removeMsg"), confirmText: T("srv.remove"), danger: true });
+        if (!ok) return;
+        const btn = e.currentTarget; btn.disabled = true;
+        try {
+          const r = await (await fetch(`/api/servers/${encodeURIComponent(s.id)}/uninstall`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_data: keep }) })).json();
+          if (r.ok) { toast(T("srv.removed")); drawList(); } else { toast(r.error || T("t.error"), "error"); btn.disabled = false; }
+        } catch { toast(T("t.error"), "error"); btn.disabled = false; }
+      });
+      list.appendChild(card);
+    });
+  };
+  drawList();
+  $("#srv-add", main).addEventListener("click", (e) => { e.currentTarget.hidden = true; renderServerForm($("#srv-form", main), drawList, () => { $("#srv-add", main).hidden = false; }); });
+}
+function renderServerForm(box, onInstalled, onClose) {
+  box.hidden = false;
+  box.innerHTML = `<div class="prov-card srv-form">
+    <div class="srv-grid">
+      <div class="form-row srv-wide"><label class="form-label">${esc(T("srv.host"))}</label><input class="field mono" data-f="host" placeholder="203.0.113.7" spellcheck="false" autocomplete="off" /></div>
+      <div class="form-row srv-port"><label class="form-label">${esc(T("srv.port"))}</label><input class="field mono" data-f="port" value="22" inputmode="numeric" /></div>
+      <div class="form-row"><label class="form-label">${esc(T("srv.user"))}</label><input class="field mono" data-f="user" value="root" spellcheck="false" autocomplete="off" /></div>
+      <div class="form-row srv-wide"><label class="form-label">${esc(T("srv.password"))}</label><input class="field" data-f="password" type="password" autocomplete="new-password" /></div>
+    </div>
+    <span class="form-help">${esc(T("srv.passwordHelp"))}</span>
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn btn-primary" data-check>${esc(T("srv.check"))}</button><button class="btn" data-cancel>${esc(T("cf.cancel"))}</button></div>
+    <div data-report></div>
+  </div>`;
+  const f = (k) => $(`[data-f="${k}"]`, box);
+  const login = () => ({ host: f("host").value.trim(), port: parseInt(f("port").value, 10) || 22, user: f("user").value.trim() || "root", password: f("password").value });
+  const close = () => { box.innerHTML = ""; box.hidden = true; onClose(); };
+  $("[data-cancel]", box).addEventListener("click", close);
+  const report = $("[data-report]", box);
+  $("[data-check]", box).addEventListener("click", async (e) => {
+    const btn = e.currentTarget; const L = login();
+    if (!L.host) { toast(T("srv.needHost"), "error"); f("host").focus(); return; }
+    btn.disabled = true; report.innerHTML = `<div class="srv-wait dim">${esc(T("srv.checking"))}</div>`;
+    let r;
+    try { r = await (await fetch("/api/servers/preflight", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(L) })).json(); }
+    catch { r = { ok: false, error: T("t.error") }; }
+    btn.disabled = false;
+    if (!r.ok) { report.innerHTML = `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(r.error || T("t.error"))}</span></div>`; return; }
+    drawReport(report, r.report, L, box, onInstalled, close);
+  });
+}
+function drawReport(report, p, L, box, onInstalled, close) {
+  const gb = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} ${T("srv.gb")}` : `${mb} ${T("srv.mb")}`);
+  const facts = [[T("srv.f.system"), p.system], [T("srv.f.cpu"), `${p.arch} · ${p.cpus}`], [T("srv.f.memory"), gb(p.mem_mb)], [T("srv.f.disk"), gb(p.disk_mb)], [T("srv.f.rights"), T(`srv.sudo.${p.sudo}`)]];
+  if ((p.missing || []).length) facts.push([T("srv.f.adds"), p.missing.join(", ")]);
+  if (p.installed) facts.push([T("srv.f.installed"), p.installed]);
+  const modes = SRV_MODES.map((m) => `<label class="srv-mode${m === p.recommended_mode ? " is-rec" : ""}"><input type="radio" name="srv-mode" value="${m}" ${m === p.recommended_mode ? "checked" : ""} />
+    <span class="srv-mode-body"><span class="srv-mode-title">${esc(T(`srv.mode.${m}`))}${m === p.recommended_mode ? ` <span class="srv-rec">${esc(T("srv.recommended"))}</span>` : ""}</span><span class="srv-mode-desc">${esc(T(`srv.modeDesc.${m}`))}</span></span></label>`).join("");
+  const problems = (p.problems || []).map((x) => `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(x)}</span></div>`).join("");
+  report.innerHTML = `<div class="srv-report">
+    <div class="srv-facts-grid">${facts.map(([k, v]) => `<span class="srv-k">${esc(k)}</span><span class="srv-v">${esc(v || "—")}</span>`).join("")}</div>
+    <div class="srv-fp-box">${iconSvg("shield", "icon icon-sm")}<div><div class="srv-k">${esc(T("srv.fp"))}</div><code class="mono">${esc(p.host_key_fingerprint)}</code><div class="form-help">${esc(T("srv.fpHelp"))}</div></div></div>
+    ${problems}
+    ${p.can_install ? `<div class="form-label" style="margin-top:14px">${esc(T("srv.modeLabel"))}</div><div class="srv-why dim">${esc(p.why || "")}</div><div class="srv-modes">${modes}</div>
+      ${p.sudo === "password" ? `<div class="form-row"><label class="form-label">${esc(T("srv.sudoPassword"))}</label><input class="field" data-f="sudo" type="password" autocomplete="new-password" /><span class="form-help">${esc(T("srv.sudoHelp"))}</span></div>` : ""}
+      <div class="form-row"><label class="form-label">${esc(T("srv.name"))}</label><input class="field" data-f="name" placeholder="${escAttr(L.host)}" maxlength="40" /></div>
+      <label class="cap-check"><input type="checkbox" data-f="memory" checked /> ${esc(T("srv.bringMemory"))}</label>
+      <div class="row" style="margin-top:14px"><button class="btn btn-primary" data-install>${esc(T("srv.install"))}</button></div>` : ""}
+  </div>`;
+  $("[data-install]", report)?.addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    const payload = { ...L, mode: $('input[name="srv-mode"]:checked', report)?.value || p.recommended_mode, name: $('[data-f="name"]', report).value.trim(), sudo_password: $('[data-f="sudo"]', report)?.value || "", bring_memory: $('[data-f="memory"]', report).checked };
+    // The passwords leave the page with this request and are not kept in the form.
+    $$('input[type="password"]', box).forEach((i) => { i.value = ""; });
+    let r;
+    try { r = await (await fetch("/api/servers/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })).json(); }
+    catch { r = { ok: false, error: T("t.error") }; }
+    if (!r.ok) { toast(r.error || T("t.error"), "error"); e.currentTarget.disabled = false; return; }
+    followInstall(box, r.job, onInstalled, close);
+  });
+}
+function followInstall(box, jobId, onInstalled, close) {
+  box.innerHTML = `<div class="prov-card srv-progress"><div class="sr-title">${esc(T("srv.installing"))}</div><div class="srv-bar"><i style="width:0"></i></div><ol class="srv-steps">${SRV_STEPS.map((s) => `<li data-step="${s}"><span class="srv-step-ico"></span>${esc(T(`srv.step.${s}`))}<span class="srv-step-detail dim"></span></li>`).join("")}</ol><div data-end></div></div>`;
+  const bar = $(".srv-bar i", box);
+  const tick = async () => {
+    let j;
+    try { j = await (await fetch(`/api/servers/jobs/${encodeURIComponent(jobId)}`)).json(); } catch { setTimeout(tick, 1500); return; }
+    const at = SRV_STEPS.indexOf(j.step);
+    SRV_STEPS.forEach((s, i) => {
+      const li = $(`[data-step="${s}"]`, box);
+      const failed = j.state === "error" && s === (j.failed_step || j.step);
+      li.className = failed ? "is-failed" : (j.state === "done" || i < at || (i === at && j.state !== "running")) ? "is-done" : i === at ? "is-now" : "";
+      if (i === at && j.detail) $(".srv-step-detail", li).textContent = j.detail;
+    });
+    bar.style.width = `${j.state === "done" ? 100 : Math.round(Math.max(0, at) / SRV_STEPS.length * 100 + (j.pct || 0) * 100 / SRV_STEPS.length)}%`;
+    const end = $("[data-end]", box);
+    if (j.state === "running") { setTimeout(tick, 700); return; }
+    if (j.state === "done") {
+      box.querySelector(".srv-progress").classList.add("is-done");
+      end.innerHTML = `<div class="srv-ok">${alti("happy", 22)} ${esc(T("srv.done", { name: (j.server && (j.server.name || j.server.host)) || "" }))}</div><button class="btn btn-outline btn-sm" data-close-form>${esc(T("srv.close"))}</button>`;
+      onInstalled();
+    } else {
+      end.innerHTML = `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(T("srv.failed", { step: T(`srv.step.${j.failed_step || j.step}`) }))}</span></div><pre class="srv-err mono">${esc(j.error || "")}</pre><button class="btn btn-outline btn-sm" data-close-form>${esc(T("srv.close"))}</button>`;
+    }
+    $("[data-close-form]", end).addEventListener("click", close);
+  };
+  tick();
+}
 async function renderPairSection(main) {
   main.innerHTML = `<div class="settings-section"><h2>${esc(T("pair.title"))}</h2><div class="dim" id="pair-body">${esc(T("pair.loading"))}</div></div>`;
   const body = $("#pair-body", main);

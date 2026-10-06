@@ -15,6 +15,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **Altair installs itself on your server.** Settings → Servers (or `altair server add HOST`): give
+  an SSH login and Altair first looks the server over without changing anything (system, processor,
+  memory, disk, rights, the server key's fingerprint to compare with your provider's), recommends how
+  free the agent should be there (Owner on a dedicated server, Autopilot where something else
+  runs, or Careful), then installs step by step with the progress shown. The password is used once to
+  put this computer's own key on the server and is not saved; the server's key is pinned. The agent
+  runs there as a service that restarts by itself, listens only on the server itself, gets this
+  computer's model settings and, if you want, its memory and skills, and `altair` works for whoever
+  logs in there. A release is checked against its signature before it is installed. Removing it takes
+  away the service, the program, the data (unless kept) and this computer's key. Linux x64 and arm64,
+  Ubuntu 22.04 and newer.
 - **The Journal: everything the agent did, read-only.** Tasks, every tool call, every approval
   (and the ones allowed earlier), restored files, rolled-back runs and updates go into an
   append-only log in the data folder. Each line carries the hash of the one before it, so an edited
