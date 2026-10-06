@@ -39,16 +39,32 @@ def supplied_token(scope: Scope) -> str:
     return ""
 
 
+#: Where a body proves itself: open without a token, or nobody could ever sign in.
+OPEN_PATHS = frozenset({"/api/bodies/challenge", "/api/bodies/login", "/api/health"})
+
+
 def is_authorized(scope: Scope) -> bool:
     client = scope.get("client")
     host = (client[0] if client else "") or ""
     if host in LOOPBACK_HOSTS:
         return True
-    token = get_settings().bridge_token.strip()
-    if not token:
-        return False  # remote access stays closed until a secret is set
+    if scope.get("type") == "http" and scope.get("path") in OPEN_PATHS:
+        return True
     given = supplied_token(scope)
-    return bool(given) and hmac.compare_digest(given, token)
+    if not given:
+        return False
+    settings = get_settings()
+    # A trusted body signed in with its key (core/bodies.py).
+    from core.bodies import get_gate
+
+    body = get_gate(settings.data_dir / "identity").who(given)
+    if body:
+        scope["altair_body"] = body
+        return True
+    token = settings.bridge_token.strip()
+    if not token:
+        return False  # the LAN bridge stays closed until its secret is set
+    return hmac.compare_digest(given, token)
 
 
 class RemoteAuthMiddleware:

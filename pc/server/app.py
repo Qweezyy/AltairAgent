@@ -505,6 +505,68 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "no avatar"}, status_code=404)
         return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
+    # ---------------------------------------------------------------- bodies (core/bodies.py)
+
+    def _gate():
+        from core.bodies import get_gate
+
+        return get_gate(app.state.settings.data_dir / "identity")
+
+    @app.get("/api/bodies/self")
+    async def body_self() -> dict:
+        """This body's card: what another body needs to trust it."""
+        return await asyncio.to_thread(lambda: _gate().identity.card())
+
+    @app.post("/api/bodies/challenge")
+    async def body_challenge(payload: dict) -> dict:
+        """A one-time challenge for a body that wants in."""
+        return _gate().challenge(str(payload.get("id") or ""))
+
+    @app.post("/api/bodies/login")
+    async def body_login(payload: dict) -> dict:
+        """The signed challenge for a session token (401 when the body is not trusted, revoked,
+        or the signature does not hold)."""
+        bid = str(payload.get("id") or "")
+        token = await asyncio.to_thread(_gate().login, bid, str(payload.get("nonce") or ""),
+                                        str(payload.get("signature") or ""))
+        if not token:
+            raise HTTPException(status_code=401, detail="unknown body or bad signature")
+        await _journal_app("body.login", body=bid)
+        from core.bodies import SESSION_SECONDS
+
+        return {"token": token, "expires_in": SESSION_SECONDS}
+
+    @app.get("/api/bodies")
+    async def bodies_list(request: Request) -> dict:
+        _local_only(request)
+        from dataclasses import asdict
+
+        trusted = await asyncio.to_thread(_gate().trust.all)
+        return {"self": await asyncio.to_thread(lambda: _gate().identity.card()),
+                "trusted": [{**asdict(b), "revoked": b.revoked} for b in trusted]}
+
+    @app.post("/api/bodies")
+    async def bodies_add(request: Request, payload: dict) -> dict:
+        """Trusts another body by its card (this PC only: trusting is the owner's call)."""
+        _local_only(request)
+        try:
+            body = await asyncio.to_thread(_gate().trust.add, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        await _journal_app("body.trusted", body=body.id, name=body.name, kind=body.kind)
+        return {"ok": True, "id": body.id}
+
+    @app.post("/api/bodies/{bid}/revoke")
+    async def bodies_revoke(request: Request, bid: str) -> dict:
+        """Keeps a body out from now on and ends its open sessions."""
+        _local_only(request)
+        gate = _gate()
+        revoked = await asyncio.to_thread(gate.trust.revoke, bid)
+        ended = gate.end_sessions(bid)
+        if revoked:
+            await _journal_app("body.revoked", body=bid, sessions_ended=ended)
+        return {"ok": revoked, "sessions_ended": ended}
+
     @app.get("/api/journal")
     async def journal_records(request: Request, limit: int = 100, before: int | None = None,
                               since: int | None = None, chat: str = "", kind: str = "") -> dict:
