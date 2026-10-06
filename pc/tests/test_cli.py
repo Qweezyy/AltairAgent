@@ -191,3 +191,17 @@ def test_the_one_file_command_carries_the_version():
     assert "VERSION" in cli_build
     version_py = (Path(__file__).resolve().parents[1] / "core" / "version.py").read_text(encoding="utf-8")
     assert "_MEIPASS" in version_py
+
+
+def test_the_command_starts_end_to_end(monkeypatch, capsys):
+    """Found on the first server body: `altair` died at once with NameError (an edit had swallowed
+    amain). The entry point itself runs: no backend reachable → a clear error and exit code 1."""
+    import cli.app as app_module
+
+    def no_backend(texts, console):
+        raise RuntimeError("no backend here")
+
+    monkeypatch.setattr(app_module, "_connect_quietly", no_backend)
+    assert callable(app_module.amain)
+    assert app_module.main(["-p", "hello"]) == 1
+    assert "no backend here" in capsys.readouterr().out

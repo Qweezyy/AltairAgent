@@ -470,6 +470,9 @@ async def print_journal(client: Client, limit: int = 50, chat: str = "") -> None
         return
     for record in reversed(records):
         client.console.print(line(record, client.t, show_chat=not chat))
+
+
+async def amain(args: argparse.Namespace) -> int:
     texts = Texts()
     from cli.theme import rich_theme
 
