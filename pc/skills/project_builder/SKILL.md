@@ -1,78 +1,74 @@
 ---
 name: project_builder
-description: Собрать целый проект за один заход — приложение, сайт, бот, игру, скрипт. Сначала разобраться и задать ВСЕ уточняющие вопросы сразу, запросить нужные секреты (ключи API), составить подробный план, а затем построить и проверить всё автономно, без лишних переспрашиваний по ходу. Для больших задач вида «сделай мне приложение/сайт X».
+description: Build a whole project in one go — an app, a site, a bot, a game, a script. First understand it and ask the clarifying questions up front, request the secrets it needs (API keys), make a detailed plan, then build and check everything autonomously, without asking again along the way. For big tasks like "make me an app/site that does X".
 ---
 
-# Навык: собрать проект за один заход
+# Skill: building a project in one go
 
-Пользователь просит что-то большое целиком («сделай приложение — калькулятор
-калорий»). Цель — выдать готовый работающий результат за один проход, а не
-дёргать его вопросами на каждом шаге. Для этого всё непонятное выясняется
-ЗАРАНЕЕ, одним блоком, а дальше идёт автономная сборка.
+The user asks for something big as a whole ("make an app — a calorie counter"). The goal is a
+finished, working result in one pass, without pulling them in with questions at every step. So
+everything unclear is cleared up IN ADVANCE, and then the build runs on its own.
 
-## 1. Понять и уточнить — итеративно, не всё одним списком
+## 1. Understand and clarify — in rounds, not one long list
 
-Цель — выяснить главное до сборки, но по-человечески: вопросы задаются
-**раундами**, а не вываливаются одной анкетой. Ответы на ранние вопросы часто
-определяют, что вообще стоит спрашивать дальше.
+The goal is to clear up the essentials before building, but in a human way: questions come in
+**rounds**, not as one questionnaire. The answers to the early questions often decide what is
+worth asking next.
 
-**Как вести уточнение:**
+**How to clarify:**
 
-* **Сначала фундамент.** Первый раунд — то, от чего зависит всё остальное:
-  платформа/стек и главная цель. Пользователь не технарь — предложи разумный
-  вариант по умолчанию и пометь его `recommended`.
-* **Группируй независимое, разделяй зависимое.** В один вызов `ask` собирай
-  вопросы, которые НЕ влияют друг на друга (до 6). Если ответ меняет следующие
-  вопросы — задай его отдельно и дождись ответа.
-  *Пример:* выбор «телефон» vs «сайт» меняет и вопросы про дизайн, и про то,
-  нужен ли бэкенд, — поэтому платформу спрашивай раньше и отдельно.
-* **Сужайся по ответам.** Узнал платформу → уточняй специфичное для неё
-  (для телефона: офлайн-режим, магазин приложений; для сайта: хостинг, домен).
-* **Покрой направления** (по мере релевантности, не все сразу): функции
-  (обязательные/опциональные), данные (ввод/хранение/внешнее API), внешние ключи,
-  дизайн (стиль, тема, язык интерфейса).
-* **Не спрашивай очевидное.** Есть разумный ответ по умолчанию — прими его сам и
-  скажи об этом. Вопрос ради вежливости — это шум.
+* **Foundations first.** The first round is what everything else depends on: the platform/stack
+  and the main goal. The user may not be technical — offer a sensible default and mark it
+  `recommended`.
+* **Group what is independent, separate what depends.** One `ask` call collects questions that do
+  NOT affect each other (up to 6). If an answer changes the following questions, ask it on its own
+  and wait for the answer.
+  *Example:* "phone" vs "website" changes both the design questions and whether a backend is
+  needed — so ask about the platform earlier and separately.
+* **Narrow down by the answers.** Know the platform → ask what is specific to it (a phone: offline
+  mode, an app store; a site: hosting, a domain).
+* **Cover the directions** (as they become relevant, not all at once): features (required /
+  optional), data (input / storage / external API), external keys, design (style, theme, the
+  interface language).
+* **Do not ask the obvious.** Where there is a sensible default, take it yourself and say so. A
+  question asked out of politeness is noise.
 
-Правило меры: спрашивай, только когда развилка реальна и цена ошибки высока.
-Переделка готового дороже одного вопроса — но и десять вопросов там, где хватило
-бы двух, раздражают. Обычно 2–4 раунда по несколько вопросов достаточно, чтобы
-картина стала ясной.
+The measure: ask only when the fork is real and a mistake is costly. Redoing finished work costs
+more than one question — but ten questions where two would do are annoying too. Usually 2–4
+rounds of a few questions make the picture clear.
 
-## 2. Запросить секреты (если нужны)
+## 2. Request the secrets (if any are needed)
 
-Нужен ключ API — вызови `request_secret name=... purpose=...`. Пользователь
-введёт его в защищённой панели «Секреты»; ты значения не увидишь и обращаешься к
-нему по имени (`os.environ['NAME']`). Скажи, что ключ можно ввести **сейчас или
-позже** — не блокируйся: строй с заглушкой/ветвлением, а с реальным ключом
-протестируешь, когда он появится (`list_secrets` покажет, задан ли он).
+An API key is needed — call `request_secret name=... purpose=...`. The user enters it in the
+protected Secrets panel; you never see the value and refer to it by name (`os.environ['NAME']`).
+Say the key can be entered **now or later** — do not block on it: build with a stub or a branch,
+and test with the real key once it is there (`list_secrets` shows whether it is set).
 
-## 3. Составить подробный план
+## 3. Make a detailed plan
 
-`write_plan` — цель, подход, все файлы, пошаговый порядок, как проверишь, риски.
-Пользователь увидит его в «Превью» и поправит до сборки. Это контракт на весь
-заход.
+`write_plan` — goal, approach, every file, the order of steps, how it will be checked, risks. The
+user sees it in the Preview and corrects it before the build. It is the contract for the whole
+run.
 
-## 4. Построить автономно — за один проход
+## 4. Build autonomously — in one pass
 
-* Иди по плану, обновляя чек-лист (`update_plan`). НЕ переспрашивай по мелочам —
-  решай сам в рамках согласованного плана.
-* Создавай файлы пачкой; однотипное — скриптом (`run_python`), не по одному.
-* Держи проект запускаемым: не оставляй его сломанным между шагами надолго.
+* Follow the plan, keeping the checklist current (`update_plan`). Do NOT ask about small things —
+  decide yourself within the agreed plan.
+* Create files in batches; similar ones with a script (`run_python`), not one by one.
+* Keep the project runnable: do not leave it broken between steps for long.
 
-## 5. Проверить по-настоящему и сдать
+## 5. Check for real and hand over
 
-* Тесты/линт/типы (см. навык `feature_delivery`), затем **живая проверка**:
-  веб/UI — `start_dev_server` + `screenshot_ui`/`audit_ui`; скрипт — запуск.
-* Если ключ уже введён — прогони сценарий с реальным API; если нет — проверь всё,
-  что можно без него, и явно скажи, что осталось протестировать после ввода ключа.
-* Итог: что собрано, **как это запустить** (пошагово, для не-программиста), что
-  проверено и что осталось (например «введи ключ — и заработает генерация»).
+* Tests, lint, types (see the `feature_delivery` skill), then **a live check**: web/UI —
+  `start_dev_server` + `screenshot_ui`/`audit_ui`; a script — run it.
+* If the key is already entered — run the scenario with the real API; if not — check everything
+  that can be checked without it, and say explicitly what is left to test once the key is in.
+* The summary: what was built, **how to run it** (step by step, for a non-programmer), what was
+  checked and what is left (for example "enter the key and the generation will work").
 
-## Принцип
+## The principle
 
-Уточнения — итеративно и осмысленно (раундами, от главного к деталям), а не
-анкетой и не по одному вопросу на сообщение. Секреты — по имени, безопасно. План
-— подробный и согласованный. Сборка — автономная и проверенная. Пользователь
-активно участвует в начале (уточнения) и в конце (готовый результат), а не
-дёргается по мелочам на каждом шаге стройки.
+Clarifications — in rounds and with purpose (from the main things to the details), not a
+questionnaire and not one question per message. Secrets — by name, safely. The plan — detailed
+and agreed. The build — autonomous and checked. The user takes part at the start (clarifying)
+and at the end (the finished result), not pulled in over small things at every step.

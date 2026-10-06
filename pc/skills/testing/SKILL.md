@@ -1,52 +1,48 @@
 ---
 name: testing
-description: Как писать тесты, которые ловят баги и доказывают работу — граничные случаи, ветки ошибок, моки внешних зависимостей, структура «дано-действие-проверка», регресс-тесты на пойманные баги, покрытие как карта дыр. Для написания тестов, поднятия покрытия и TDD.
+description: How to write tests that catch bugs and prove the work — edge cases, error branches, mocks of external dependencies, the arrange-act-assert shape, regression tests for caught bugs, coverage as a map of the holes. For writing tests, raising coverage and TDD.
 ---
 
-# Навык: писать тесты, которые что-то доказывают
+# Skill: writing tests that prove something
 
-Тест существует, чтобы поймать поломку и зафиксировать, что фича работает.
-Тест, который проходит всегда и ничего не проверяет по сути, — вредный балласт:
-даёт ложное чувство надёжности.
+A test exists to catch a breakage and to show that a feature works. A test that always passes and
+checks nothing of substance is harmful ballast: it gives a false sense of safety.
 
-## Что тестировать в первую очередь
+## What to test first
 
-* **Поведение, а не реализацию.** Проверяй результат и наблюдаемые эффекты, а не
-  внутренние детали. Иначе тест ломается при любом рефакторинге, хотя код прав.
-* **Граничные случаи** — там живут баги: пусто (`[]`, `""`, `None`, 0),
-  единственный элемент, максимум/минимум, отрицательное, дубликаты, юникод,
-  очень большое, некорректный ввод.
-* **Ветки ошибок.** Каждый `raise`, `try/except`, проверка аргумента — это
-  отдельный путь. Проверяй, что при плохом входе бросается нужное исключение с
-  понятным сообщением, а не «просто падает».
-* **Регресс на пойманный баг.** Починил баг — сразу напиши тест, который БЕЗ
-  починки падал бы. Это гарантия, что он не вернётся.
+* **Behaviour, not implementation.** Check the result and the observable effects, not the
+  internals. Otherwise the test breaks on any refactoring while the code is right.
+* **Edge cases** — that is where bugs live: empty (`[]`, `""`, `None`, 0), a single element, the
+  maximum/minimum, negatives, duplicates, unicode, very large, invalid input.
+* **Error branches.** Every `raise`, `try/except` and argument check is a path of its own. Check
+  that bad input raises the right exception with a clear message, rather than "just crashing".
+* **A regression test for a caught bug.** Fixed a bug — write a test at once that WOULD fail
+  without the fix. That guarantees it does not come back.
 
-## Структура
+## Shape
 
-Дано → Действие → Проверка (Arrange–Act–Assert): подготовил вход, вызвал одно
-поведение, проверил один результат. Один тест — одна мысль; имя говорит, что
-именно проверяется (`test_expand_without_placeholder_appends_argument`, а не
-`test_1`).
+Arrange → Act → Assert: prepare the input, call one behaviour, check one result. One test — one
+idea; the name says what exactly is checked
+(`test_expand_without_placeholder_appends_argument`, not `test_1`).
 
-## Моки — только границы, не свой код
+## Mocks — only the boundaries, not your own code
 
-Подменяй ВНЕШНЕЕ и медленное/недетерминированное: сеть, LLM-вызовы, время,
-случайность, файловую систему, чужие сервисы. Свою логику не мокай — иначе
-проверяешь мок, а не код. В этом проекте для LLM есть `ScriptedLLM`, для
-событий — `EventCollector`, рабочая папка — фикстура `settings`/`tmp_path`.
+Replace what is EXTERNAL and slow or non-deterministic: the network, LLM calls, time, randomness,
+the file system, other people's services. Do not mock your own logic — then you test the mock,
+not the code. In this project there is `ScriptedLLM` for the LLM, `EventCollector` for events,
+and the `settings`/`tmp_path` fixtures for the working folder.
 
-## Покрытие — это карта дыр, а не цель
+## Coverage is a map of the holes, not a goal
 
-`test_coverage source=... tests=...` показывает непокрытые строки. Используй их
-как список того, что ещё не проверено (обычно это как раз ветки ошибок и
-граничные случаи). Но 100% ради числа не нужно: покрытая строка ≠ проверенное
-поведение. Цель — чтобы важные пути и краевые случаи имели осмысленный тест.
+`test_coverage source=... tests=...` shows the uncovered lines. Use them as the list of what is
+not checked yet (usually exactly the error branches and edge cases). But 100% for the number's
+sake is not needed: a covered line is not a checked behaviour. The goal is a meaningful test for
+the important paths and the edge cases.
 
-## Порядок
+## Order
 
-1. Написал/поправил код — сразу тест на новое поведение (а не «потом»).
-2. `run_tests` — зелёное. Красное — чини причину, не подгоняй тест под баг.
-3. Сомневаешься, всё ли охватил, — `test_coverage`, добери непокрытые ветки.
-4. Тест должен падать, если сломать код: мысленно проверь, что он вообще
-   способен поймать ошибку. Всегда-зелёный тест — выброси или почини.
+1. Wrote or changed code — a test for the new behaviour at once (not "later").
+2. `run_tests` — green. Red — fix the cause, do not bend the test to the bug.
+3. Unsure whether everything is covered — `test_coverage`, then add the uncovered branches.
+4. A test must fail if the code breaks: check in your head that it can catch an error at all. An
+   always-green test — throw it away or fix it.

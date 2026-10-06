@@ -1,48 +1,45 @@
 ---
 name: dev_server
-description: Наблюдение за живым dev-сервером (npm run dev, uvicorn --reload, vite, cargo watch) — запуск в фоне, чтение логов, детекция ошибок сборки/рантайма и цикл «правка → проверка пересборки». Для веб-разработки и отладки с горячей перезагрузкой.
+description: Watching a live dev server (npm run dev, uvicorn --reload, vite, cargo watch) — starting it in the background, reading its logs, catching build and runtime errors, and the "edit → check the rebuild" loop. For web development and debugging with hot reload.
 ---
 
-# Навык: наблюдатель за dev-сервером
+# Skill: watching a dev server
 
-Обычный `execute_command` запускает команду и ждёт её завершения — для
-dev-сервера это тупик: он не завершается сам. Для живых серверов есть отдельные
-инструменты: `start_dev_server`, `read_dev_server`, `stop_dev_server`,
-`list_dev_servers`.
+A plain `execute_command` starts a command and waits for it to end — a dead end for a dev server,
+which never ends by itself. Live servers have their own tools: `start_dev_server`,
+`read_dev_server`, `stop_dev_server`, `list_dev_servers`.
 
-## Когда использовать
+## When to use them
 
-* Запуск сервера разработки с горячей перезагрузкой: `npm run dev`, `pnpm dev`,
-  `vite`, `uvicorn app:app --reload`, `cargo watch -x run`, `next dev`.
-* Отладка, где важно видеть поток логов и ловить ошибки сборки/рантайма по мере
-  их появления.
+* Starting a development server with hot reload: `npm run dev`, `pnpm dev`, `vite`,
+  `uvicorn app:app --reload`, `cargo watch -x run`, `next dev`.
+* Debugging where you need to see the stream of logs and catch build and runtime errors as they
+  appear.
 
-НЕ используй для обычных команд (тесты, сборка, git) — для них `execute_command`.
+Do NOT use them for ordinary commands (tests, builds, git) — those are `execute_command`.
 
-## Рабочий цикл (Observe → Fix → Verify)
+## The loop (Observe → Fix → Verify)
 
-1. **Запуск.** `start_dev_server(command="npm run dev", name="web")`. Имя короткое
-   и осмысленное — по нему обращаешься дальше. Вернутся первые логи; если сервер
-   упал сразу — увидишь код возврата и причину.
-2. **Чтение.** `read_dev_server(name="web", wait_sec=3)` отдаёт ТОЛЬКО новые
-   строки с прошлого раза и помечает похожие на ошибки (`⚠️`). `wait_sec` даёт
-   серверу время отреагировать — ставь 2–5 с после правок.
-3. **Починка.** Нашёл ошибку — локализуй файл (`find_symbol`, `grep_search`),
-   поправь `apply_patch`.
-4. **Проверка пересборки.** Снова `read_dev_server(name="web", wait_sec=3)`.
-   Признак успеха — `✅ Похоже, сервер успешно собрался` (ready/compiled/HMR).
-   Есть ошибка — повтори шаг 3. Не показывай результат пользователю, пока в
-   логах не станет чисто.
-5. **Остановка.** По завершении — `stop_dev_server(name="web")`. Не плоди
-   забытые серверы: `list_dev_servers` покажет запущенные.
+1. **Start.** `start_dev_server(command="npm run dev", name="web")`. A short, meaningful name —
+   you refer to the server by it. The first logs come back; if the server died at once, you see
+   the exit code and the reason.
+2. **Read.** `read_dev_server(name="web", wait_sec=3)` returns ONLY the lines new since the last
+   read and marks the ones that look like errors. `wait_sec` gives the server time to react — use
+   2–5 s after edits.
+3. **Fix.** Found an error — locate the file (`find_symbol`, `grep_search`) and fix it
+   (`edit_file` / `apply_patch`).
+4. **Check the rebuild.** `read_dev_server(name="web", wait_sec=3)` again. Success is the line
+   saying the server built successfully (ready/compiled/HMR). An error — repeat step 3. Do not
+   show the result to the user until the logs are clean.
+5. **Stop.** When done — `stop_dev_server(name="web")`. Do not leave forgotten servers behind:
+   `list_dev_servers` shows the running ones.
 
-## Тонкости
+## Details
 
-* Логи читаются инкрементально: если между чтениями сервер напечатал больше,
-  чем помещается в буфер, инструмент честно пометит `[...пропущено N строк...]`.
-* Сервер живёт в рабочей папке (`cwd` относительно workspace). Убедись, что там
-  есть `package.json`/точка входа.
-* При выходе из приложения все dev-серверы гасятся автоматически (включая дерево
-  дочерних процессов node/python), порты не остаются занятыми.
-* Один сервер на имя. Чтобы перезапустить — сначала `stop_dev_server`, потом
-  `start_dev_server` снова.
+* Logs are read incrementally: if the server printed more between two reads than the buffer
+  holds, the tool marks honestly how many lines were skipped.
+* The server runs in the working folder (`cwd` relative to the workspace). Make sure there is a
+  `package.json` or an entry point there.
+* When the app exits, every dev server is stopped automatically (with its tree of node/python
+  child processes); no ports stay taken.
+* One server per name. To restart — `stop_dev_server` first, then `start_dev_server` again.

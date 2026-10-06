@@ -1,42 +1,41 @@
 ---
 name: academic
-description: Учёба и наука — точная математика (SymPy), список литературы по ГОСТ, колоды Anki для повторения, помощь с курсовыми и рефератами. Для решения задач, оформления работ и подготовки к экзаменам.
+description: Study and science — exact maths (SymPy), a bibliography in the GOST style, Anki decks for review, help with term papers and essays. For solving problems, formatting papers and preparing for exams.
 ---
 
-# Навык: учёба и наука
+# Skill: study and science
 
-## Точная математика
+## Exact maths
 
-* Считай инструментом `solve_math`, а НЕ в уме: в уме модель теряет знаки и
-  корни, а SymPy считает строго. Это уравнения, производные, интегралы, пределы,
-  ряды, матрицы.
-* Инструмент возвращает ответ, ход решения и запись в LaTeX — приведи их. Формулы
-  в ответе оформляй в `$…$` (строчные) и `$$…$$` (выключные), они отрисуются.
-* Неберущийся интеграл `solve_math` честно назовёт неберущимся — не выдумывай
-  «красивый» ответ вместо него.
+* Compute with `solve_math`, NOT in your head: in its head a model loses signs and roots, SymPy
+  computes strictly. That covers equations, derivatives, integrals, limits, series, matrices.
+* The tool returns the answer, the steps and the LaTeX form — give them. Write formulas in the
+  answer as `$…$` (inline) and `$$…$$` (display); they are rendered.
+* An integral with no closed form is reported as such by `solve_math` — do not make up a "nice"
+  answer instead.
 
-## Список литературы
+## Bibliography
 
-* `format_bibliography` оформляет источники по ГОСТ Р 7.0.100–2018 (книги,
-  статьи, электронные ресурсы, диссертации, законы), сортирует по алфавиту и
-  сам расставляет тире и косые черты. Не оформляй список вручную.
-* Актуальные источники ищи в сети (`web_search`, `deep_research`), а потом
-  прогоняй через `format_bibliography`.
+* `format_bibliography` formats sources by GOST R 7.0.100–2018 (books, articles, web resources,
+  dissertations, laws), sorts them alphabetically and places the dashes and slashes itself. Do
+  not format the list by hand.
+* Find current sources on the web (`web_search`, `deep_research`), then run them through
+  `format_bibliography`.
 
-## Карточки для повторения
+## Cards for review
 
-* `create_anki_deck` собирает колоду `.apkg` из пар «вопрос — ответ». Хорошая
-  карточка проверяет одну мысль — не переписывай в неё абзац конспекта.
-* Собирай карточки по местам, где студент плавал, а не по всей теме подряд.
+* `create_anki_deck` builds an `.apkg` deck from question–answer pairs. A good card checks one
+  idea — do not copy a paragraph of notes into it.
+* Make cards for the places where the student struggled, not for the whole topic in a row.
 
-## Курсовые, рефераты, дипломы
+## Term papers, essays, theses
 
-* Структура → содержание → список литературы → проверка. Не лей воду.
-* Разбор темы делай через `deep_research` со ссылками, а не по памяти.
-* Ты помогаешь понять и оформить, а не «сдать за студента» — объясняй решения.
+* Structure → content → bibliography → review. No filler.
+* Research the topic with `deep_research`, with links, not from memory.
+* You help to understand and to format, not to "hand it in for the student" — explain the
+  solutions.
 
-## Экзамены
+## Exams
 
-Для проверки понимания есть отдельный навык `socratic_examiner` — опрос
-вопросами без готовых ответов. Переключись на него, если человек готовится к
-экзамену или защите.
+For checking understanding there is a separate skill, `socratic_examiner`: questions without
+ready answers. Switch to it when the person is preparing for an exam or a defence.

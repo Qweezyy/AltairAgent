@@ -1,54 +1,52 @@
 ---
 name: data_analytics
-description: Анализ данных и наглядные графики — разбор банковских выписок и таблиц, построение интерактивных диаграмм, презентация результата. Для финансов, отчётов и любой задачи «посчитай и покажи».
+description: Data analysis and clear charts — bank statements and tables, interactive charts, presenting the result. For finances, reports and any "count it and show it" task.
 ---
 
-# Навык: аналитика и графики
+# Skill: analytics and charts
 
-Принцип: **считай инструментами, показывай графиком.** Ошибиться в сумме,
-разбирая данные, недопустимо, а один график понятнее трёх абзацев.
+The rule: **count with tools, show with a chart.** A wrong sum while analysing data is not
+acceptable, and one chart is clearer than three paragraphs.
 
-## Банковские выписки
+## Bank statements
 
-* `analyze_statement` разбирает CSV/XLSX сам: раскладывает по категориям,
-  считает доходы/расходы/итог, находит крупнейшие траты, строит диаграмму. Не
-  считай суммы вручную.
-* На основе разбора предлагай конкретное: где расходы выбиваются, что сократить
-  без потери качества жизни. Без морализаторства.
-* Категоризация — по ключевым словам; если банк называет операции необычно,
-  часть уйдёт в «Прочее» — так и скажи, не выдавай за точную картину.
+* `analyze_statement` reads a CSV/XLSX itself: sorts it into categories, counts income, spending
+  and the total, finds the largest expenses, draws a chart. Do not add up sums by hand.
+* From the analysis, suggest concrete things: where spending stands out, what to cut without
+  losing quality of life. No moralising.
+* Categories come from keywords; when a bank names its operations oddly, part goes to "Other" —
+  say so, do not present it as an exact picture.
 
-## Графики (`create_chart`)
+## Charts (`create_chart`)
 
-* Тип под данные: `line` — динамика во времени, `bar` — сравнение категорий,
-  `pie` — доли целого, `scatter` — связь величин, `area` — накопление.
-* Для линий/столбцов — `series` (ряды по Y) и общие `x`; для круговой —
-  `labels` и `values`.
-* График сохраняется самодостаточным HTML: открывается в превью и в любом
-  браузере, офлайн. Сошлись на него в ответе.
-* Строй график ПОСЛЕ расчётов, чтобы показать результат, а не вместо него.
+* The type follows the data: `line` — change over time, `bar` — comparing categories, `pie` —
+  shares of a whole, `scatter` — a relation between values, `area` — accumulation.
+* For lines and bars — `series` (the Y series) and a shared `x`; for a pie — `labels` and
+  `values`.
+* The chart is saved as self-contained HTML: it opens in the preview and in any browser, offline.
+  Refer to it in the answer.
+* Draw the chart AFTER the calculation, to show the result, not instead of it.
 
-## Большие таблицы (`profile_data`, `query_data`)
+## Large tables (`profile_data`, `query_data`)
 
-Для CSV/Parquet/JSON — особенно больших (сотни МБ, гигабайты) — DuckDB, а не
-ручной разбор:
+For CSV/Parquet/JSON — especially large ones (hundreds of MB, gigabytes) — use DuckDB, not
+reading by hand:
 
-* `profile_data path=...` — авто-разведка (EDA) незнакомого набора: строки,
-  колонки с типами, доля пропусков, уникальность, статистика (min/max/среднее/
-  квартили) и найденные проблемы (много пропусков, колонки-константы). ВСЕГДА
-  начинай с неё, чтобы понять данные до запросов.
-* `query_data path=... sql=...` — SQL прямо над файлом (он доступен как таблица
-  `data`), без загрузки в память: агрегации, группировки, фильтры, JOIN'ы.
-  Пример: `SELECT category, SUM(amount) FROM data GROUP BY category`.
-  Только чтение — исходный файл не меняется.
-* Нашёл срез — покажи его `create_chart`.
+* `profile_data path=...` — an automatic first look (EDA) at an unfamiliar dataset: rows, columns
+  with types, the share of missing values, uniqueness, statistics (min/max/mean/quartiles) and the
+  problems found (many gaps, constant columns). ALWAYS start with it, to understand the data
+  before querying.
+* `query_data path=... sql=...` — SQL right over the file (it is the table `data`), without loading
+  it into memory: aggregations, grouping, filters, JOINs. Example:
+  `SELECT category, SUM(amount) FROM data GROUP BY category`. Read-only — the file is not changed.
+* Found the slice — show it with `create_chart`.
 
-## Прочие данные и прогнозы
+## Other data and forecasts
 
-* Небольшие расчёты — явно через `run_python`, а не «на глаз».
-* «Что если» и прогнозы — тоже расчётом, и покажи графиком.
+* Small calculations — explicitly with `run_python`, not "by eye".
+* "What if" and forecasts — calculated too, and shown as a chart.
 
-## Честность
+## Honesty
 
-Не выдумывай числа. Данных не хватает или формат не разобрался — скажи прямо,
-что именно неизвестно, а не подставляй правдоподобное.
+Do not make up numbers. Not enough data, or a format that did not parse — say plainly what is
+unknown instead of putting in something plausible.

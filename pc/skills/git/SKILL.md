@@ -1,53 +1,51 @@
 ---
 name: git
-description: Работа с git как у разработчика — смотреть статус и свой дифф перед сдачей, изучать историю через log и blame, делать осмысленные атомарные коммиты, вести ветки. Для любой задачи в git-репозитории.
+description: Working with git like a developer — checking the status and your own diff before handing over, reading history with log and blame, making meaningful atomic commits, keeping branches. For any task in a git repository.
 ---
 
-# Навык: работа с git
+# Skill: working with git
 
-git — это память проекта. Через него понимают, что уже сделано, почему код
-такой, и фиксируют изменения обратимыми порциями.
+git is the project's memory. Through it you understand what is already done and why the code is
+the way it is, and you record changes in portions that can be undone.
 
-## Перед работой — осмотрись
+## Before working — look around
 
-* `git_status` — что сейчас изменено, добавлено, не отслеживается. Первым делом
-  в незнакомом состоянии: понять, с чего начинаешь.
-* `git_log path=...` — как менялся конкретный файл. Свежая история объясняет
-  замысел лучше, чем чтение кода вслепую.
-* `git_blame path=... start_line=.. end_line=..` — кто и в каком коммите ввёл
-  эти строки. Незаменимо, когда надо понять «почему тут так, а не иначе»:
-  находишь коммит-первоисточник и его сообщение.
+* `git_status` — what is changed, added, untracked right now. The first thing in an unfamiliar
+  state: know where you start from.
+* `git_log path=...` — how a file changed. Recent history explains the intent better than reading
+  the code blind.
+* `git_blame path=... start_line=.. end_line=..` — who brought these lines in and in which commit.
+  Indispensable for "why is it like this and not otherwise": you find the original commit and its
+  message.
 
-## Проверяй СВОЙ дифф перед тем, как объявить готово
+## Check YOUR diff before calling it done
 
-После правок — `git_diff` (без аргументов: все изменения рабочего дерева).
-Читай его как ревьюер: не осталось ли отладочного мусора, случайных правок,
-не то удалил. Это тот же самоконтроль, что и перечитать письмо перед отправкой.
-`git_diff against=HEAD~1` — сравнить с предыдущим коммитом; `staged=true` —
-только то, что уже в индексе.
+After edits — `git_diff` (no arguments: every change in the working tree). Read it as a reviewer:
+no debugging leftovers, no accidental edits, nothing removed by mistake. It is the same as
+rereading a letter before sending it. `git_diff against=HEAD~1` — compare with the previous
+commit; `staged=true` — only what is already staged.
 
-## Коммить осмысленно
+## Commit meaningfully
 
-* `git_commit message="..."` фиксирует изменения. По умолчанию берёт все
-  отслеживаемые правки; `paths=[...]` — только нужные файлы.
-* Один коммит = одно логическое изменение. Не сваливай несвязанные правки в
-  кучу: потом их не откатить по отдельности.
-* Сообщение — коротко и по сути: ЧТО и ЗАЧЕМ, а не «фикс» и «правки».
-* Коммить, только когда попросили или когда логический кусок готов и проверен
-  (тесты/линт зелёные). Не коммить сломанное состояние.
+* `git_commit message="..."` records the changes. By default it takes every tracked change;
+  `paths=[...]` — only the files you name.
+* One commit = one logical change. Do not pile unrelated edits together: later they cannot be
+  undone separately.
+* The message — short and to the point: WHAT and WHY, not "fix" or "edits".
+* Commit only when asked, or when a logical piece is done and checked (tests and lint green). Do
+  not commit a broken state.
 
-## Ветки под крупные задачи
+## Branches for big tasks
 
-`git_branch action=create name=...` заводит отдельную ветку и переключается на
-неё. Держи большую фичу или рискованный рефакторинг в своей ветке, чтобы не
-мешать основной. `action=list` — посмотреть ветки, `action=switch` —
-переключиться.
+`git_branch action=create name=...` creates a branch and switches to it. Keep a big feature or a
+risky refactoring in its own branch, so it does not get in the way of the main one.
+`action=list` — see the branches, `action=switch` — switch.
 
-## Границы
+## Limits
 
-* **Пуш не делается инструментами.** Отправка во внешний репозиторий (`git push`) —
-  действие пользователя; предложи, но не выполняй сам.
-* Не переписывай опубликованную историю (`reset --hard`, `rebase` чужих
-  коммитов, `push --force`) без явной просьбы — это ломает работу другим.
-* Если папка не git-репозиторий, `git_status` подскажет `git init` — но заводить
-  репозиторий стоит только по согласию пользователя.
+* **Pushing is not done by tools.** Sending to a remote (`git push`) is the user's action; offer
+  it, do not do it yourself.
+* Do not rewrite published history (`reset --hard`, `rebase` of others' commits, `push --force`)
+  without an explicit request — it breaks other people's work.
+* If the folder is not a git repository, `git_status` suggests `git init` — but start a repository
+  only with the user's consent.

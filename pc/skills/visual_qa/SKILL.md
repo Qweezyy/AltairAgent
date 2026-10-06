@@ -1,44 +1,42 @@
 ---
 name: visual_qa
-description: Визуальная проверка вёрстки перед сдачей — скриншоты страниц/элементов в разных размерах экрана и автономный Vision-аудит (модель смотрит на результат и находит дефекты). Для веб-UI, лендингов, компонентов и любых задач с версткой.
+description: Checking a layout visually before handing it over — screenshots of pages and elements at different screen sizes and an autonomous vision audit (the model looks at the result and finds the defects). For web UIs, landing pages, components and any layout work.
 ---
 
-# Навык: визуальная верификация вёрстки (Vision-in-the-loop)
+# Skill: visual verification of a layout (vision in the loop)
 
-Правило: **не показывай пользователю свёрстанный UI, пока не увидел его глазами
-модели**. Текст HTML/CSS не говорит, как это выглядит — отступы, контраст,
-переполнение и наложения видны только на скриншоте.
+The rule: **do not show the user a UI you built until you have seen it through the model's eyes**.
+HTML/CSS text does not tell how it looks — spacing, contrast, overflow and overlaps show only on a
+screenshot.
 
-## Инструменты
+## Tools
 
-* `screenshot_ui` — снять скриншот и показать в панели «Превью». Режимы:
-  - вся страница (`full_page=true`) или элемент по CSS-селектору (`selector="#header"`);
-  - размер экрана `viewport`: `desktop` (1280×800), `tablet` (768×1024), `mobile` (375×667).
-* `audit_ui` — снять скриншот И отдать его мультимодальной модели: вернёт список
-  дефектов (контраст, выравнивание, переполнение, битые картинки, горизонтальный
-  скролл) с правками и вердиктом «Готово к показу / Нужны правки». `focus` —
-  указать, на что смотреть особенно.
+* `screenshot_ui` — take a screenshot and show it in the Preview panel. Modes:
+  - the whole page (`full_page=true`) or an element by CSS selector (`selector="#header"`);
+  - the screen size `viewport`: `desktop` (1280×800), `tablet` (768×1024), `mobile` (375×667).
+* `audit_ui` — take a screenshot AND give it to a multimodal model: it returns a list of defects
+  (contrast, alignment, overflow, broken images, horizontal scroll) with fixes and a verdict
+  "Ready to show / Needs fixes". `focus` — what to look at especially.
 
-Цель (`target`) — URL своего dev-сервера (`http://localhost:5173`) или путь к
-HTML-файлу в рабочей папке.
+The target (`target`) is your dev server's URL (`http://localhost:5173`) or the path to an HTML
+file in the working folder.
 
-## Рабочий цикл (Render → Audit → Fix)
+## The loop (Render → Audit → Fix)
 
-1. Свёрстал/поправил UI → подними превью или dev-сервер.
-2. `audit_ui(target=..., viewport="desktop")` — получи разбор.
-3. Есть замечания → правь CSS/HTML (`apply_patch`) точечно по указанным причинам.
-4. Снова `audit_ui` — пока не будет «Готово к показу». Не показывай
-   промежуточный сломанный результат пользователю.
-5. Для адаптивных макетов прогони аудит на всех трёх вьюпортах
-   (`desktop`/`tablet`/`mobile`): типичные баги — горизонтальный скролл на
-   мобильном и слишком мелкие области клика.
+1. Built or changed the UI → start the preview or the dev server.
+2. `audit_ui(target=..., viewport="desktop")` — get the review.
+3. There are remarks → fix the CSS/HTML (`edit_file` / `apply_patch`) for the reasons given.
+4. `audit_ui` again — until it says "Ready to show". Do not show a broken intermediate result to
+   the user.
+5. For responsive layouts run the audit on all three viewports (`desktop`/`tablet`/`mobile`):
+   typical bugs are a horizontal scroll on mobile and click targets that are too small.
 
-## Тонкости
+## Details
 
-* Скриншоты складываются в `.screenshots/` рабочей папки и сразу видны в «Превью»
-  — это визуальный журнал того, что проверялось.
-* Селекторный скриншот кадрируется по bounding box элемента — удобно проверять
-  один компонент (карточку, шапку), не разглядывая всю страницу.
-* Аудит своего `localhost`/локального файла идёт без лишних подтверждений;
-  скриншот внешнего сайта попросит разрешение (это сетевое действие).
-* Модель просят НЕ выдумывать проблемы: если вёрстка чистая — она так и скажет.
+* Screenshots go to `.screenshots/` in the working folder and show up in the Preview at once — a
+  visual log of what was checked.
+* A selector screenshot is cropped to the element's bounding box — handy for checking one
+  component (a card, a header) without looking over the whole page.
+* Auditing your own `localhost` or a local file needs no extra approvals; a screenshot of an
+  external site asks for permission (it is a network action).
+* The model is asked NOT to invent problems: if the layout is clean, it says so.

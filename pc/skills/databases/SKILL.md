@@ -1,43 +1,41 @@
 ---
 name: databases
-description: Работа с базами данных SQLite — понять устройство через схему и ER-диаграмму, безопасно запрашивать данные (SELECT через read-only подключение), оптимизировать запросы через EXPLAIN, аккуратно менять данные с подтверждением. Для анализа и правки локальных баз (.db/.sqlite).
+description: Working with SQLite databases — understanding one through its schema and an ER diagram, querying safely (SELECT over a read-only connection), optimising queries with EXPLAIN, changing data carefully and with confirmation. For analysing and editing local databases (.db/.sqlite).
 ---
 
-# Навык: базы данных (SQLite)
+# Skill: databases (SQLite)
 
-Инструменты: `db_schema` (структура), `db_query` (SQL), `db_diagram` (ER-схема
-в Mermaid). Пока поддержан SQLite — он под капотом у множества приложений
-(браузеры, мессенджеры, мобильные и десктопные программы, `*.db`/`*.sqlite`).
+Tools: `db_schema` (the structure), `db_query` (SQL), `db_diagram` (an ER diagram in Mermaid).
+SQLite is supported for now — it sits under many applications (browsers, messengers, mobile and
+desktop programs, `*.db`/`*.sqlite`).
 
-## Сначала пойми базу, потом трогай
+## Understand the database first, then touch it
 
-1. `db_schema path=...` — таблицы, колонки, типы, ключи, число строк. Первым
-   делом в незнакомой базе.
-2. `db_diagram path=...` — ER-диаграмма связей (Mermaid). Покажи пользователю в
-   блоке ` ```mermaid ` — так связи видны наглядно.
-3. Разобрался в структуре — только тогда пиши запросы.
+1. `db_schema path=...` — tables, columns, types, keys, row counts. The first thing in an
+   unfamiliar database.
+2. `db_diagram path=...` — an ER diagram of the relations (Mermaid). Show it to the user in a
+   ` ```mermaid ` block — the relations are clearer that way.
+3. Only once the structure is clear, write queries.
 
-## Запросы — безопасно по умолчанию
+## Queries — safe by default
 
-* `SELECT`/`PRAGMA`/`EXPLAIN` идут через **read-only подключение** и без
-  подтверждения: испортить данные невозможно даже при ошибке в запросе.
-* Изменяющие запросы (`INSERT`/`UPDATE`/`DELETE`/`CREATE`/`DROP`/…) требуют
-  подтверждения пользователя и открывают базу на запись. Прежде чем менять
-  данные — покажи, что именно и сколько строк затронешь (сначала `SELECT`).
-* Результат приходит таблицей; много строк — ограничивай `LIMIT` в самом
-  запросе, не тащи всю таблицу в контекст.
+* `SELECT`/`PRAGMA`/`EXPLAIN` go over a **read-only connection** and need no confirmation: the data
+  cannot be damaged even by a wrong query.
+* Changing queries (`INSERT`/`UPDATE`/`DELETE`/`CREATE`/`DROP`/…) need the user's confirmation and
+  open the database for writing. Before changing data, show what exactly and how many rows will be
+  touched (a `SELECT` first).
+* The result comes as a table; with many rows, limit them with `LIMIT` in the query itself — do
+  not pull a whole table into the context.
 
-## Оптимизация
+## Optimisation
 
-`EXPLAIN QUERY PLAN SELECT ...` показывает, как SQLite выполнит запрос: `SCAN`
-по большой таблице — сигнал, что не хватает индекса; `SEARCH ... USING INDEX` —
-хорошо. Медленный запрос по внешнему ключу без индекса — типичная причина
-тормозов.
+`EXPLAIN QUERY PLAN SELECT ...` shows how SQLite will run a query: a `SCAN` over a large table
+means an index is missing; `SEARCH ... USING INDEX` is good. A slow query on a foreign key
+without an index is a typical cause of slowness.
 
-## Осторожно с данными пользователя
+## Careful with the user's data
 
-* Не выполняй `DROP`/массовый `DELETE`/`UPDATE` без явной просьбы и понимания
-  последствий. Данные в базе часто невосстановимы.
-* Перед разрушительной операцией предложи сделать копию файла базы.
-* Не показывай наружу чувствительное содержимое (пароли, токены, персональные
-  данные), если пользователь об этом не просил.
+* Do not run `DROP` or a mass `DELETE`/`UPDATE` without an explicit request and an understanding
+  of the consequences. Data in a database often cannot be recovered.
+* Before a destructive operation, offer to copy the database file.
+* Do not expose sensitive contents (passwords, tokens, personal data) unless the user asked.

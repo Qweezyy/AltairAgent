@@ -179,3 +179,17 @@ def test_copy_bundled_skills_adds_new_only(tmp_path):
     assert added == 1  # только research добавлен
     assert (target / "coding" / "SKILL.md").read_text(encoding="utf-8") == "мои правки"
     assert (target / "research" / "SKILL.md").exists()
+
+
+def test_built_in_skills_speak_english():
+    """The built-in skills go into the model's prompt like the system prompt and the tools, which
+    are in English: a Russian skill in an English prompt mixed the languages (2026-10, 0.3.0)."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    cyrillic = re.compile("[Ѐ-ӿ]")
+    for skill_file in sorted((root / "skills").glob("*/SKILL.md")):
+        assert not cyrillic.search(skill_file.read_text(encoding="utf-8")), skill_file.parent.name
+    for module in ("core/tools/builtin/devserver_tools.py", "core/devserver/manager.py"):
+        assert not cyrillic.search((root / module).read_text(encoding="utf-8")), module

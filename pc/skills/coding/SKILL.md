@@ -1,92 +1,92 @@
 ---
 name: coding
-description: Рабочий процесс программирования в этом агенте — навигация по коду, безопасные правки диффами, цикл тест → авто-фикс, откат. Для разработки, рефакторинга и починки в любом проекте и на любом языке.
+description: How to program with this agent — code navigation, safe edits, the test → fix loop, rollback. For development, refactoring and repairs in any project and any language.
 ---
 
-# Навык: разработка кода
+# Skill: writing code
 
-Это про то, КАК работать с кодом инструментами агента, а не про синтаксис
-конкретного языка (для Python есть отдельный навык `python_expert`).
+This is about HOW to work with code through the agent's tools, not about the syntax of a language
+(Python has its own skill, `python_expert`).
 
-## Сложную задачу начинай с плана
+## Start a non-trivial task with a plan
 
-Прежде чем менять код в нетривиальной задаче (несколько файлов, новая фича,
-рефакторинг) — вызови `write_plan`: он сохранит `implementation_plan.md` (цель,
-подход, затрагиваемые файлы, шаги, проверка, риски) и покажет его пользователю
-для правок ДО начала работы. Это дешевле, чем переписывать сделанное: пользователь
-поймает неверное направление на плане, а не на готовом коде. Шаги плана попадают
-в живой чек-лист — держи их статусы актуальными по ходу дела.
+Before changing code in a non-trivial task (several files, a new feature, a refactoring), call
+`write_plan`: it saves `implementation_plan.md` (goal, approach, files touched, steps, how it will
+be checked, risks) and shows it to the user for changes BEFORE the work starts. That is cheaper
+than redoing the work: a wrong direction is caught on the plan, not in finished code. The plan's
+steps become a live checklist — keep their statuses current as you go.
 
-## Порядок в незнакомом проекте
+## The order in an unfamiliar project
 
-1. **Сначала карта, потом чтение.** `code_map` даёт структуру файла с номерами
-   строк — это в разы дешевле, чем читать файлы целиком. Ориентируйся по ней.
-   Для JS/TS/Go/Rust/Java/C# карта точная (tree-sitter): классы с методами,
-   интерфейсы, трейты, impl-блоки, типы, enum'ы — не хуже, чем для Python.
-2. **Перед правкой функции — `find_symbol`:** где она определена и кто её
-   вызывает. Изменение сигнатуры без проверки вызовов ломает код молча.
-3. **`read_file` точечно** — по нужным строкам из карты, а не «прочитать всё».
+1. **Map first, then read.** `code_map` gives a file's structure with line numbers — many times
+   cheaper than reading whole files. Navigate by it. For JS/TS/Go/Rust/Java/C# the map is exact
+   (tree-sitter): classes with methods, interfaces, traits, impl blocks, types, enums — as good
+   as for Python.
+2. **Before changing a function — `find_symbol`:** where it is defined and who calls it. A changed
+   signature without checking the callers breaks code silently.
+3. **`read_file` precisely** — the lines the map points to, not "read everything".
 
-### Структурные вопросы — `ast_search` (Python)
+### Structural questions — `ast_search` (Python)
 
-Когда нужно найти по СТРУКТУРЕ, а не по имени, бери `ast_search` — он разбирает
-синтаксическое дерево и точнее `grep_search`:
-* `decorated_by` — функции/классы с декоратором (`@router.get`, `@app.websocket`);
-* `subclass_of` — наследники класса (например все `BaseModel`);
-* `calls` — реальные места вызова функции (в т.ч. через атрибут);
-* `raises` — где кидают исключение; `imports` — кто импортирует модуль;
-* `async_functions`, `missing_return_type` — обход по признаку.
+When you need to find something by STRUCTURE rather than by name, use `ast_search`: it parses the
+syntax tree and is more precise than `grep_search`:
+* `decorated_by` — functions/classes with a decorator (`@router.get`, `@app.websocket`);
+* `subclass_of` — subclasses of a class (for example every `BaseModel`);
+* `calls` — the real call sites of a function (attribute calls included);
+* `raises` — where an exception is raised; `imports` — who imports a module;
+* `async_functions`, `missing_return_type` — a walk by a property.
 
-Пример: перед сменой контракта эндпоинтов — `ast_search decorated_by router.get`,
-чтобы увидеть все затронутые обработчики разом.
+Example: before changing the contract of the endpoints — `ast_search decorated_by router.get`, to
+see every affected handler at once.
 
-### Семантика — `code_intel` (LSP)
+### Semantics — `code_intel` (LSP)
 
-Когда нужна точность настоящего анализатора, а не совпадение имён — `code_intel`
-(pyright для Python; tsserver/gopls/rust-analyzer, если установлены):
-* `definition` — куда ведёт символ (следует за импортами и ре-экспортами);
-* `references` — все использования семантически (различает одноимённые);
-* `hover` — полная сигнатура и тип символа.
+When you need the precision of a real analyser rather than matching names — `code_intel`
+(pyright for Python; tsserver/gopls/rust-analyzer when installed):
+* `definition` — where a symbol leads (follows imports and re-exports);
+* `references` — every use, semantically (tells same-named symbols apart);
+* `hover` — the full signature and type of a symbol.
 
-`find_symbol` быстрее и достаточно для обзора; `code_intel` — когда важно не
-ошибиться (одноимённые функции, цепочки импортов, точный тип).
+`find_symbol` is faster and enough for an overview; `code_intel` is for when a mistake matters
+(same-named functions, chains of imports, the exact type).
 
-## Правки
+## Edits
 
-* Существующие файлы меняй `apply_patch` (unified diff): нетронутый код не может
-  пропасть, а в контекст уходят только изменённые строки. Один патч может менять
-  несколько файлов атомарно.
-* `write_file` — только для новых файлов или полной замены. `edit_file` — для
-  одной короткой точечной замены.
-* После правок Python — `type_check` (pyright): ловит несовпадения типов,
-  неопределённые имена и неверные аргументы, которые не видит `run_lint` (ruff) и
-  которые всплыли бы только в рантайме. Прогоняй перед тестами и перед сдачей.
-* Пиши код, который читается как соседний: тот же стиль, отступы, соглашения об
-  именах, плотность комментариев. Новый файл не должен выделяться.
-* Любую правку можно откатить кнопкой «↩ Откатить» — но не полагайся на это как
-  на замену аккуратности. Снимок делается автоматически перед каждым изменением.
+* One localised change in a file → `edit_file`: copy `old_text` exactly from the file (with its
+  indentation) and make it unique with a few surrounding lines.
+* Changes in several places or files, or creating/deleting/moving files in the same step →
+  `apply_patch` (unified diff or the V4A format). It is atomic: every hunk applies or nothing
+  changes, and only the changed lines go into the context.
+* `write_file` — only for new files or a complete replacement.
+* After Python edits — `type_check` (pyright): it catches type mismatches, undefined names and
+  wrong arguments that `run_lint` (ruff) does not see and that would only show up at run time.
+  Run it before the tests and before handing the work over.
+* Write code that reads like the code next to it: the same style, indentation, naming and comment
+  density. A new file must not stand out.
+* Any edit can be undone with the "↩ Undo" button — do not count on it instead of care. A snapshot
+  is taken automatically before every change.
 
-## Обязательный цикл проверки
+## The checking loop (mandatory)
 
-После правок кода — **не пиши «готово», пока не проверил**:
+After code edits — **do not say "done" before checking**:
 
-1. `run_tests` — прогони тесты, `run_lint` — стиль и типы, `type_check` — типы.
-2. Упало — прочитай отчёт, найди причину, исправь, запусти снова. Повторяй до
-   зелёного, но не больше 3–4 кругов подряд.
-3. Не выходит за несколько попыток — остановись и честно опиши, что падает и что
-   уже пробовал. Не выдавай непроверенное за рабочее.
-4. Тестов в проекте нет — так и скажи, а результат проверь запуском кода
-   (`run_python` / `execute_command`).
-5. **Перед сдачей перечитай свой дифф** — `git_diff` (в git-репозитории): глазами
-   ревьюера, не осталось ли отладочного мусора и случайных правок. См. навык `git`.
+1. `run_tests` — the tests; `run_lint` — style; `type_check` — types.
+2. Something failed — read the report, find the cause, fix it, run again. Repeat until green, but
+   no more than 3–4 rounds in a row.
+3. A few attempts did not do it — stop and say honestly what fails and what you tried. Do not pass
+   off unchecked work as working.
+4. The project has no tests — say so, and check the result by running the code (`run_python` /
+   `execute_command`).
+5. **Before handing over, reread your diff** — `git_diff` (in a git repository) with a reviewer's
+   eye: no debugging leftovers, no accidental edits. See the `git` skill.
 
-## Пакетные операции
+## Batch operations
 
-Десятки однотипных правок (переименование, замена по многим файлам) быстрее
-сделать одним скриптом через `run_python`, чем поштучными вызовами инструментов.
+Dozens of edits of the same kind (a rename, a replacement across many files) are faster as one
+script via `run_python` than as many separate tool calls.
 
-## Чего не делать
+## What not to do
 
-* Не гадать про содержимое файла — проверь `grep_search` / `read_file`.
-* Не оставлять код в нерабочем состоянии между шагами без явной причины.
-* Не приписывать себе несделанное: шаг не удался — так и скажи.
+* Do not guess what a file contains — check with `grep_search` / `read_file`.
+* Do not leave the code broken between steps without a clear reason.
+* Do not claim what you did not do: a step failed — say so.

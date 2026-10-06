@@ -1,11 +1,11 @@
-"""Инструменты наблюдателя за dev-серверами.
+"""Tools that watch dev servers.
 
-Типичный цикл агента:
-  1. start_dev_server(command="npm run dev", name="web") — поднять сервер;
-  2. read_dev_server(name="web", wait_sec=3) — почитать логи, увидеть ошибку;
-  3. edit_file(...) — починить причину;
-  4. read_dev_server(name="web", wait_sec=3) — убедиться, что пересборка прошла;
-  5. stop_dev_server(name="web") — по завершении работы.
+The agent's usual loop:
+  1. start_dev_server(command="npm run dev", name="web") — start the server;
+  2. read_dev_server(name="web", wait_sec=3) — read the logs, see the error;
+  3. edit_file(...) — fix the cause;
+  4. read_dev_server(name="web", wait_sec=3) — make sure the rebuild went through;
+  5. stop_dev_server(name="web") — when the work is done.
 """
 
 from __future__ import annotations
@@ -22,12 +22,12 @@ from core.security.paths import resolve_path
 from core.tools.base import EmptyArgs, Tool, ToolContext, ToolResult
 from core.tools.builtin.shell import check_command
 
-#: Максимум, сколько инструмент подождёт свежих логов за один вызов.
+#: The longest one call waits for fresh logs.
 _MAX_WAIT = 20.0
 
 
 def _format_errors(lines: list[str]) -> str:
-    """Готовит блок с найденными ошибками, если они есть."""
+    """A block with the errors found in these lines ("" when there are none)."""
     errors = scan_output(lines)
     if not errors:
         return ""
@@ -38,22 +38,22 @@ def _format_errors(lines: list[str]) -> str:
             continue
         seen.add(err.text)
         rows.append(f"  • [{err.source}] {err.text}")
-    return "⚠️ Похоже на ошибки:\n" + "\n".join(rows[:15])
+    return "⚠️ Looks like errors:\n" + "\n".join(rows[:15])
 
 
 class StartDevServerArgs(BaseModel):
-    command: str = Field(description="Команда запуска, например «npm run dev» или «uvicorn app:app --reload»")
-    name: str = Field(description="Короткое имя сервера для последующих обращений, например «web»")
-    cwd: str = Field(default=".", description="Рабочая папка относительно workspace")
-    wait_sec: float = Field(default=3.0, description="Сколько секунд подождать первых логов (0–20)")
+    command: str = Field(description="The start command, e.g. 'npm run dev' or 'uvicorn app:app --reload'")
+    name: str = Field(description="A short name to refer to the server later, e.g. 'web'")
+    cwd: str = Field(default=".", description="The working folder, relative to the workspace")
+    wait_sec: float = Field(default=3.0, description="Seconds to wait for the first logs (0–20)")
 
 
 class StartDevServerTool(Tool):
     name = "start_dev_server"
     description = (
-        "Запускает долгоживущий dev-сервер (npm run dev, uvicorn --reload, cargo watch и т.п.) "
-        "в фоне и возвращает первые строки логов. В отличие от execute_command процесс не ждёт "
-        "завершения — потом читайте его через read_dev_server. Не используйте для обычных команд."
+        "Starts a long-running dev server (npm run dev, uvicorn --reload, cargo watch…) in the "
+        "background and returns its first log lines. Unlike execute_command it does not wait for "
+        "the process to end — read it later with read_dev_server. Not for ordinary commands."
     )
     Args = StartDevServerArgs
     category = "execute"
@@ -79,17 +79,17 @@ class StartDevServerTool(Tool):
         if wait:
             await asyncio.sleep(wait)
 
-        # Первый лог сдвигает курсор чтения, чтобы read_dev_server отдавал уже
-        # только новое.
+        # Reading the first logs moves the read cursor, so read_dev_server returns only what
+        # is new.
         first = server.read_new()
         if not server.is_running():
-            body = "\n".join(first) or "(без вывода)"
+            body = "\n".join(first) or "(no output)"
             return ToolResult.fail(
-                f"Сервер «{args.name}» завершился сразу (код {server.exit_code()}).\n{body}"
+                f"Server '{args.name}' exited at once (code {server.exit_code()}).\n{body}"
             )
 
-        parts = [f"Сервер «{args.name}» запущен (pid {server.proc.pid}). Первые логи:"]
-        parts.append("\n".join(first) if first else "(логов пока нет)")
+        parts = [f"Server '{args.name}' started (pid {server.proc.pid}). First logs:"]
+        parts.append("\n".join(first) if first else "(no logs yet)")
         errors = _format_errors(first)
         if errors:
             parts.append(errors)
@@ -97,16 +97,16 @@ class StartDevServerTool(Tool):
 
 
 class ReadDevServerArgs(BaseModel):
-    name: str = Field(description="Имя сервера, заданное при запуске")
-    wait_sec: float = Field(default=0.0, description="Сколько секунд подождать новых логов, если их пока нет (0–20)")
+    name: str = Field(description="The server's name given at start")
+    wait_sec: float = Field(default=0.0, description="Seconds to wait for new logs when there are none yet (0–20)")
 
 
 class ReadDevServerTool(Tool):
     name = "read_dev_server"
     description = (
-        "Возвращает НОВЫЕ строки логов dev-сервера с прошлого чтения и помечает похожие на "
-        "ошибки сборки/рантайма. Используйте после правок, чтобы проверить, что пересборка "
-        "(HMR/reload) прошла без ошибок. wait_sec даёт серверу время отреагировать."
+        "Returns the dev server's NEW log lines since the last read and marks the ones that look "
+        "like build or runtime errors. Use it after edits to check that the rebuild (HMR/reload) "
+        "went through cleanly. wait_sec gives the server time to react."
     )
     Args = ReadDevServerArgs
     category = "read"
@@ -121,38 +121,38 @@ class ReadDevServerTool(Tool):
         wait = max(0.0, min(args.wait_sec, _MAX_WAIT))
         deadline = wait
         lines: list[str] = server.read_new()
-        # Ждём появления логов короткими интервалами, но не дольше wait.
+        # Wait for logs in short steps, no longer than wait.
         while not lines and deadline > 0 and server.is_running():
             step = min(0.5, deadline)
             await asyncio.sleep(step)
             deadline -= step
             lines = server.read_new()
 
-        header = f"Сервер «{args.name}»"
+        header = f"Server '{args.name}'"
         if not server.is_running():
-            header += f" ЗАВЕРШИЛСЯ (код {server.exit_code()})"
+            header += f" EXITED (code {server.exit_code()})"
 
         if not lines:
             tail = server.tail(3)
-            hint = "\nПоследние строки:\n" + "\n".join(tail) if tail else ""
-            return ToolResult(content=f"{header}: новых логов нет.{hint}")
+            hint = "\nLast lines:\n" + "\n".join(tail) if tail else ""
+            return ToolResult(content=f"{header}: no new logs.{hint}")
 
-        parts = [f"{header}. Новые логи:", "\n".join(lines)]
+        parts = [f"{header}. New logs:", "\n".join(lines)]
         errors = _format_errors(lines)
         if errors:
             parts.append(errors)
         elif looks_ready(lines):
-            parts.append("✅ Похоже, сервер успешно собрался/перезапустился.")
+            parts.append("✅ The server seems to have built/restarted successfully.")
         return ToolResult(content="\n\n".join(parts))
 
 
 class StopDevServerArgs(BaseModel):
-    name: str = Field(description="Имя сервера для остановки")
+    name: str = Field(description="The name of the server to stop")
 
 
 class StopDevServerTool(Tool):
     name = "stop_dev_server"
-    description = "Останавливает ранее запущенный dev-сервер по имени."
+    description = "Stops a dev server started earlier, by its name."
     Args = StopDevServerArgs
     category = "execute"
     dangerous = True
@@ -162,32 +162,32 @@ class StopDevServerTool(Tool):
         return tr("appr.dev_stop", name=args.name)
 
     def auto_verdict(self, args: StopDevServerArgs, ctx: ToolContext) -> str:  # type: ignore[override]
-        # Остановка своего же процесса безопасна — не дёргаем пользователя.
+        # Stopping its own process is safe: no need to bother the user.
         return "allow"
 
     async def run(self, args: StopDevServerArgs, ctx: ToolContext) -> ToolResult:
         stopped = get_manager().stop(args.name)
         if not stopped:
-            return ToolResult.fail(f"Сервер «{args.name}» не найден или уже остановлен.")
-        return ToolResult(content=f"Сервер «{args.name}» остановлен.")
+            return ToolResult.fail(f"Server '{args.name}' was not found or is already stopped.")
+        return ToolResult(content=f"Server '{args.name}' stopped.")
 
 
 class ListDevServersTool(Tool):
     name = "list_dev_servers"
-    description = "Показывает запущенные dev-серверы: имя, команду, статус, аптайм."
+    description = "Lists the running dev servers: name, command, state, uptime."
     Args = EmptyArgs
     category = "read"
 
     async def run(self, args: EmptyArgs, ctx: ToolContext) -> ToolResult:
         servers = get_manager().all()
         if not servers:
-            return ToolResult(content="Нет запущенных dev-серверов.")
+            return ToolResult(content="No dev servers are running.")
         rows = []
         for s in servers:
             st = s.status()
-            state = "работает" if st["running"] else f"завершён (код {st['exit_code']})"
+            state = "running" if st["running"] else f"exited (code {st['exit_code']})"
             rows.append(
                 f"• {st['name']}: {st['command']} — {state}, "
-                f"аптайм {st['uptime_sec']} с, строк лога {st['log_lines']}"
+                f"uptime {st['uptime_sec']} s, {st['log_lines']} log lines"
             )
         return ToolResult(content="\n".join(rows))

@@ -1,49 +1,48 @@
 ---
 name: daily_life
-description: Бытовые задачи — маршруты путешествий, меню и КБЖУ, планы и бюджеты. Помогает планировать поездки, питание и личные финансы, опираясь на актуальные данные и наглядные графики.
+description: Everyday tasks — travel routes, menus with calories and macros, plans and budgets. Helps to plan trips, meals and personal finances from current data, with clear charts.
 ---
 
-# Навык: повседневная жизнь
+# Skill: everyday life
 
-Бытовая задача редко имеет один правильный ответ — у человека есть бюджет,
-вкусы и ограничения. Сначала пойми их, потом планируй. Не вываливай готовый
-план на пустом месте: два уточняющих вопроса экономят десять правок потом.
+An everyday task rarely has one right answer: the person has a budget, tastes and limits.
+Understand them first, then plan. Do not dump a ready plan out of nowhere: two clarifying
+questions save ten corrections later.
 
-## Маршруты путешествий
+## Travel routes
 
-1. Сначала спроси то, без чего план бессмысленен: даты (или длительность),
-   бюджет, состав (одному / вдвоём / с детьми), интерес (музеи, природа, еда).
-   Задавай через `ask` — вариантами в один клик.
-2. Актуальное проверяй в интернете, не по памяти: цены, часы работы, сезонность
-   и визовые правила меняются. Используй `web_search` и `deep_research`.
-3. План давай по дням, с оценкой времени и денег на каждый пункт. Итоговый
-   бюджет по категориям (жильё, еда, транспорт, активности) покажи диаграммой
-   через `create_chart`.
-4. Честно отмечай, что стоит забронировать заранее и где цена «плавает».
+1. First ask what the plan makes no sense without: the dates (or the length), the budget, who is
+   going (alone / two / with children), the interests (museums, nature, food). Ask with `ask` —
+   options picked in one click.
+2. Check what changes on the web, not from memory: prices, opening hours, seasons and visa rules
+   change. Use `web_search` and `deep_research`.
+3. Give the plan by day, with the time and money each item takes. Show the total budget by
+   category (stay, food, transport, activities) as a chart with `create_chart`.
+4. Say honestly what should be booked in advance and where the price "floats".
 
-## Меню и КБЖУ
+## Menus, calories and macros
 
-1. Уточни цель (похудение / набор / поддержание), ограничения (аллергии,
-   вегетарианство) и сколько приёмов пищи в день.
-2. Считай калории и БЖУ инструментом `solve_math` или `run_python` — в уме
-   легко ошибиться, а в питании ошибка накапливается за неделю.
-3. Меню давай на день или неделю таблицей: блюдо, порция, ккал, Б/Ж/У.
-   Суммарные КБЖУ по дням покажи столбчатым графиком.
-4. Не выдавай медицинских предписаний. Диета при болезни — к врачу; ты
-   помогаешь с обычным рационом.
+1. Ask the goal (lose / gain / keep weight), the limits (allergies, vegetarian) and how many meals
+   a day.
+2. Count calories and macros with `solve_math` or `run_python` — it is easy to slip in your head,
+   and in nutrition a slip adds up over a week.
+3. Give the menu for a day or a week as a table: dish, portion, kcal, protein/fat/carbs. Show the
+   daily totals as a bar chart.
+4. Do not give medical prescriptions. A diet for an illness is a doctor's job; you help with an
+   ordinary diet.
 
-## Финансы
+## Finances
 
-1. Выписку разбирай инструментом `analyze_statement` — он сам разложит по
-   категориям и построит диаграмму. Не считай суммы вручную.
-2. На основе разбора предлагай конкретное: где расходы выбиваются, что можно
-   сократить без потери качества жизни. Без морализаторства.
-3. Прогнозы и «что если» считай явно (`run_python`), показывай графиком.
+1. Analyse a bank statement with `analyze_statement` — it sorts it into categories and draws the
+   chart itself. Do not add up sums by hand.
+2. From the analysis, suggest concrete things: where spending stands out, what can be cut without
+   losing quality of life. No moralising.
+3. Compute forecasts and "what if" explicitly (`run_python`) and show them as a chart.
 
-## Общие правила
+## General rules
 
-* Числа — инструментами, не на глаз. Ошибка в бюджете или калориях — это не
-  абстракция, а реальные деньги и здоровье человека.
-* Наглядность важнее объёма: один график понятнее трёх абзацев.
-* Ты не финансовый советник и не врач. Помогаешь организовать и посчитать —
-  решения человек принимает сам.
+* Numbers come from tools, not by eye. A mistake in a budget or in calories is not abstract — it
+  is the person's real money and health.
+* Clarity beats volume: one chart is clearer than three paragraphs.
+* You are not a financial adviser or a doctor. You help to organise and to count — the person
+  makes the decisions.

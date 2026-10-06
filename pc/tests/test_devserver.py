@@ -83,7 +83,7 @@ def test_duplicate_name_rejected(tmp_path):
     mgr = DevServerManager()
     mgr.start("dup", _sleep_server(), tmp_path)
     try:
-        with pytest.raises(DevServerError, match="уже запущен"):
+        with pytest.raises(DevServerError, match="already running"):
             mgr.start("dup", _sleep_server(), tmp_path)
     finally:
         mgr.stop("dup")
@@ -91,7 +91,7 @@ def test_duplicate_name_rejected(tmp_path):
 
 def test_get_unknown_raises(tmp_path):
     mgr = DevServerManager()
-    with pytest.raises(DevServerError, match="не найден"):
+    with pytest.raises(DevServerError, match="was not found"):
         mgr.get("нет")
 
 

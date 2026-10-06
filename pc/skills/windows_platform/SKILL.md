@@ -1,67 +1,66 @@
 ---
 name: windows_platform
-description: Выстраданные грабли платформы и стека этого приложения — asyncio-подпроцессы на Windows, псевдотерминал ConPTF vs WinPTY, language server, headless-браузер, кодировки консоли. Читать при работе с процессами, PTY, LSP, веб-сокетами и сборкой на Windows, чтобы не потратить часы на уже решённое.
+description: The hard-won pitfalls of this app's platform and stack — asyncio subprocesses on Windows, the ConPTY vs WinPTY pseudo-terminal, the language server, the headless browser, console encodings. Read it when working with processes, PTYs, LSP, websockets and builds on Windows, so as not to spend hours on what is already solved.
 ---
 
-# Навык: грабли платформы (Windows + этот стек)
+# Skill: platform pitfalls (Windows + this stack)
 
-Здесь собрано то, что уже стоило многочасовой отладки. Если задача касается
-подпроцессов, терминала, language server, веб-сокетов или сборки — сверься
-СНАЧАЛА, чтобы не пройти тот же путь заново.
+Collected here is what already cost hours of debugging. If the task touches subprocesses, the
+terminal, the language server, websockets or the build — check here FIRST, so as not to walk the
+same path again.
 
-## asyncio-подпроцессы глохнут вне главного потока (Windows)
+## asyncio subprocesses stall outside the main thread (Windows)
 
-Сервер приложения работает в daemon-потоке (uvicorn запущен не в главном).
-В этом режиме на Windows `asyncio.create_subprocess_exec` и пайпы к дочернему
-процессу **подвисают**: процесс стартует, но ввод/вывод не ходит.
+The app's server runs in a daemon thread (uvicorn is not started in the main one). In that mode on
+Windows `asyncio.create_subprocess_exec` and the pipes to the child process **hang**: the process
+starts, but no input or output flows.
 
-**Решение:** долгоживущие процессы запускай через `subprocess.Popen` + отдельный
-поток-читатель, а результат пробрасывай в event loop через
-`loop.call_soon_threadsafe`. Короткие команды — `subprocess.run` в
-`asyncio.to_thread`. Так сделаны терминал, dev-серверы, git, pyright, LSP.
+**Fix:** start long-running processes with `subprocess.Popen` plus a separate reader thread, and
+hand the results to the event loop with `loop.call_soon_threadsafe`. Short commands —
+`subprocess.run` inside `asyncio.to_thread`. The terminal, dev servers, git, pyright and LSP are
+done this way.
 
-## Псевдотерминал: WinPTY, а не ConPTY
+## Pseudo-terminal: WinPTY, not ConPTY
 
-pywinpty по умолчанию берёт backend **ConPTY**, который использует IOCP и
-конфликтует с IOCP asyncio-loop'а, когда сервер в отдельном потоке: терминал
-стартует, печатает пару байт и «замолкает» на ввод.
+By default pywinpty takes the **ConPTY** backend, which uses IOCP and clashes with the asyncio
+loop's IOCP when the server is in a separate thread: the terminal starts, prints a couple of bytes
+and goes "silent" on input.
 
-**Решение:** принудительно `backend=Backend.WinPTY` (winpty-agent.exe + именованные
-каналы, без IOCP). См. `core/terminal/session.py`.
+**Fix:** force `backend=Backend.WinPTY` (winpty-agent.exe + named pipes, no IOCP). See
+`core/terminal/session.py`.
 
-## Веб-сокет + фоновый вывод: две задачи, не конкуренция на одном потоке ввода
+## Websocket + background output: two tasks, not a race on one input stream
 
-Одновременные `send_text` и `receive_text` из одной `asyncio.wait` на Windows
-могут вести себя странно с ConPTY. Надёжно: раздельные задачи (насос вывода +
-цикл приёма) и очередь для сохранения порядка. Сам по себе concurrent
-send+receive на веб-сокете работает — проверено.
+Concurrent `send_text` and `receive_text` from one `asyncio.wait` can behave oddly with ConPTY on
+Windows. Reliable: separate tasks (an output pump + a receive loop) and a queue to keep the order.
+Concurrent send+receive on a websocket by itself works — checked.
 
-## Language server (LSP): нужен `workspaceFolders`
+## Language server (LSP): `workspaceFolders` is needed
 
-pyright-langserver НЕ загрузит `pyproject.toml` и не разрешит импорты своих же
-пакетов и ре-экспорты, если в `initialize` передан только устаревший `rootUri`.
-Определения/hover приходят пустыми, хотя CLI-pyright всё резолвит.
+pyright-langserver will NOT load `pyproject.toml` nor resolve imports of the project's own
+packages and re-exports when `initialize` carries only the old `rootUri`. Definitions and hover
+come back empty, while CLI pyright resolves everything.
 
-**Решение:** передавай `workspaceFolders` в `initialize`. См. `core/lsp/client.py`.
-Ещё: перед запросом дождись `publishDiagnostics` — сигнал, что файл проанализирован.
+**Fix:** pass `workspaceFolders` in `initialize`. See `core/lsp/client.py`. Also: wait for
+`publishDiagnostics` before a request — the sign that the file has been analysed.
 
-## Кодировка консоли (cp1251)
+## Console encoding (cp1251)
 
-Стандартная консоль Windows — cp1251, и печать кириллицы/эмодзи из скриптов
-падает с `UnicodeEncodeError`, а вывод в терминал сборки — «кракозябры».
-В диагностических скриптах ставь `sys.stdout.reconfigure(encoding='utf-8')` или
-`PYTHONIOENCODING=utf-8`. Внутри приложения файлы читай/пиши с `encoding='utf-8'`.
+The standard Windows console is cp1251, and printing Cyrillic or emoji from scripts fails with
+`UnicodeEncodeError`, while output in the build terminal turns into mojibake. In diagnostic
+scripts set `sys.stdout.reconfigure(encoding='utf-8')` or `PYTHONIOENCODING=utf-8`. Inside the
+app, read and write files with `encoding='utf-8'`.
 
-## Пути в песочнице
+## Paths in the sandbox
 
-Инструменты работают строго внутри WORKSPACE. `/tmp` и пути на другом диске
-песочница отвергнет — это правильно. Для временных файлов внутри тестов бери
-рабочую папку/`tmp_path`, а не системный temp.
+The tools work strictly inside the WORKSPACE. `/tmp` and paths on another drive are refused by the
+sandbox — that is correct. For temporary files in tests use the working folder / `tmp_path`, not
+the system temp.
 
-## Сборка (PyInstaller)
+## The build (PyInstaller)
 
-* Приложение должно быть ЗАКРЫТО — Windows не даст перезаписать работающий exe.
-* Динамически импортируемое (`__import__`, отложенные import внутри функций)
-  PyInstaller не видит — добавляй `--collect-all <пакет>` в `build_app.py`
-  (так собраны winpty, pyright, грамматики tree-sitter).
-* После сборки проверяй, что нужные бинарники реально попали в `dist/`.
+* The app must be CLOSED — Windows does not let a running exe be overwritten.
+* What is imported dynamically (`__import__`, deferred imports inside functions) is invisible to
+  PyInstaller — add `--collect-all <package>` in `build_app.py` (that is how winpty, pyright and
+  the tree-sitter grammars are bundled).
+* After the build, check that the needed binaries really are in `dist/`.

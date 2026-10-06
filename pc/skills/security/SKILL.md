@@ -1,45 +1,44 @@
 ---
 name: security
-description: Безопасность кода (DevSecOps) — не дать утечь секретам (ключи, пароли, токены) и не оставить уязвимостей (инъекции, небезопасная десериализация, слабая криптография). Инструменты scan_secrets и security_scan. Для проверки перед коммитом, публикацией и сдачей кода, работающего с данными, сетью или командами.
+description: Code security (DevSecOps) — keep secrets from leaking (keys, passwords, tokens) and leave no vulnerabilities (injections, unsafe deserialisation, weak cryptography). The scan_secrets and security_scan tools. For checking before a commit, a release, and before handing over code that works with data, the network or commands.
 ---
 
-# Навык: безопасность кода
+# Skill: code security
 
-Две частые беды: утёкший секрет и дыра в коде. Обе дешевле поймать до коммита,
-чем расхлёбывать после.
+Two common troubles: a leaked secret and a hole in the code. Both are cheaper to catch before the
+commit than to clean up after.
 
-## Секреты — `scan_secrets`
+## Secrets — `scan_secrets`
 
-Запускай **перед коммитом и перед публикацией**: находит приватные ключи,
-API-ключи, токены (AWS, GitHub, Google, Slack, `sk-…`), пароли, зашитые прямо в
-исходники. Найденное показывается замаскированным.
+Run it **before a commit and before publishing**: it finds private keys, API keys, tokens (AWS,
+GitHub, Google, Slack, `sk-…`) and passwords hard-coded in the sources. What it finds is shown
+masked.
 
-Правила по секретам:
-* Секрет **никогда** не лежит в коде и не уходит в git. Место секретов —
-  переменные окружения / `.env`, а `.env` — в `.gitignore`.
-* Нашёл секрет в коде — вынеси его в окружение И считай **скомпрометированным**:
-  если он уже был в коммите/публикации, его нужно **отозвать и перевыпустить**,
-  а не просто удалить строку (история git его помнит).
-* Никогда не показывай пользователю и не пересылай сам секрет целиком — только
-  факт находки и где она.
+Rules for secrets:
+* A secret **never** lives in code and never goes into git. Secrets belong in environment
+  variables / `.env`, and `.env` belongs in `.gitignore`.
+* Found a secret in code — move it to the environment AND treat it as **compromised**: if it was
+  already in a commit or published, it must be **revoked and reissued**, not just deleted from the
+  line (git history remembers it).
+* Never show the user or pass on the secret itself — only the fact of the finding and where it is.
 
-## Уязвимости — `security_scan` (Bandit)
+## Vulnerabilities — `security_scan` (Bandit)
 
-Запускай для Python-кода, который работает с **данными, сетью, командами,
-сериализацией**. Bandit ловит:
-* инъекции команд (`subprocess(..., shell=True)`, `os.system`);
-* SQL-инъекции (строковая склейка запросов вместо параметров);
-* небезопасную десериализацию (`pickle.loads`, `yaml.load` без `safe_load`);
-* `eval`/`exec` пользовательского ввода;
-* слабую криптографию (md5/sha1 для паролей), захардкоженные пароли.
+Run it for Python code that works with **data, the network, commands, serialisation**. Bandit
+catches:
+* command injection (`subprocess(..., shell=True)`, `os.system`);
+* SQL injection (gluing strings into queries instead of parameters);
+* unsafe deserialisation (`pickle.loads`, `yaml.load` without `safe_load`);
+* `eval`/`exec` of user input;
+* weak cryptography (md5/sha1 for passwords), hard-coded passwords.
 
-По каждой находке — severity (🔴 high / 🟠 medium / 🟡 low). Чини начиная с
-high: параметризуй SQL, `yaml.safe_load`, `subprocess` без `shell=True` со
-списком аргументов, `ast.literal_eval` вместо `eval`.
+Each finding has a severity (🔴 high / 🟠 medium / 🟡 low). Fix from high down: parameterise SQL,
+`yaml.safe_load`, `subprocess` with an argument list and without `shell=True`,
+`ast.literal_eval` instead of `eval`.
 
-## Когда обязательно
+## When it is a must
 
-* Перед коммитом — `scan_secrets`.
-* Написал код с БД/сетью/командами/загрузкой файлов — `security_scan` перед сдачей.
-* Не полагайся только на «выглядит нормально»: инъекции и утечки часто незаметны
-  на глаз, а инструмент их видит.
+* Before a commit — `scan_secrets`.
+* Wrote code with a database, the network, commands or file uploads — `security_scan` before
+  handing it over.
+* Do not rely on "looks fine": injections and leaks are often invisible by eye, the tool sees them.
