@@ -920,6 +920,7 @@ class Tui:
         add("detach", self.c_detach)
         add("compact", self.c_compact)
         add("history", self.c_history)
+        add("journal", self.c_journal)
         add("stop", self.c_stop)
         add("exit", self.c_exit, "quit", "q")
 
@@ -1283,6 +1284,17 @@ class Tui:
             return False
         self.r.phase, self.r.run_started = "compacting", time.monotonic()
         await self.client.send({"type": "compact", "focus": rest})
+        return False
+
+    async def c_journal(self, rest: str) -> bool:
+        """The Journal: this chat's records ("/journal all" — every chat), the newest last."""
+        from cli.app import print_journal
+
+        words = rest.split()
+        limit = next((int(w) for w in words if w.isdigit()), 40)
+        chat = "" if "all" in words else str(self.client.session.get("id") or "")
+        self.r.print(Text(self.t("jr.title"), style="bold"), gap=True)
+        await print_journal(self.client, limit, chat)
         return False
 
     async def c_history(self, rest: str) -> bool:

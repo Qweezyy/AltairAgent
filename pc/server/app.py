@@ -505,6 +505,31 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "no avatar"}, status_code=404)
         return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
+    @app.get("/api/journal")
+    async def journal_records(request: Request, limit: int = 100, before: int | None = None,
+                              since: int | None = None, chat: str = "", kind: str = "") -> dict:
+        """The Journal, newest first, a page at a time: `before` pages back (the `next` of the
+        previous page), `since` brings only what is new, `kind` is a comma list (a prefix may
+        end with '.')."""
+        _local_only(request)
+        from core.journal import get_journal
+
+        limit = max(1, min(limit, 500))
+        journal = get_journal(app.state.settings.data_dir / "journal")
+        kinds = [k.strip() for k in kind.split(",") if k.strip()]
+        records = await asyncio.to_thread(journal.read, before=before, since=since, chat=chat.strip(),
+                                          kinds=kinds, limit=limit)
+        older = records[-1]["seq"] if len(records) == limit and since is None else None
+        return {"records": records, "next": older}
+
+    @app.get("/api/journal/verify")
+    async def journal_verify(request: Request) -> dict:
+        """Whether the Journal's chain is whole: nothing was changed or removed."""
+        _local_only(request)
+        from core.journal import get_journal
+
+        return await asyncio.to_thread(get_journal(app.state.settings.data_dir / "journal").verify)
+
     @app.get("/api/memory")
     async def get_memory() -> dict:
         """Что агент запомнил — для прозрачности: пользователь видит и правит."""
@@ -1194,6 +1219,15 @@ def create_app() -> FastAPI:
     # is ~150 MB, and one silent request for all of it left the user staring at a toast.
     app.state.update_job = {"stage": "idle"}
 
+    async def _journal_app(kind: str, **data: Any) -> None:
+        """A record about the app itself (an update), not about a chat."""
+        settings = app.state.settings
+        if not getattr(settings, "journal", True):
+            return
+        from core.journal import get_journal
+
+        await asyncio.to_thread(get_journal(settings.data_dir / "journal").append, kind, **data)
+
     async def _run_update() -> None:
         job = app.state.update_job
         started = time.monotonic()
@@ -1218,12 +1252,14 @@ def create_app() -> FastAPI:
             job.update(stage="applying")
             await asyncio.to_thread(updater.apply, folder)
             job.update(stage="ready")
+            await _journal_app("update.ready", version=info.version)
         except asyncio.CancelledError:
             job.update(stage="error", error="cancelled")
             raise
         except Exception as exc:  # noqa: BLE001 - причину показываем пользователю
             logger.exception("Update failed")
             job.update(stage="error", error=str(exc))
+            await _journal_app("update.failed", error=str(exc))
 
     @app.post("/api/update/install")
     async def install_update() -> dict:

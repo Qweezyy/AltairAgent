@@ -15,6 +15,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **The Journal: everything the agent did, read-only.** Tasks, every tool call, every approval
+  (and the ones allowed earlier), restored files, rolled-back runs and updates go into an
+  append-only log in the data folder. Each line carries the hash of the one before it, so an edited
+  or removed line shows up in "Check integrity". A Journal pane in the window (by kind, this chat or
+  all chats, older pages, live while open), `altair --journal [N]` and `/journal` in the terminal.
+  `JOURNAL=false` turns it off.
 - **`altair` became a full terminal agent.** The conversation flows into the terminal's scrollback and
   the input stays at the bottom with a status line (model, approval mode, context, cost) and a live
   indicator of what the agent is doing. Answers are Markdown with highlighted code, an edit shows its

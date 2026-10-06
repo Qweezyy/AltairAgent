@@ -7,6 +7,7 @@
     altair -c                   continue the most recent chat
     altair -r <id|title>        resume a chat (also one started in the window)
     altair --chats              list the chats
+    altair --journal [N]        the last N records of the Journal (what the agent did)
 
 Exit codes: 0 done, 1 failed or stopped, 2 it needed a person (an approval or a question) and
 there was nobody to ask.
@@ -44,6 +45,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("-c", "--continue", dest="cont", action="store_true", help="continue the most recent chat")
     p.add_argument("-r", "--resume", metavar="CHAT", help="resume a chat by id or by words from its title")
     p.add_argument("--chats", action="store_true", help="list the chats and exit")
+    p.add_argument("--journal", nargs="?", const=50, type=int, metavar="N",
+                   help="print the last N records of the Journal (default 50) and exit")
     p.add_argument("--version", action="version", version=f"altair {__version__}")
     p.add_argument("--model", help="the model for this run")
     p.add_argument("--mode", choices=MODES, help="the chat's approval mode (kept by the chat)")
@@ -453,7 +456,20 @@ async def print_chats(client: Client, limit: int = 30) -> None:
         client.console.print(line)
 
 
-async def amain(args: argparse.Namespace) -> int:
+async def print_journal(client: Client, limit: int = 50, chat: str = "") -> None:
+    """The Journal's last records, oldest of them first (the newest at the bottom, by the prompt)."""
+    from cli.journal_view import line
+
+    params: dict[str, Any] = {"limit": max(1, min(limit, 500))}
+    if chat:
+        params["chat"] = chat
+    async with httpx.AsyncClient(timeout=15) as http:
+        records = (await http.get(f"{client.backend.http}/api/journal", params=params)).json().get("records", [])
+    if not records:
+        client.console.print(client.t("jr.empty"))
+        return
+    for record in reversed(records):
+        client.console.print(line(record, client.t, show_chat=not chat))
     texts = Texts()
     from cli.theme import rich_theme
 
@@ -492,6 +508,9 @@ async def amain(args: argparse.Namespace) -> int:
         if args.chats:
             await print_chats(client)
             return 0
+        if args.journal:
+            await print_journal(client, args.journal)
+            return 0
         await client.pick_chat()
         if client.running:            # resumed a chat that works in the background: follow it
             await client.until_idle()
@@ -517,7 +536,7 @@ async def amain(args: argparse.Namespace) -> int:
 def use_tui(args: argparse.Namespace) -> bool:
     """The full-screen-free interactive UI needs a real terminal on both ends; pipes and
     `ALTAIR_PLAIN=1` get the plain line mode."""
-    if args.print_mode or args.chats or args.output_format != "text":
+    if args.print_mode or args.chats or args.journal or args.output_format != "text":
         return False
     if os.environ.get("ALTAIR_PLAIN", "").strip() in ("1", "true", "yes"):
         return False

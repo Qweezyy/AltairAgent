@@ -27,9 +27,11 @@ from core.errors import AgentError, ConfigError
 from core.events import (
     ArtifactCreated,
     BrowserHandoff,
+    CheckpointRestored,
     Event,
     PlanUpdate,
     QuestionAsked,
+    RunCancelled,
     RunFailed,
     RunFinished,
     RunStarted,
@@ -158,6 +160,38 @@ class ChatState:
         self._wake_ids: list[str] = []
         self._notice_ids: dict[str, list[str]] = {}
         self._scratch["_on_notifications"] = self._notifications_taken
+        #: The run the Journal's records belong to (from its RunStarted).
+        self._journal_run = ""
+
+    # ------------------------------------------------------------ the Journal
+
+    async def journal(self, kind: str, **data: Any) -> None:
+        """One record in the Journal of this body, tagged with this chat and its run."""
+        settings = self.session_settings
+        if not getattr(settings, "journal", True):
+            return
+        from core.journal import get_journal
+
+        journal = get_journal(settings.data_dir / "journal")
+        await asyncio.to_thread(journal.append, kind, chat=self.session.id, run=self._journal_run, **data)
+
+    async def _journal_event(self, event: Event) -> None:
+        """What of the run's events goes into the Journal (text deltas and progress do not)."""
+        if isinstance(event, RunStarted):
+            self._journal_run = event.run_id
+            await self.journal("run.started", task=event.task, model=event.model)
+        elif isinstance(event, ToolFinished):
+            await self.journal("tool", name=event.name, args=_jsonable(self._tool_args.get(event.call_id, {})),
+                               ok=event.ok, duration_ms=event.duration_ms, output=event.output)
+        elif isinstance(event, RunFinished):
+            await self.journal("run.finished", steps=event.steps, duration_ms=event.duration_ms,
+                               cost_usd=event.cost_usd, checks=event.checks, answer=event.text)
+        elif isinstance(event, RunFailed):
+            await self.journal("run.failed", message=event.message)
+        elif isinstance(event, RunCancelled):
+            await self.journal("run.cancelled")
+        elif isinstance(event, CheckpointRestored):
+            await self.journal("file.restored", path=event.path, message=event.message)
 
     # ------------------------------------------------------------ state
 
@@ -204,6 +238,8 @@ class ChatState:
     async def emit(self, event: Event) -> None:
         if isinstance(event, RunStarted):
             await self._on_run_started()
+        # Before the timeline: it takes the finished tool's arguments away.
+        await self._journal_event(event)
         if isinstance(event, PlanUpdate):
             self.session.set_plan([s.model_dump() for s in event.steps])
             await self._save_session()
@@ -702,10 +738,12 @@ class ChatState:
 
         # A remembered "always allow" answers before any card is shown.
         if self.permissions.is_allowed(request.name, workspace):
+            await self.journal("approval", name=request.name, scope="remembered", approved=True)
             return True
 
         async with self._approval_lock:
             if self.permissions.is_allowed(request.name, workspace):
+                await self.journal("approval", name=request.name, scope="remembered", approved=True)
                 return True
 
             req_id = uuid.uuid4().hex[:8]
@@ -742,6 +780,8 @@ class ChatState:
                 await asyncio.to_thread(self.permissions.allow_global, request.name)
 
             approved = answer in ("once", "project", "global")
+            await self.journal("approval", name=request.name, scope=answer, approved=approved,
+                               reason=request.reason, args=_jsonable(request.args))
             await self.send(
                 {
                     "type": "approval.resolved",

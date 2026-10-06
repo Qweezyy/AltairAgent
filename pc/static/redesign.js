@@ -1403,7 +1403,7 @@ async function selectFileInTree(path) {
 }
 window.AltairOpenFile = selectFileInTree;
 // ---------------------------------------------------------- многопанельный док
-const PANES = ["terminal", "diff", "browser", "artifacts", "preview"];
+const PANES = ["terminal", "diff", "journal", "browser", "artifacts", "preview"];
 function paneEl(id) { return $(`#pane-${id}`); }
 function paneVisible(id) { const p = paneEl(id); return p && !p.hidden; }
 function anyPaneOpen() { return PANES.some(paneVisible); }
@@ -1425,6 +1425,7 @@ function openPane(id) {
   updateDock();
   if (id === "terminal") window.AgentTerminal?.onTabShown();
   if (id === "diff") loadDiff();
+  if (id === "journal") openJournal();
   if (id === "browser") window.BrowserPanel?.onPaneOpen();
   if (id === "artifacts") refreshFilesTree();
 }
@@ -1479,6 +1480,103 @@ function popoutPane(id) {
 }
 
 // Совместимость со старыми вызовами.
+// ------------------------------------------------------------------ the Journal
+// Everything the agent did on this body, newest first: read-only, a page at a time, new
+// records come in while the pane is open. Filters: the kind of record, this chat or all.
+const JR_FILTERS = { all: "", tasks: "run.,user", tools: "tool", approvals: "approval", files: "file.,run.rollback,update." };
+const jr = { filter: "all", scope: "chat", next: null, newest: 0, timer: 0, gen: 0 };
+function journalQuery(extra) {
+  const q = new URLSearchParams({ limit: "100", ...extra });
+  if (JR_FILTERS[jr.filter]) q.set("kind", JR_FILTERS[jr.filter]);
+  if (jr.scope === "chat" && state.sessionId) q.set("chat", state.sessionId);
+  return `/api/journal?${q}`;
+}
+function journalLine(r) {
+  const d = r.data || {};
+  const when = new Date((r.ts || 0) * 1000);
+  const time = when.toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  let mark = "", text = "", cls = "";
+  switch (r.kind) {
+    case "user": case "user.steer": mark = "›"; text = d.text || ""; cls = "jr-user"; break;
+    case "run.started": mark = "▶"; text = T("jr.started", { task: d.task || "" }); break;
+    case "run.finished": {
+      const c = d.checks || {}; const ck = !c.attempted ? "" : !c.executed ? ` · ${T("ck.notRun")}` : c.passed ? ` · ${T("ck.passed")}` : ` · ${T("ck.failed")}`;
+      mark = "✓"; cls = "jr-ok"; text = T("jr.finished", { steps: d.steps || 0, sec: ((d.duration_ms || 0) / 1000).toFixed(1) }) + (d.cost_usd ? ` · $${Number(d.cost_usd).toFixed(4)}` : "") + ck; break;
+    }
+    case "run.failed": mark = "✗"; cls = "jr-bad"; text = T("jr.failed", { message: d.message || "" }); break;
+    case "run.cancelled": mark = "■"; cls = "jr-warn"; text = T("jr.cancelled"); break;
+    case "tool": {
+      const a = d.args || {}; const hint = String(a.path || a.command || a.query || a.url || a.pattern || "").slice(0, 120);
+      mark = d.ok ? "●" : "✗"; cls = d.ok ? "" : "jr-bad"; text = `${d.name}${hint ? `(${hint})` : ""}${d.duration_ms >= 1000 ? ` · ${(d.duration_ms / 1000).toFixed(1)} ${T("u.sec")}` : ""}`; break;
+    }
+    case "approval": mark = d.approved ? "✓" : "✗"; cls = d.approved ? "jr-ok" : "jr-bad"; text = T("jr.approval." + (d.scope || "once"), { name: d.name || "" }); break;
+    case "file.restored": mark = "↺"; cls = "jr-warn"; text = T("jr.restored", { path: d.path || "" }); break;
+    case "run.rollback": mark = "↺"; cls = "jr-warn"; text = T("jr.rollback", { n: (d.restored || []).length }); break;
+    case "update.ready": mark = "⬆"; cls = "jr-ok"; text = T("jr.updated", { version: d.version || "" }); break;
+    case "update.failed": mark = "⬆"; cls = "jr-bad"; text = T("jr.updateFailed", { error: d.error || "" }); break;
+    default: mark = "·"; text = r.kind;
+  }
+  const chat = jr.scope === "all" && r.chat ? `<button class="jr-chat" data-chat="${escAttr(r.chat)}">${esc(r.chat.slice(0, 6))}</button>` : "";
+  const row = el(`<div class="jr-row ${cls}" data-seq="${r.seq}"><span class="jr-mark">${esc(mark)}</span><span class="jr-text grow">${esc(text)}</span>${chat}<span class="jr-time" data-tip="#${r.seq} · ${escAttr(r.kind)}">${esc(time)}</span></div>`);
+  row._record = r;
+  $(".jr-text", row).addEventListener("click", () => row.classList.toggle("open"));
+  if (chat) $(".jr-chat", row).addEventListener("click", () => send({ type: "load_session", session_id: r.chat }));
+  return row;
+}
+async function openJournal() {
+  const v = $("#view-journal"); if (!v) return;
+  const gen = ++jr.gen;
+  const filters = Object.keys(JR_FILTERS).map((k) => `<button data-f="${k}" class="${jr.filter === k ? "on" : ""}">${esc(T("jr.f." + k))}</button>`).join("");
+  v.innerHTML = `<div class="preview-tools jr-tools"><div class="segmented" id="jr-filter">${filters}</div><span class="grow"></span>
+    <div class="segmented" id="jr-scope"><button data-s="chat" class="${jr.scope === "chat" ? "on" : ""}">${esc(T("jr.thisChat"))}</button><button data-s="all" class="${jr.scope === "all" ? "on" : ""}">${esc(T("jr.allChats"))}</button></div>
+    <button class="btn btn-outline" id="jr-verify">${iconSvg("shield", "icon icon-sm")} ${esc(T("jr.verify"))}</button></div>
+    <div class="jr-verdict muted" id="jr-verdict" hidden></div><div class="jr-list" id="jr-list"><div class="alti-empty">${altiAt("read", 48)}<div>${esc(T("jr.loading"))}</div></div></div>`;
+  $$("#jr-filter button", v).forEach((b) => b.addEventListener("click", () => { jr.filter = b.dataset.f; openJournal(); }));
+  $$("#jr-scope button", v).forEach((b) => b.addEventListener("click", () => { jr.scope = b.dataset.s; openJournal(); }));
+  $("#jr-verify", v).addEventListener("click", verifyJournal);
+  let data;
+  try { data = await (await fetch(journalQuery({}))).json(); } catch { if (gen === jr.gen) $("#jr-list", v).innerHTML = altiEmpty(T("t.error"), "sad", 48); return; }
+  if (gen !== jr.gen) return;
+  const list = $("#jr-list", v); list.innerHTML = "";
+  jr.newest = data.records.length ? data.records[0].seq : 0;
+  if (!data.records.length) list.innerHTML = altiEmpty(T("jr.empty"), "sleep", 56);
+  data.records.forEach((r) => list.appendChild(journalLine(r)));
+  journalMore(list, data.next);
+  clearInterval(jr.timer);
+  jr.timer = setInterval(() => { if (!paneVisible("journal")) { clearInterval(jr.timer); return; } journalFollow(); }, 3000);
+}
+function journalMore(list, next) {
+  jr.next = next;
+  $(".jr-more", list)?.remove();
+  if (!next) return;
+  const more = el(`<button class="btn btn-ghost jr-more">${esc(T("jr.older"))}</button>`);
+  more.addEventListener("click", async () => {
+    more.disabled = true;
+    const data = await (await fetch(journalQuery({ before: String(jr.next) }))).json();
+    more.remove();
+    data.records.forEach((r) => list.appendChild(journalLine(r)));
+    journalMore(list, data.next);
+  });
+  list.appendChild(more);
+}
+async function journalFollow() {
+  const list = $("#jr-list"); if (!list) return;
+  let data;
+  try { data = await (await fetch(journalQuery({ since: String(jr.newest || 0) }))).json(); } catch { return; }
+  if (!data.records.length) return;
+  if ($(".alti-empty", list)) list.innerHTML = "";
+  jr.newest = data.records[0].seq;
+  data.records.slice().reverse().forEach((r) => list.insertBefore(journalLine(r), list.firstChild));
+}
+async function verifyJournal() {
+  const box = $("#jr-verdict"); if (!box) return;
+  box.hidden = false; box.textContent = T("jr.verifying");
+  try {
+    const d = await (await fetch("/api/journal/verify")).json();
+    box.className = "jr-verdict " + (d.ok ? "jr-ok" : "jr-bad");
+    box.textContent = d.ok ? T("jr.whole", { n: d.checked }) : T("jr.broken", { seq: d.broken_at ?? "?", reason: d.reason || "" });
+  } catch { box.textContent = T("t.error"); }
+}
 function openPanel(view) { openPane(view); }
 function switchPanel(view) { openPane(view); }
 async function openPreviewFile(path) {

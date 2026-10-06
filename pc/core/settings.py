@@ -164,6 +164,9 @@ class Settings(BaseSettings):
     #: The model names a new chat from its first message (one tiny extra request to the
     #: cheapest configured model). Off: the chat is named after that message's first line.
     chat_titles: bool = True
+    #: The Journal: every action of the agent appended to a hash-chained, read-only log in the
+    #: data folder (core/journal.py). What the owner reads to know what happened unattended.
+    journal: bool = True
     #: The packaged app puts its `altair` terminal command on the user's PATH on start
     #: (Windows: the user's Path; Linux/macOS: a link in ~/.local/bin).
     cli_on_path: bool = True

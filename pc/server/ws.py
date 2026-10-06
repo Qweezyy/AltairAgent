@@ -545,6 +545,7 @@ class Connection:
             # перезапускаем задачу, а передаём агенту следующим ходом.
             self._scratch.setdefault("steering", []).append(task_text)
             self.session.append_timeline({"kind": "user", "text": task_text, "ts": time.time()})
+            await self.chat.journal("user.steer", text=task_text)
             await self._save_session()
             await self.send(
                 {"type": "log", "level": "info", "text": tr("ws.steer_queued")}
@@ -595,6 +596,8 @@ class Connection:
         # больше нет. Если модель не понимает картинки, она сама ответит отказом.
 
         entry: dict[str, Any] = {"kind": "user", "text": task_text, "ts": time.time()}
+        await self.chat.journal("user", text=task_text,
+                                attachments=[item.name for item in options.attachments.items])
         if options.attachments.items:
             entry["attachments"] = [
                 {"name": item.name, "kind": item.kind, "path": str(item.path)}
@@ -704,6 +707,7 @@ class Connection:
             return
         n = len(result["restored"])
         skipped = result.get("skipped") or []
+        await self.chat.journal("run.rollback", rolled_back=run_id, restored=result["restored"], skipped=skipped)
         summary = f"Откат прогона: восстановлено файлов — {n}"
         if skipped:
             summary += f", пропущено (без снимка) — {len(skipped)}"
