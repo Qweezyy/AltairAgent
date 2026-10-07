@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -77,7 +79,108 @@ def install(app: FastAPI) -> None:
         from core.body_status import status
 
         card = await asyncio.to_thread(_self_card, app)
-        return await asyncio.to_thread(status, card, app.state.settings.data_dir, running_tasks())
+        settings = app.state.settings
+        return await asyncio.to_thread(status, card, settings.data_dir, running_tasks(), str(settings.workspace))
+
+    # --- memory and skills shared with the other bodies (core/bodies_sync.py) ----------------
+    # The PC drives the sync; these answer it, only through the tunnel (this machine itself).
+
+    def sync_root(request: Request, area: str) -> Path:
+        from core.bodies_sync import AREAS, area_root
+
+        if not _local(request.client.host if request.client else ""):
+            raise HTTPException(status_code=403, detail=tr("api.local_only"))
+        if area not in AREAS:
+            raise HTTPException(status_code=400, detail=f"area: one of {', '.join(AREAS)}")
+        return area_root(app.state.settings, area)
+
+    @app.get("/api/sync/manifest")
+    async def sync_manifest(request: Request, area: str) -> dict:
+        from core.bodies_sync import manifest
+
+        return {"files": await asyncio.to_thread(manifest, sync_root(request, area), area)}
+
+    @app.post("/api/sync/read")
+    async def sync_read(request: Request, payload: dict) -> dict:
+        from core.bodies_sync import read_files
+
+        area = str(payload.get("area") or "")
+        try:
+            return {"files": await asyncio.to_thread(read_files, sync_root(request, area), list(payload.get("paths") or []))}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    @app.post("/api/sync/apply")
+    async def sync_apply(request: Request, payload: dict) -> dict:
+        from core.bodies_sync import apply_files
+
+        area = str(payload.get("area") or "")
+        root = sync_root(request, area)
+        try:
+            done = await asyncio.to_thread(apply_files, root, area, dict(payload.get("put") or {}),
+                                           list(payload.get("delete") or []))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"ok": True, **done}
+
+    @app.post("/api/bodies/{bid}/sync")
+    async def bodies_sync_now(request: Request, bid: str) -> dict:
+        if not _local(request.client.host if request.client else ""):
+            raise HTTPException(status_code=403, detail=tr("api.local_only"))
+        tunnels = getattr(app.state, "tunnels", None)
+        tunnel = tunnels.get(bid) if tunnels is not None else None
+        if tunnel is None:
+            raise HTTPException(status_code=404, detail="no such body")
+        try:
+            return {"ok": True, "areas": await sync_with(app, tunnel)}
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            return {"ok": False, "error": tr("body.unreachable", why=str(exc) or type(exc).__name__)}
+
+    @app.post("/api/tools/run")
+    async def tools_run(request: Request, payload: dict) -> dict:
+        """Runs one of this body's machine tools for another body of the same agent (the PC's chat
+        sent it through the tunnel, core/bodies_routing.py). Only from this machine itself: the
+        tunnel ends here. Not for a body signed in with its key, nor the phone bridge — a server
+        must never be able to run commands on the PC that installed it."""
+        from core.bodies_routing import ROUTED
+        from core.errors import ConfigError
+        from core.tools.base import ToolContext
+
+        if not _local(request.client.host if request.client else ""):
+            raise HTTPException(status_code=403, detail=tr("api.local_only"))
+        name = str(payload.get("tool") or "")
+        tool = app.state.registry.get(name) if name in ROUTED else None
+        if tool is None:
+            raise HTTPException(status_code=404, detail=f"no machine tool '{name}' on this body")
+        args = payload.get("args") or {}
+        if not isinstance(args, dict):
+            raise HTTPException(status_code=400, detail="args: an object")
+        args.pop("body", None)                    # it is here now: no further hop
+        settings = app.state.settings
+        folder = str(payload.get("folder") or "").strip()
+        if folder:
+            try:
+                settings = await asyncio.to_thread(settings.for_workspace, folder)
+            except ConfigError as exc:
+                return {"ok": False, "content": f"The folder '{folder}' cannot be used on this body: {exc}",
+                        "metadata": {}, "folder": folder}
+        # The owner approved it where the chat is (with the stricter of the two modes); the
+        # hard blocks of this body still hold inside invoke().
+        settings = settings.model_copy(update={"approval_mode": "bypass"})
+        ctx = ToolContext(settings=settings, registry=app.state.registry, run_id=f"remote-{payload.get('chat') or ''}")
+        result = await tool.invoke(args, ctx)
+        if getattr(settings, "journal", True):
+            from core.journal import get_journal
+            from core.tools.base import args_summary
+
+            await asyncio.to_thread(get_journal(settings.data_dir / "journal").append, "tool.remote",
+                                    tool=name, args=args_summary(args), ok=result.ok, folder=str(settings.workspace),
+                                    chat=str(payload.get("chat") or ""), by="tunnel")
+        try:
+            meta = json.loads(json.dumps(result.metadata, default=str))
+        except (TypeError, ValueError):
+            meta = {}
+        return {"ok": result.ok, "content": result.content, "metadata": meta, "folder": str(settings.workspace)}
 
     @app.get("/api/bodies")
     async def bodies_list(request: Request) -> dict:
@@ -218,19 +321,82 @@ def install(app: FastAPI) -> None:
                 await websocket.close()
 
 
+async def sync_with(app: FastAPI, tunnel: Any) -> list[dict[str, Any]]:
+    """Memory and skills with one server, both areas; the Journal notes what changed."""
+    from core.bodies_sync import AREAS, sync_area
+
+    if tunnel.state != "online" or not tunnel.local_port:
+        raise OSError(f"{tunnel.record.name or tunnel.record.host} is not connected")
+    base_url = f"http://127.0.0.1:{tunnel.local_port}"
+    settings = app.state.settings
+
+    async def call(method: str, path: str, payload: dict | None) -> dict:
+        async with httpx.AsyncClient(timeout=60) as http:
+            r = await http.request(method, base_url + path, json=payload)
+            r.raise_for_status()
+            return r.json()
+
+    results = []
+    for area in AREAS:
+        base_file = settings.data_dir / "bodies" / "sync" / f"{tunnel.record.id}.json"
+        result = await sync_area(settings, area, base_file, call)
+        results.append(result)
+        changed = sum(result[k] for k in ("to_here", "to_there", "deleted_here", "deleted_there"))
+        if changed and getattr(settings, "journal", True):
+            from core.journal import get_journal
+
+            await asyncio.to_thread(get_journal(settings.data_dir / "journal").append, "body.synced",
+                                    body=tunnel.record.name or tunnel.record.host, **result)
+    return results
+
+
+SYNC_EVERY_S = 120.0
+
+
+async def _sync_loop(app: FastAPI) -> None:
+    """Every server that answers, now and then: what one body learned, the others know."""
+    while True:
+        tunnels = getattr(app.state, "tunnels", None)
+        for tunnel in getattr(tunnels, "all", list)():
+            if tunnel.state == "online" and tunnel.agent == "ok":
+                try:
+                    await sync_with(app, tunnel)
+                except asyncio.CancelledError:
+                    raise
+                except (httpx.HTTPError, OSError, ValueError) as exc:
+                    logger.info("sync with %s: %s", tunnel.record.host, exc)
+        await asyncio.sleep(SYNC_EVERY_S)
+
+
 async def start_tunnels(app: FastAPI) -> None:
     """Tunnels to every server added, kept in step with the list (server/app.py calls it)."""
+    from core.bodies_routing import set_tunnels
     from core.servers.registry import ServerStore
     from core.servers.tunnel import TunnelManager
 
     app.state.tunnels = TunnelManager(ServerStore(app.state.settings.data_dir))
     await app.state.tunnels.sync()
+    set_tunnels(app.state.tunnels, app.state.settings.data_dir)
+    # The first round waits for the tunnels to come up (the first heartbeat).
+    async def delayed() -> None:
+        await asyncio.sleep(20)
+        await _sync_loop(app)
+
+    app.state.sync_task = asyncio.create_task(delayed(), name="bodies-sync")
 
 
 async def stop_tunnels(app: FastAPI) -> None:
+    from core.bodies_routing import set_tunnels
+
+    task = getattr(app.state, "sync_task", None)
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
     tunnels = getattr(app.state, "tunnels", None)
     if tunnels is not None:
         await tunnels.stop()
+    set_tunnels(None)
     client = getattr(app.state, "http_proxy", None)
     if client is not None:
         await client.aclose()

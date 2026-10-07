@@ -15,12 +15,29 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **One agent, several machines: it decides where to work.** In an ordinary chat on this PC the agent
+  runs commands, edits files, searches, uses git, tests and dev servers on a server when that fits
+  better — the tools take a `body` ("test-vps", or "test-vps:/srv/app" for a folder there, remembered
+  by the chat). It knows what each machine has from the prompt, sees their load with the new `bodies`
+  tool, which also ranks them for a task (GPU, Docker, memory, where the files are, long work that
+  should go on with the PC off, load, your labels), and says in one line where and why. A step that
+  ran on a server shows its name in the chat. The approval is asked here, by the stricter of the
+  chat's and the server's mode; the server keeps its own record in its Journal. Without servers
+  nothing changes, not even the request size.
+- **Move a chat to a server.** "Move to a server…" in the chat's menu (or `/move NAME` in the
+  terminal): the history, its reminders and, if you want, its folder (without `node_modules`,
+  virtual environments and caches) go to the server and the task goes on there with this PC
+  switched off. Here the chat goes to Recently deleted.
+- **What one body learns, the others know.** Memory notes and skills are synced between this PC and
+  each server every two minutes: additions and edits travel both ways, a deletion is not undone by
+  the other side, an edit beats a deletion, and of two edits the newer one stays.
 - **A server is one more body of the same agent, right in the window.** This PC keeps an SSH tunnel to
   every server it installed Altair on (nothing is opened to the outside; it reconnects by itself after
   sleep or a reboot) and asks each one for its load every 15 s. A switcher under the logo shows the
   bodies with their state; picking a server shows its chats, terminal, files and settings in the same
   panels, and a task typed there runs on the server. The other bodies' chats are listed under this
-  one's, each opening on its own body. Settings → Servers shows each server's CPU, memory and disk,
+  one's, each opening on its own body (the switcher shows while a server is opened, as the way
+  back). Settings → Servers shows each server's CPU, memory and disk,
   takes labels ("builds", "prod") and reconnects on demand. In the terminal: `altair --body NAME` and
   `/body` to list the bodies or switch.
 - **Altair installs itself on your server.** Settings → Servers (or `altair server add HOST`): give

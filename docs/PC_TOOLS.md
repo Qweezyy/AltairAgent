@@ -4,7 +4,7 @@ Catalog of every built-in tool the PC agent exposes to the model. Generated from
 the code (`core/tools/builtin/*`), not from memory. Keep it in sync — see the
 update rule at the bottom.
 
-- **Total: 117 tools** · last updated: 2026-09-27
+- **Total: 119 tools** · last updated: 2026-10-07
 - **Category** — how approval is gated: `read` (auto), `edit` / `execute` /
   `network` (may ask in manual mode). `⚠` marks a tool flagged `dangerous`
   (state-changing, asks by default).
@@ -210,6 +210,20 @@ next start (with how late it is).
 |------|-----|-------------|--------|
 | `list_secrets` | read | Which secrets are set (names + masked values). | secret_tools |
 | `request_secret` | read | Ask the user to enter a secret via a secure form (stored in `.env`, unseen by the model). | secret_tools |
+
+## Bodies (servers)
+
+Once at least one server is added (Settings → Servers), the machine tools — `execute_command`,
+`run_python`, the background and file tools, `find_files`, `grep_search`, `code_map`, git, tests,
+lint, coverage, dev servers, `db_query`/`db_schema`, `http_request`, `download_file` (the list is
+`core/bodies_routing.py::ROUTED`) — take an optional **`body`** argument: a server's name runs the
+call there through its tunnel, `name:/folder` also sets the folder (remembered by the chat).
+Without servers the schemas are exactly the same as before. Approval is asked here with the
+stricter of the chat's mode and the server's mode.
+
+| Tool | Cat | Description | Source |
+|------|-----|-------------|--------|
+| `bodies` | read | This PC and the servers: what each has (CPU, RAM, GPU, Docker), state and load now; `action=pick` ranks them for a task (GPU/Docker/memory/arch, where the data is, long work, load, labels). | bodies_tools |
 
 ## Phone bridge
 

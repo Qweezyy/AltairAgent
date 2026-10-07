@@ -89,6 +89,8 @@ def load(data_dir: Path, running_tasks: int = 0) -> dict[str, Any]:
     }
 
 
-def status(identity_card: dict[str, Any], data_dir: Path, running_tasks: int = 0) -> dict[str, Any]:
+def status(identity_card: dict[str, Any], data_dir: Path, running_tasks: int = 0,
+           workspace: str = "") -> dict[str, Any]:
     card = {k: v for k, v in identity_card.items() if k != "public_key"}
-    return {**card, **facts(), "load": load(data_dir, running_tasks)}
+    # The default folder there: where another body's call lands when it names no folder.
+    return {**card, **facts(), "workspace": workspace, "load": load(data_dir, running_tasks)}

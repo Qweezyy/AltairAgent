@@ -166,8 +166,15 @@ def test_chat_is_stored_as_new_chat_before_the_title_is_ready(monkeypatch, setti
         ws.receive_json()
         ws.send_json({"type": "run", "task": "сделай что-нибудь"})
         _collect(ws, {"run.finished"})
+        # The chat is stored by a write in a worker thread: under load the list may be read a
+        # moment before it lands (the window refreshes on chat.activity anyway). Wait for it.
+        import time
+
+        deadline = time.monotonic() + 3
         listed = tc.get("/api/sessions").json()["sessions"]
-        # Seldom flaky under full-suite load: the message shows what the list held then.
+        while not listed and time.monotonic() < deadline:
+            time.sleep(0.05)
+            listed = tc.get("/api/sessions").json()["sessions"]
         assert listed and listed[0]["title"] == "Новый диалог", listed
         gate.set()
         title = next(e for e in _collect(ws, {"session.title"}) if e["type"] == "session.title")

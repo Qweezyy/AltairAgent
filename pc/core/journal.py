@@ -237,11 +237,16 @@ _JOURNALS: dict[str, Journal] = {}
 _JOURNALS_LOCK = threading.Lock()
 
 
-def get_journal(folder: Path, body: str = "pc") -> Journal:
-    """One Journal object per folder: every chat and window of the app writes the same chain."""
+def get_journal(folder: Path, body: str = "") -> Journal:
+    """One Journal object per folder: every chat and window of the app writes the same chain.
+    The records say which body wrote them: this install's kind (BODY_KIND) unless given."""
     key = str(Path(folder).resolve())
     with _JOURNALS_LOCK:
         journal = _JOURNALS.get(key)
         if journal is None:
+            if not body:
+                from core.settings import get_settings
+
+                body = get_settings().body_kind
             journal = _JOURNALS[key] = Journal(Path(folder), body)
         return journal

@@ -203,3 +203,14 @@ def test_the_terminal_prints_journal_lines():
     assert "Denied write_file" in line(record, t).plain and "abc123" in line(record, t).plain
     tool = {"seq": 4, "ts": time.time(), "kind": "tool", "chat": "", "data": {"name": "read_file", "args": {"path": "a.py"}, "ok": True}}
     assert "Read(a.py)" in line(tool, t).plain
+
+
+def test_a_servers_journal_says_it_was_the_server(tmp_path, monkeypatch, settings):
+    """Found live: the journal on the test server stamped its records "pc"."""
+    import core.settings as settings_module
+    from core.journal import get_journal
+
+    settings.body_kind = "server"
+    monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
+    record = get_journal(tmp_path / "server-journal").append("tool.remote", tool="execute_command")
+    assert record["body"] == "server"

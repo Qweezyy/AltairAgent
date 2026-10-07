@@ -197,6 +197,10 @@ class Client:
             self.mode = str(m.get("mode") or self.mode)
         elif kind == "session.title" and m.get("session_id") == self.session.get("id"):
             self.session["title"] = m.get("title")
+        elif kind == "session.moved" and m.get("session_id") == self.session.get("id") and self.fmt == "text":
+            # Moved to a server from the window: say where it went and how to follow it.
+            self.console.print(Text(self.t("move.moved_away", name=m.get("name") or m.get("body") or "")
+                                    + f"  /body {m.get('name') or m.get('body')}", style="yellow"))
 
     def _apply_loaded(self, m: dict[str, Any]) -> None:
         self.session = m.get("session") or {}

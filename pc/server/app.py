@@ -367,6 +367,8 @@ def create_app() -> FastAPI:
                 await live.stop()
                 await asyncio.gather(live.run_task, return_exceptions=True)
             live.deleted = True  # a window still showing it must not store it back
+        if hasattr(app.state, "chats"):
+            app.state.chats.forget(session_id)
         deleted = await store.async_delete(session_id)
         return {"ok": deleted}
 
@@ -380,6 +382,8 @@ def create_app() -> FastAPI:
     async def restore_session(session_id: str) -> dict:
         """Вернуть случайно удалённый чат из корзины."""
         store: SessionStore = app.state.store
+        if hasattr(app.state, "chats"):
+            app.state.chats.gone.discard(session_id)     # back from the trash: it may open again
         return {"ok": await store.async_restore(session_id)}
 
     @app.get("/api/sessions/{session_id}/export")
@@ -577,6 +581,9 @@ def create_app() -> FastAPI:
     from server import bodies as bodies_routes
 
     bodies_routes.install(app)
+    from server import chat_move
+
+    chat_move.install(app)
 
     async def _tunnels_follow() -> None:
         tunnels = getattr(app.state, "tunnels", None)

@@ -415,10 +415,17 @@ function diffHtml(name, args) {
   const d = diffCounts(name, args);
   return d ? `<span class="tr-diff"><span class="add">+${d.add}</span> <span class="del">−${d.del}</span></span>` : "";
 }
+// A step that ran on another body (a server): which one, right in the row.
+function bodyTagHtml(args) {
+  const on = String((args && args.body) || "").trim();
+  const onName = on.replace(/:(?=[/~]|[A-Za-z]:[/\\]).*$/, "");
+  return on && !/^(pc|local|this|here)$/i.test(onName) ? `<span class="tr-body" data-tip="${escAttr(T("body.ranOn", { name: on }))}">${iconSvg("server", "icon icon-sm")}${esc(onName)}</span>` : "";
+}
 function roundAddTool(call_id, name, args) {
   const round = state.round || startRound();
   const L = stepLabel(name, args, "run");
-  const row = el(`<div class="tool-row" data-open="0"><button class="tool-row-head" type="button"><span class="tr-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="tr-ico">${iconSvg(L.icon, "icon icon-sm")}</span><span class="tr-label">${L.label}</span>${diffHtml(name, args)}<span class="tr-status"><span class="spin">${iconSvg("refresh", "icon icon-sm")}</span></span></button><div class="tool-row-out" hidden></div></div>`);
+  const bodyTag = bodyTagHtml(args);
+  const row = el(`<div class="tool-row" data-open="0"><button class="tool-row-head" type="button"><span class="tr-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="tr-ico">${iconSvg(L.icon, "icon icon-sm")}</span><span class="tr-label">${L.label}</span>${bodyTag}${diffHtml(name, args)}<span class="tr-status"><span class="spin">${iconSvg("refresh", "icon icon-sm")}</span></span></button><div class="tool-row-out" hidden></div></div>`);
   $(".tools-body", round).appendChild(row);
   round._rows.set(call_id, row);
   row._summary = { label: L.label };
@@ -495,7 +502,7 @@ function startHistoryRound() {
 }
 function historyAddRow(round, e) {
   const ok = e.ok !== false; const L = stepLabel(e.name, e.args, ok ? "ok" : "fail");
-  const row = el(`<div class="tool-row ${ok ? "ok" : "fail"}" data-open="0"><button class="tool-row-head" type="button"><span class="tr-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="tr-ico">${iconSvg(L.icon, "icon icon-sm")}</span><span class="tr-label">${L.label}</span>${diffHtml(e.name, e.args)}<span class="tr-status">${ok ? iconSvg("check", "icon icon-sm") : iconSvg("x", "icon icon-sm")}</span></button><div class="tool-row-out" hidden></div></div>`);
+  const row = el(`<div class="tool-row ${ok ? "ok" : "fail"}" data-open="0"><button class="tool-row-head" type="button"><span class="tr-caret">${iconSvg("chevron-right", "icon icon-sm")}</span><span class="tr-ico">${iconSvg(L.icon, "icon icon-sm")}</span><span class="tr-label">${L.label}</span>${bodyTagHtml(e.args)}${diffHtml(e.name, e.args)}<span class="tr-status">${ok ? iconSvg("check", "icon icon-sm") : iconSvg("x", "icon icon-sm")}</span></button><div class="tool-row-out" hidden></div></div>`);
   const outBox = $(".tool-row-out", row); let built = false;
   $(".tool-row-head", row).addEventListener("click", () => { const open = row.dataset.open === "1"; row.dataset.open = open ? "0" : "1"; if (!open && !built) { built = true; outBox.innerHTML = toolOutputHtml(e.name, e.args, e.output || ""); } outBox.hidden = open; });
   $(".tools-body", round).appendChild(row);
@@ -733,6 +740,8 @@ const HANDLERS = {
     if (state.freshSession) loadSession(state.freshSession); else showWelcome();
   },
   "session.title"(m) { applySessionTitle(m); },
+  // The chat went to a server (from this window or another): follow it there.
+  "session.moved"(m) { if (m.session_id === state.sessionId) { toast(T("move.done", { name: m.name || "" })); window.AltairBody?.open(m.body, m.session_id); } else refreshSessions(); },
   "workspace.updated"(m) { setWorkspace(m.workspace); toast(T("ev.wsUpdated")); },
   "workspace.error"(m) { toast(m.message, "error"); },
   "mode.updated"(m) { updateMode(m.mode); },
@@ -1148,7 +1157,9 @@ function drawBodyBar(list) {
   const bar = $("#body-bar");
   if (!bar) return;
   const B = window.AltairBody;
-  if (!list || list.length < 2) { bar.hidden = true; return; }
+  // The agent picks the body itself; the switcher only shows while a server is looked at
+  // directly (from Settings → Servers or a server's chat in the rail): the way back.
+  if (!list || list.length < 2 || !B.id) { bar.hidden = true; drawLostState(list); return; }
   bar.hidden = false;
   const cur = B.current();
   bar.innerHTML = list.map((b) => {
@@ -1162,6 +1173,10 @@ function drawBodyBar(list) {
     if (!b.self && b.state !== "online") { toast(T("body.notYet", { name: bodyName(b) }), "error"); return; }
     window.AltairBody.open(b.id);
   }));
+  drawLostState(list);
+}
+function drawLostState(list) {
+  const cur = window.AltairBody?.current();
   // Shown a server that went away: say so where the work is.
   const lost = cur && !cur.self && cur.state !== "online";
   document.documentElement.classList.toggle("body-lost", !!lost);
@@ -2939,6 +2954,36 @@ function followInstall(box, jobId, onInstalled, close) {
   };
   tick();
 }
+// Moving this chat to a server: it goes on there with this PC switched off (server/chat_move.py).
+async function openMoveChat() {
+  const B = window.AltairBody;
+  await B?.refresh();
+  const servers = (B?.list || []).filter((b) => !b.self);
+  if (!servers.length) { toast(T("move.noServers"), "error"); return; }
+  const folderish = state.workspace && !isChatFolder(state.workspace);
+  const running = !!state.running;
+  const opts = servers.map((b) => `<option value="${escAttr(b.id)}" ${b.state === "online" && b.agent !== "down" ? "" : "disabled"}>${esc(b.name || b.host)}${b.state === "online" ? "" : ` — ${esc(T("bd.offShort"))}`}</option>`).join("");
+  const { overlay, close } = openModal({
+    title: T("move.title"),
+    bodyHtml: `<p class="sr-desc" style="margin-bottom:14px">${esc(T("move.desc"))}</p>
+      <div class="form-row"><label class="form-label">${esc(T("move.to"))}</label><select class="field" id="mv-body">${opts}</select></div>
+      ${folderish ? `<label class="cap-check"><input type="checkbox" id="mv-copy" checked /> ${esc(T("move.copy", { folder: state.workspace }))}</label><div class="form-help" style="margin:2px 0 10px 24px">${esc(T("move.copyHelp"))}</div>` : ""}
+      <div class="form-row"><label class="form-label">${esc(T("move.folder"))}</label><input class="field mono" id="mv-folder" spellcheck="false" placeholder="${escAttr(T("move.folderPh"))}" /></div>
+      <label class="cap-check"><input type="checkbox" id="mv-go" ${running ? "checked" : ""} /> ${esc(T(running ? "move.goRunning" : "move.go"))}</label>`,
+    footHtml: `<button class="btn" data-close>${esc(T("cf.cancel"))}</button><button class="btn btn-primary" id="mv-ok">${esc(T("move.ok"))}</button>`,
+  });
+  $("#mv-ok", overlay).addEventListener("click", async (e) => {
+    const btn = e.currentTarget; btn.disabled = true; btn.textContent = T("move.moving");
+    const payload = { body: $("#mv-body", overlay).value, copy_folder: !!$("#mv-copy", overlay)?.checked, folder: $("#mv-folder", overlay).value.trim(), continue: $("#mv-go", overlay).checked };
+    let r;
+    try { r = await (await B.rawFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/move`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })).json(); }
+    catch { r = { ok: false, error: T("t.error") }; }
+    if (!r.ok) { toast(r.error || r.detail || T("t.error"), "error"); btn.disabled = false; btn.textContent = T("move.ok"); return; }
+    close();
+    toast(T("move.done", { name: (servers.find((b) => b.id === r.body) || {}).name || "" }));
+    B.open(r.body, r.chat);
+  });
+}
 async function renderPairSection(main) {
   main.innerHTML = `<div class="settings-section"><h2>${esc(T("pair.title"))}</h2><div class="dim" id="pair-body">${esc(T("pair.loading"))}</div></div>`;
   const body = $("#pair-body", main);
@@ -3373,6 +3418,7 @@ function init() {
     { text: T("menu.preview"), chosen: paneVisible("preview"), onClick: () => togglePane("preview") },
     { label: T("menu.dialog") },
     { text: T("menu.exportChat"), onClick: () => openExport($("#btn-more")) },
+    ...((window.AltairBody?.list || []).some((b) => !b.self) && !window.AltairBody?.id && (state.currentHasContent || chatStarted()) ? [{ text: T("move.menu"), onClick: () => openMoveChat() }] : []),
     { text: T("menu.clearChat"), onClick: async () => { if (await confirmDialog({ message: T("cf.clearChat"), danger: true })) { send({ type: "reset" }); showWelcome(); } } },
     { label: T("menu.chats") },
     { text: T("nav.trash"), onClick: () => openTrash() },

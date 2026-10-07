@@ -108,6 +108,7 @@ from core.tools.builtin.patch import ApplyPatchTool
 from core.tools.builtin.plan import UpdatePlanTool
 from core.tools.builtin.python_exec import RunPythonTool
 from core.tools.builtin.quality_tools import RunLintTool, RunTestsTool
+from core.tools.builtin.bodies_tools import BodiesTool
 from core.tools.builtin.reminder_tools import (
     CancelReminderTool,
     ListRemindersTool,
@@ -144,6 +145,8 @@ def builtin_tools() -> list[Tool]:
     return [
         # deferred loading: finds and activates the rest of the tools on demand
         ToolSearchTool(),
+        # the machines this agent works on (this PC, the servers)
+        BodiesTool(),
         # диалог с пользователем
         AskTool(),
         RequestSecretTool(),

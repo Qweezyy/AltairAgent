@@ -97,8 +97,10 @@ class Settings(BaseSettings):
     # --- LLM ---
     #: Универсальный ключ OpenAI-совместимого API. Приоритетнее старого
     #: OPENROUTER_API_KEY, оставленного для существующих .env.
-    llm_api_key: str = ""
-    openrouter_api_key: str = ""
+    # Secrets stay out of repr(): a test failure or a log line printing the settings must not
+    # carry the keys with it.
+    llm_api_key: str = Field(default="", repr=False)
+    openrouter_api_key: str = Field(default="", repr=False)
     llm_base_url: str = "https://openrouter.ai/api/v1"
     default_model: str = "anthropic/claude-sonnet-4.5"
     llm_temperature: float = 0.3
@@ -232,8 +234,8 @@ class Settings(BaseSettings):
     custom_instructions: str = ""
 
     # --- Поиск в интернете (опционально: по умолчанию бесплатный DuckDuckGo) ---
-    tavily_api_key: str = ""
-    brave_api_key: str = ""
+    tavily_api_key: str = Field(default="", repr=False)
+    brave_api_key: str = Field(default="", repr=False)
     #: URL своего SearXNG (опц.): включает image-поиск для инлайн-картинок в ответах.
     searxng_url: str = ""
 
@@ -297,7 +299,7 @@ class Settings(BaseSettings):
     #: телефоне). Пусто — удалённые подключения запрещены, разрешён только
     #: localhost (веб-интерфейс). Никогда не логируется. Чтобы телефон достучался,
     #: сервер должен слушать не только 127.0.0.1 (host=0.0.0.0 или адрес Tailscale).
-    bridge_token: str = ""
+    bridge_token: str = Field(default="", repr=False)
     #: Разрешить подключение по локальной сети (сервер слушает 0.0.0.0 при
     #: следующем запуске). Нужно, чтобы телефон достучался до моста по Wi-Fi.
     #: Удалённый доступ всё равно защищён bridge_token. Меняется из UI связывания.

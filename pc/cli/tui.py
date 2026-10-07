@@ -923,6 +923,7 @@ class Tui:
         add("history", self.c_history)
         add("journal", self.c_journal)
         add("body", self.c_body)
+        add("move", self.c_move)
         add("stop", self.c_stop)
         add("exit", self.c_exit, "quit", "q")
 
@@ -1325,21 +1326,28 @@ class Tui:
             return False
         if self.client.running:
             self.r.print(Text(self.t("bd.busy"), style="dim"))
-        # A new socket to the other body; a new chat there, in its own default folder. The event
-        # pump stops meanwhile: the old socket's end is not "the backend is gone", and the new
-        # one's first events are read here.
+        if await self._switch(wanted):
+            self.r.print(Text(self.t("bd.switched", name=name), style="bold"), gap=True)
+        return False
+
+    async def _switch(self, wanted: str, chat: str = "") -> bool:
+        """Points this terminal at another body: a new socket, then that chat there (or a new one
+        in its default folder). The event pump stops meanwhile: the old socket's end is not "the
+        backend is gone", and the new one's first events are read here. If the body cannot be
+        reached, it goes back to the previous body and chat. True when it got there."""
+        backend = self.client.backend
+        previous, previous_chat = backend.body, str(self.client.session.get("id") or "")
         self._pump_task.cancel()
         await asyncio.gather(self._pump_task, return_exceptions=True)
-        previous = backend.body
         try:
             await self.client.close()
-            for body in (wanted, previous):
+            for body, sid in ((wanted, chat), (previous, previous_chat)):
                 self.client.events = asyncio.Queue()
                 backend.body = body
                 self.http = backend.http
                 try:
                     await self.client.open()
-                    await self.client.send({"type": "new_session"})
+                    await self.client.send({"type": "load_session", "session_id": sid} if sid else {"type": "new_session"})
                     self.client._apply_loaded(await self.client._wait_for("session.loaded"))
                     break
                 except (OSError, ConnectionError, TimeoutError, websockets.WebSocketException) as exc:
@@ -1351,9 +1359,50 @@ class Tui:
         finally:
             self._pump_task = asyncio.create_task(self._pump())
         await self._load_config()
-        if backend.body != wanted:
+        return backend.body == wanted
+
+    async def c_move(self, rest: str) -> bool:
+        """/move NAME: this chat goes to that server with its folder and goes on there (the PC
+        may be switched off); --no-copy leaves the folder here."""
+        from cli.bodies_view import list_bodies, live, resolve
+
+        words = rest.split()
+        no_copy = "--no-copy" in words
+        query = " ".join(w for w in words if w != "--no-copy").strip()
+        backend = self.client.backend
+        if backend.body:
+            self.r.print(Text(self.t("mv.only_from_pc"), style=theme.WARN))
             return False
-        self.r.print(Text(self.t("bd.switched", name=name), style="bold"), gap=True)
+        try:
+            bodies = await list_bodies(backend.root)
+        except httpx.HTTPError as exc:
+            self.r.print(Text(str(exc), style=theme.ERR))
+            return False
+        servers = [b for b in bodies if not b.get("self")]
+        target = resolve(servers, query) if query else (servers[0] if len(servers) == 1 else None)
+        if target is None:
+            self.r.print(Text(self.t("mv.which" if not query else "bd.not_found", query=query), style=theme.ERR))
+            return False
+        name = target.get("name") or target["id"]
+        if live(target) != "on":
+            self.r.print(Text(self.t("bd.not_online", name=name), style=theme.ERR))
+            return False
+        sid = str(self.client.session.get("id") or "")
+        self.r.print(Text(self.t("mv.moving", name=name), style="dim"), gap=True)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=None)) as http:
+            r = await http.post(f"{backend.root}/api/sessions/{sid}/move",
+                                json={"body": target["id"], "copy_folder": not no_copy, "continue": True})
+        reply = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if not reply.get("ok"):
+            self.r.print(Text(reply.get("error") or reply.get("detail") or f"HTTP {r.status_code}", style=theme.ERR))
+            return False
+        copied = reply.get("copied") or {}
+        if copied:
+            skipped = ", ".join(copied.get("skipped") or [])
+            self.r.print(Text(self.t("mv.copied", mb=f"{copied.get('bytes', 0) / 1e6:.1f}", folder=reply["folder"])
+                              + (" " + self.t("mv.skipped", names=skipped) if skipped else ""), style="dim"))
+        if await self._switch(target["id"], sid):
+            self.r.print(Text(self.t("mv.done", name=name), style="bold"), gap=True)
         return False
 
     async def c_history(self, rest: str) -> bool:

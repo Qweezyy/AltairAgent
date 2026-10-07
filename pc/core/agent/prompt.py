@@ -188,6 +188,13 @@ def build_system_prompt(
             "</deferred_tools>",
         ])
 
+    # The other bodies of this agent (servers): what they are, so it can pick where to work.
+    from core.bodies_routing import prompt_section as bodies_section
+
+    bodies = bodies_section()
+    if bodies:
+        stable.extend(["", bodies])
+
     # The user's personal instructions (style, preferences) are part of the stable
     # prefix, so they are cached together with the rules.
     if settings.custom_instructions.strip():

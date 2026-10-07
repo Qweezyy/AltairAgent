@@ -206,7 +206,7 @@ class ChatState:
 
     async def _save_session(self) -> None:
         self.session.workspace = str(self.session_settings.workspace)
-        if self.session.messages and not self.deleted:
+        if self.session.messages and not self.deleted and self.session.id not in self.hub.gone:
             self._last_save = time.monotonic()
             await self.store.async_save(self.session)
 
@@ -837,6 +837,9 @@ class ChatHub:
         #: the app) stops it, as the socket used to.
         self.detached_runs = detached_runs
         self.shutting_down = False
+        #: Chats deleted or moved to another body: never opened or stored here again, even by a
+        #: reminder that loaded one a moment before it went (it would bring the file back).
+        self.gone: set[str] = set()
 
     # ------------------------------------------------------------ chats
 
@@ -847,6 +850,8 @@ class ChatHub:
 
     async def open(self, session_id: str, registry: ToolRegistry | None = None) -> tuple[ChatState | None, str]:
         """The live chat, or the stored one brought to life. Returns (chat, warning)."""
+        if session_id in self.gone:
+            return None, ""
         live = self.chats.get(session_id)
         if live is not None:
             return live, ""
@@ -860,6 +865,13 @@ class ChatHub:
             return live, ""
         chat = self.new_chat(registry or self.registry, loaded, chat_settings)  # type: ignore[arg-type]
         return chat, warning
+
+    def forget(self, session_id: str) -> None:
+        """The chat was deleted or moved away: drop it and keep it from coming back."""
+        self.gone.add(session_id)
+        live = self.chats.pop(session_id, None)
+        if live is not None:
+            live.deleted = True
 
     def attach(self, chat: ChatState, viewer: Any) -> None:
         chat.viewers.add(viewer)
