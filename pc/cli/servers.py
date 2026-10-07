@@ -25,7 +25,7 @@ from rich.text import Text
 from cli.backend import Backend, connect
 from cli.texts import Texts
 
-COMMANDS = ("list", "check", "add", "remove")
+COMMANDS = ("list", "check", "add", "remove", "update", "mode")
 MODES = ("owner", "autopilot", "careful")
 STEPS = ("connect", "preflight", "key", "packages", "download", "unpack", "configure", "identity", "service",
          "health")
@@ -51,6 +51,12 @@ def parse(argv: list[str]) -> argparse.Namespace:
             c.add_argument("--name", default="")
             c.add_argument("--no-memory", action="store_true", help="do not bring memory and skills from this PC")
             c.add_argument("-y", "--yes", action="store_true", help="do not ask before installing")
+    u = sub.add_parser("update", help="the latest signed release on a server (its settings, memory and keys stay)")
+    u.add_argument("server", help="id, name or address")
+    u.add_argument("--source", default="github", help="github (default), a package zip here, or server:/path there")
+    m = sub.add_parser("mode", help="how free the agent is there: owner, autopilot or careful")
+    m.add_argument("server", help="id, name or address")
+    m.add_argument("mode", choices=MODES)
     r = sub.add_parser("remove", help="remove the agent from a server")
     r.add_argument("server", help="id, name or address")
     r.add_argument("--keep-data", action="store_true", help="leave the agent's data folder on the server")
@@ -178,10 +184,13 @@ class Servers:
         with self.console.status(self.t("srv.step.connect")) as status:
             while True:
                 job = await self._get(f"/api/servers/jobs/{job_id}")
-                # Finished between two polls: the step is already "done", every step passed.
+                # The steps it went through (an update skips some); the one under way is not done
+                # yet, and a failed one is not done at all. Finished between two polls: all of them.
                 current = job.get("failed_step") or job["step"] if job["state"] == "error" else job["step"]
-                at = len(STEPS) if job["state"] == "done" else STEPS.index(current) if current in STEPS else 0
-                for step in STEPS[:at]:
+                passed = [x for x in job.get("steps") or [] if x in STEPS]
+                if job["state"] != "done" and current in passed:
+                    passed = passed[: passed.index(current)]
+                for step in passed:
                     if step not in shown:
                         shown.add(step)
                         self.console.print(Text.assemble(("✓ ", "green"), self.t(f"srv.step.{step}")))
@@ -192,13 +201,44 @@ class Servers:
                 await asyncio.sleep(0.7)
         if job["state"] == "done":
             server = job.get("server") or {}
-            self.console.print(Text("✦ " + self.t("srv.done", name=server.get("name") or server.get("host", "")),
+            done_key = "srv.updated" if job.get("kind") == "update" else "srv.done"
+            self.console.print(Text("✦ " + self.t(done_key, name=server.get("name") or server.get("host", ""),
+                                                  version=server.get("version", "")),
                                     style="bold"))
             return 0
         failed = job.get("failed_step") or job.get("step", "")
         self.console.print(Text("✗ " + self.t("srv.failed", step=self.t(f"srv.step.{failed}")), style="red"))
         self.console.print(Text(job.get("error", ""), style="dim"))
         return 1
+
+    def _one(self, servers: list[dict], wanted: str) -> dict | None:
+        match = [s for s in servers if wanted in (s["id"], s.get("name"), s["host"])]
+        if len(match) != 1:
+            self.console.print(Text(self.t("srv.not_found" if not match else "srv.ambiguous", query=wanted),
+                                    style="red"))
+            return None
+        return match[0]
+
+    async def update(self, args: argparse.Namespace) -> int:
+        s = self._one(await self.all(), args.server.strip())
+        if s is None:
+            return 1
+        started = await self._post(f"/api/servers/{s['id']}/update", {"source": args.source})
+        if not started.get("ok"):
+            self.console.print(Text(started.get("error") or "?", style="red"))
+            return 1
+        return await self._follow(started["job"])
+
+    async def set_mode(self, args: argparse.Namespace) -> int:
+        s = self._one(await self.all(), args.server.strip())
+        if s is None:
+            return 1
+        r = await self._post(f"/api/servers/{s['id']}/mode", {"mode": args.mode})
+        if not r.get("ok"):
+            self.console.print(Text(r.get("error") or "?", style="red"))
+            return 1
+        self.console.print(self.t("srv.mode_now", name=s.get("name") or s["host"], mode=self.t(f"srv.mode.{args.mode}")))
+        return 0
 
     async def remove(self, args: argparse.Namespace) -> int:
         wanted = args.server.strip()
@@ -242,6 +282,10 @@ async def run(argv: list[str]) -> int:
             return await servers.add(args)
         if args.command == "remove":
             return await servers.remove(args)
+        if args.command == "update":
+            return await servers.update(args)
+        if args.command == "mode":
+            return await servers.set_mode(args)
         return await servers.show_list()
     except httpx.HTTPError as exc:
         console.print(Text(str(exc) or type(exc).__name__, style="red"))

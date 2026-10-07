@@ -40,16 +40,17 @@ ROUTED = frozenset({
     "list_directory", "find_files", "grep_search", "code_map", "git_status", "git_diff", "git_log",
     "git_commit", "git_branch", "git_restore", "git_blame", "run_tests", "run_lint", "test_coverage",
     "start_dev_server", "stop_dev_server", "list_dev_servers", "read_dev_server", "db_query",
-    "db_schema", "http_request", "download_file",
+    "db_schema", "http_request", "download_file", "safe_system_change", "self_check",
 })
 
 BODY_HELP = ("Where to run it: leave out for this machine; a server's name (the `bodies` tool lists "
              "them) runs it there, 'name:/folder' also sets the folder there (remembered in this chat).")
 
 #: Stricter first: the mode a remote call is judged by is the stricter of the chat's and the server's.
-_STRICTNESS = {"plan": 0, "manual": 1, "allowlist": 1, "auto": 2, "accept_edits": 3, "bypass": 4}
+_STRICTNESS = {"plan": 0, "manual": 1, "allowlist": 1, "auto": 2, "accept_edits": 3, "autopilot": 3.5,
+               "bypass": 4}
 #: The server's mode → the approval mode it stands for (core/servers/install.py MODE_APPROVAL).
-_SERVER_APPROVAL = {"owner": "bypass", "autopilot": "accept_edits", "careful": "manual"}
+_SERVER_APPROVAL = {"owner": "bypass", "autopilot": "autopilot", "careful": "manual"}
 
 _LOCAL_NAMES = {"", "pc", "local", "this", "here"}
 _PATH_START = re.compile(r"(/|~|[A-Za-z]:[/\\])")
@@ -153,6 +154,41 @@ async def call_remote(tunnel: Any, tool: str, args: dict[str, Any], folder: str,
     return ToolResult(content=str(data.get("content") or ""), ok=bool(data.get("ok")), metadata=meta)
 
 
+#: A new login is tried this many times, this far apart, before the change is left to be undone.
+CONFIRM_TRIES, CONFIRM_PAUSE_S = 4, 5.0
+
+
+async def confirm_with_new_login(tunnel: Any, cid: str, script: str) -> tuple[bool, str]:
+    """A safe_system_change stays only if a *new* SSH login works after it (the tunnel's own
+    connection outlives an sshd reload, so it proves nothing): log in afresh and confirm."""
+    import shlex
+
+    from core.servers import remote as remote_module
+    from core.servers.registry import ServerStore
+    from core.servers.remote import Login, RemoteError
+
+    r = tunnel.record
+    login = Login(host=r.host, port=r.port, user=r.user, key_path=str(ServerStore(router.data_dir).key_path(r.id)),
+                  host_key=r.host_key)
+    why = ""
+    for attempt in range(CONFIRM_TRIES):
+        if attempt:
+            await asyncio.sleep(CONFIRM_PAUSE_S)
+        try:
+            async with remote_module.SSHRemote(login) as remote:
+                remote.sudo = "" if r.user == "root" else "sudo -n"
+                done = await remote.run(f"APP_PATH={shlex.quote(r.data_dir)} python3 {shlex.quote(script)} confirm {cid}",
+                                        root=True, timeout=60)
+                if done.ok:
+                    return True, ""
+                why = (done.out or done.err).strip()[-300:]
+                if "no such pending change" in why:
+                    return False, why          # already undone: trying again changes nothing
+        except RemoteError as exc:
+            why = str(exc)
+    return False, why
+
+
 class RoutedTool(Tool):
     """A machine tool that can run on another body. Built per wrapped tool by `routed()`, which
     gives each its tool's name, description and arguments; this base is never registered."""
@@ -222,8 +258,21 @@ class RoutedTool(Tool):
         if not folder and ctx.session is not None:
             folder = remembered_folder(getattr(ctx.session, "messages", []) or [], name)
         chat = str(getattr(ctx.session, "id", "") or "")
-        return await call_remote(tunnel, self.inner.name, inner_args.model_dump(mode="json"), folder, chat,
-                                 self.inner.timeout)
+        result = await call_remote(tunnel, self.inner.name, inner_args.model_dump(mode="json"), folder, chat,
+                                   self.inner.timeout)
+        meta = result.metadata
+        if result.ok and meta.get("needs_confirmation") and meta.get("change_id") and router.data_dir:
+            ok, why = await confirm_with_new_login(tunnel, str(meta["change_id"]), str(meta.get("guardian") or ""))
+            meta["confirmed"] = ok
+            if ok:
+                result.content = ("Kept: a new SSH login from this PC works after the change, so it is confirmed.\n\n"
+                                  + result.content)
+            else:
+                result.ok = False
+                result.content = (f"NOT kept: a new SSH login from this PC did not work after the change ({why}). "
+                                  "The guardian on the server undoes it by itself when its window ends; the "
+                                  "connection may come back after that.\n\n" + result.content)
+        return result
 
 
 def routed(tool: Tool) -> Tool:
@@ -293,6 +342,9 @@ def prompt_section() -> str:
         "long work or work meant to go on while the PC is off goes to a server; then the lighter load "
         "(`bodies` shows it live and ranks them with action='pick'); then the owner's labels. Short local "
         "work stays here. Say in one line where and why. Files on one body are not on another: copy what "
-        "is needed (write_file on the target, or git).",
+        "is needed (write_file on the target, or git). A change to a server's sshd, firewall, network or "
+        "sudoers goes through `safe_system_change`, never a plain command: it undoes itself unless a new login "
+        "works afterwards. `self_check` (with `body`) shows how a body is doing — its services, guardian, "
+        "disk and recent failures.",
         "</bodies>",
     ])

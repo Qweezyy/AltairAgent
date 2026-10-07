@@ -37,6 +37,7 @@ systemd=yes
 docker=no
 unzip=no
 curl=yes
+python3=yes
 apt=yes
 sudo_nopass=yes
 sudo=yes
@@ -151,6 +152,14 @@ async def test_a_server_is_installed_step_by_step(settings, tmp_path, release):
     assert "D:\\Projects" not in env and "0.0.0.0" not in env and "BRIDGE_TOKEN" not in env and "C:\\x" not in env
     unit = server.files["/etc/systemd/system/altair.service"]
     assert "Restart=always" in unit and "APP_PATH=/var/lib/altair" in unit and "--host 127.0.0.1" in unit
+    # The guardian: its script and its own service, run by the system's python3.
+    assert "class Guardian" in server.files["/opt/altair/guardian.py"]
+    gunit = server.files["/etc/systemd/system/altair-guardian.service"]
+    assert "guardian.py watch" in gunit and "Restart=always" in gunit and "ALTAIR_INSTALL_DIR=/opt/altair" in gunit
+    assert any("enable altair-guardian" in c for c in server.commands)
+    # A release folder of its own, and the one before recorded for the guardian to go back to.
+    unpack = next(c for c in server.commands if "unzip -q" in c)
+    assert "/opt/altair/releases/0.3.0-" in unpack and "pending-update.json" in unpack and "readlink -f" in unpack
     # The two bodies trust each other.
     assert TrustStore(settings.data_dir / "identity").get(server.identity.id) is not None
     assert server.trusted_cards and server.trusted_cards[0]["kind"] == "pc"
@@ -417,3 +426,50 @@ async def test_a_failed_connection_says_why(monkeypatch, error, expected):
             pass
     message = str(caught.value)
     assert "203.0.113.7:22" in message and expected in message and not message.rstrip().endswith(":")
+
+
+
+async def test_a_release_that_does_not_start_is_rolled_back_at_once(settings, tmp_path, release, monkeypatch):
+    """The health check fails: the installer asks the guardian to go back to the release before,
+    and says the server keeps working on it."""
+    server = FakeServer(tmp_path)
+    original_run = FakeRemote.run
+
+    async def run(self, command, **kw):
+        if "/api/health" in command:
+            self.server.commands.append(command)
+            return RunResult(1, "", "")
+        if command.startswith("journalctl"):
+            return RunResult(0, "Traceback: boom", "")
+        return await original_run(self, command, **kw)
+
+    monkeypatch.setattr(FakeRemote, "run", run)
+    with pytest.raises(InstallError) as err:
+        await _installer(settings, server, InstallRequest(host="h", password="p")).run()
+    assert err.value.step == "health" and "went back" in str(err.value) and "boom" in str(err.value)
+    assert any("guardian.py rollback" in c for c in server.commands)
+    assert ServerStore(settings.data_dir).all() == []          # not recorded as installed
+
+
+def test_an_update_changes_only_the_program(monkeypatch, settings, tmp_path, release):
+    server = FakeServer(tmp_path)
+    with _api(monkeypatch, settings, server) as client:
+        job = _wait_job(client, client.post("/api/servers/install",
+                                            json={"host": "h", "password": "p", "mode": "careful"}).json()["job"])
+        sid = job["server"]["id"]
+        server.commands.clear()
+        env_writes = [k for k in server.files if k.endswith("/.env")]
+        server.files = {k: v for k, v in server.files.items() if not k.endswith("/.env")}
+
+        job = _wait_job(client, client.post(f"/api/servers/{sid}/update", json={}).json()["job"])
+        assert job["state"] == "done" and job["kind"] == "update", job
+        assert job["server"]["mode"] == "careful"                     # its mode stays
+        sent = "\n".join(server.commands)
+        assert "unzip -q" in sent and "pending-update.json" in sent    # the program, with its way back
+        assert "--body-card" not in sent and "--trust-body" not in sent  # its keys stay
+        assert not [k for k in server.files if k.endswith("/.env")]    # its settings stay
+        assert all(not l.password for l in server.logins[-2:])         # the PC's key, no password
+        assert env_writes
+        kinds = [r["kind"] for r in client.get("/api/journal?kind=server.").json()["records"]]
+        assert kinds[0] == "server.updated"
+        assert client.post("/api/servers/nope/update", json={}).status_code == 404

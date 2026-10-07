@@ -633,20 +633,15 @@ def create_app() -> FastAPI:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "report": report.to_dict()}
 
-    @app.post("/api/servers/install")
-    async def servers_install(request: Request, payload: dict) -> dict:
-        """Installs the agent on a server in the background; /api/servers/jobs/{id} follows it."""
-        _local_only(request)
-        from core.servers.install import Installer, InstallError
+    def _start_server_job(req, kind: str) -> dict:
+        from core.servers.install import InstallError, Installer
 
-        req = _install_request(payload)
-        if not req.host:
-            return {"ok": False, "error": tr("srv.need_host")}
-        busy = [j for j in app.state.server_jobs.values() if j.get("host") == req.host and j["state"] == "running"]
+        busy = [j for j in app.state.server_jobs.values()
+                if j.get("host") == req.host and j["state"] == "running"]
         if busy:
             return {"ok": True, "job": busy[0]["id"]}
         job_id = uuid.uuid4().hex[:10]
-        job = {"id": job_id, "kind": "install", "host": req.host, "state": "running", "step": "connect",
+        job = {"id": job_id, "kind": kind, "host": req.host, "state": "running", "step": "connect",
                "detail": "", "pct": 0.0, "steps": [], "error": "", "failed_step": "", "server": None}
         app.state.server_jobs[job_id] = job
 
@@ -662,11 +657,13 @@ def create_app() -> FastAPI:
 
                 job.update(state="done", server=ServerStore.public(record))
                 await _tunnels_follow()
-                await _journal_app("server.installed", server=record.id, host=record.host, name=record.name,
-                                   mode=record.mode, version=record.version, body=record.body_id)
+                await _journal_app("server.updated" if req.update else "server.installed", server=record.id,
+                                   host=record.host, name=record.name, mode=record.mode, version=record.version,
+                                   body=record.body_id)
             except InstallError as exc:
                 job.update(state="error", error=str(exc), failed_step=exc.step)
-                await _journal_app("server.install_failed", host=req.host, step=exc.step, error=str(exc))
+                await _journal_app("server.update_failed" if req.update else "server.install_failed",
+                                   host=req.host, step=exc.step, error=str(exc))
             except asyncio.CancelledError:
                 job.update(state="error", error="cancelled")
                 raise
@@ -678,6 +675,68 @@ def create_app() -> FastAPI:
 
         job["_task"] = asyncio.create_task(work(), name=f"server-install-{job_id}")
         return {"ok": True, "job": job_id}
+
+    @app.post("/api/servers/install")
+    async def servers_install(request: Request, payload: dict) -> dict:
+        """Installs the agent on a server in the background; /api/servers/jobs/{id} follows it."""
+        _local_only(request)
+        req = _install_request(payload)
+        if not req.host:
+            return {"ok": False, "error": tr("srv.need_host")}
+        return _start_server_job(req, "install")
+
+    @app.post("/api/servers/{sid}/update")
+    async def servers_update(request: Request, sid: str, payload: dict | None = None) -> dict:
+        """A new version of the agent on a server: only the program changes (its settings, memory
+        and keys stay); the guardian there goes back to the release before if it does not answer."""
+        _local_only(request)
+        from core.servers.install import InstallRequest
+        from core.servers.registry import ServerStore
+
+        record = await asyncio.to_thread(ServerStore(app.state.settings.data_dir).get, sid)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such server")
+        req = InstallRequest(host=record.host, user=record.user, port=record.port, name=record.name,
+                             mode=record.mode, source=str((payload or {}).get("source") or "github"),
+                             bring_memory=False, update=True)
+        return _start_server_job(req, "update")
+
+    @app.post("/api/servers/{sid}/mode")
+    async def servers_mode(request: Request, sid: str, payload: dict) -> dict:
+        """How free the agent is on that server (Owner / Autopilot / Careful), changed there at once
+        through its tunnel: its own settings, so its chats follow it even with this PC off."""
+        _local_only(request)
+        import httpx
+
+        from core.servers.install import MODE_APPROVAL, MODES
+        from core.servers.registry import ServerStore
+
+        mode = str(payload.get("mode") or "")
+        if mode not in MODES:
+            raise HTTPException(status_code=400, detail=f"mode: one of {', '.join(MODES)}")
+        store = ServerStore(app.state.settings.data_dir)
+        record = await asyncio.to_thread(store.get, sid)
+        tunnels = getattr(app.state, "tunnels", None)
+        tunnel = tunnels.get(sid) if tunnels is not None else None
+        if record is None or tunnel is None:
+            raise HTTPException(status_code=404, detail="no such server")
+        if tunnel.state != "online" or not tunnel.local_port:
+            return {"ok": False, "error": tr("body.offline", name=record.name or record.host)}
+        try:
+            async with httpx.AsyncClient(timeout=30) as http:
+                r = await http.post(f"http://127.0.0.1:{tunnel.local_port}/api/settings",
+                                    json={"approval_mode": MODE_APPROVAL[mode]})
+            ok = r.status_code == 200 and r.json().get("ok")
+        except (httpx.HTTPError, ValueError) as exc:
+            return {"ok": False, "error": tr("body.unreachable", why=str(exc) or type(exc).__name__)}
+        if not ok:
+            return {"ok": False, "error": r.text[:300]}
+        before = record.mode
+        record.mode = mode
+        await asyncio.to_thread(store.save, record)
+        await _tunnels_follow()
+        await _journal_app("server.mode", server=sid, host=record.host, before=before, mode=mode)
+        return {"ok": True, "mode": mode}
 
     @app.get("/api/servers/jobs/{job_id}")
     async def servers_job(request: Request, job_id: str) -> dict:

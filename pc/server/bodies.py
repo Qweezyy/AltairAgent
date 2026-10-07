@@ -353,6 +353,53 @@ async def sync_with(app: FastAPI, tunnel: Any) -> list[dict[str, Any]]:
 SYNC_EVERY_S = 120.0
 
 
+def ingest_guardian_events(settings: Any) -> int:
+    """The guardian's events (core/servers/guardian.py) go into this body's Journal, each once:
+    the guardian cannot write the hash chain itself, so it leaves a plain file behind."""
+    folder = Path(settings.app_dir) / "guardian"       # APP_PATH: where the guardian works
+    events, mark = folder / "events.jsonl", folder / "journal.offset"
+    if not events.exists():
+        return 0
+    try:
+        offset = int(mark.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        offset = 0
+    size = events.stat().st_size
+    if size < offset:                    # the file was replaced: read it from the start
+        offset = 0
+    if size == offset:
+        return 0
+    with events.open("rb") as fh:
+        fh.seek(offset)
+        chunk = fh.read()
+    complete = chunk[: chunk.rfind(b"\n") + 1]         # a line still being written waits
+    from core.journal import get_journal
+
+    journal = get_journal(Path(settings.data_dir) / "journal")
+    count = 0
+    for line in complete.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        kind = str(event.pop("kind", "event"))
+        event.pop("ts", None)
+        journal.append(f"guardian.{kind}", **event)
+        count += 1
+    mark.write_text(str(offset + len(complete)), encoding="utf-8")
+    return count
+
+
+async def _guardian_loop(app: FastAPI) -> None:
+    while True:
+        if getattr(app.state.settings, "journal", True):
+            try:
+                await asyncio.to_thread(ingest_guardian_events, app.state.settings)
+            except OSError as exc:
+                logger.info("guardian events: %s", exc)
+        await asyncio.sleep(30)
+
+
 async def _sync_loop(app: FastAPI) -> None:
     """Every server that answers, now and then: what one body learned, the others know."""
     while True:
@@ -383,16 +430,18 @@ async def start_tunnels(app: FastAPI) -> None:
         await _sync_loop(app)
 
     app.state.sync_task = asyncio.create_task(delayed(), name="bodies-sync")
+    app.state.guardian_task = asyncio.create_task(_guardian_loop(app), name="guardian-events")
 
 
 async def stop_tunnels(app: FastAPI) -> None:
     from core.bodies_routing import set_tunnels
 
-    task = getattr(app.state, "sync_task", None)
-    if task is not None:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+    for name in ("sync_task", "guardian_task"):
+        task = getattr(app.state, name, None)
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
     tunnels = getattr(app.state, "tunnels", None)
     if tunnels is not None:
         await tunnels.stop()

@@ -33,6 +33,7 @@ echo "systemd=$(command -v systemctl >/dev/null && echo yes || echo no)"
 echo "docker=$(command -v docker >/dev/null && echo yes || echo no)"
 echo "unzip=$(command -v unzip >/dev/null && echo yes || echo no)"
 echo "curl=$(command -v curl >/dev/null && echo yes || echo no)"
+echo "python3=$(command -v python3 >/dev/null && echo yes || echo no)"
 echo "apt=$(command -v apt-get >/dev/null && echo yes || echo no)"
 echo "sudo_nopass=$(sudo -n true 2>/dev/null && echo yes || echo no)"
 echo "sudo=$(command -v sudo >/dev/null && echo yes || echo no)"
@@ -91,7 +92,8 @@ def parse(text: str) -> Preflight:
     )
     p.sudo = "root" if p.root else "nopass" if raw.get("sudo_nopass") == "yes" else (
         "password" if raw.get("sudo") == "yes" else "none")
-    p.missing = [tool for tool in ("unzip", "curl") if raw.get(tool) != "yes"]
+    # python3 runs the guardian (core/servers/guardian.py), apart from the agent itself.
+    p.missing = [tool for tool in ("unzip", "curl", "python3") if raw.get(tool) != "yes"]
     p.busy_ports = [port for port in raw.get("ports", "").split() if port and port not in _BASE_PORTS]
     _judge(p)
     return p

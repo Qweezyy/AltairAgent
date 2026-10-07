@@ -32,6 +32,7 @@ import json
 import re
 import shlex
 import tarfile
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -53,7 +54,7 @@ STEPS = ("connect", "preflight", "key", "packages", "download", "unpack", "confi
          "health")
 MODES = ("owner", "autopilot", "careful")
 #: The approval mode the agent works in on the server, per server mode.
-MODE_APPROVAL = {"owner": "bypass", "autopilot": "accept_edits", "careful": "manual"}
+MODE_APPROVAL = {"owner": "bypass", "autopilot": "autopilot", "careful": "manual"}
 REPO = "Qweezyy/AltairAgent"
 SERVER_PORT = 8137
 #: Settings of this PC that make no sense on a server (they are set for the server instead).
@@ -87,6 +88,9 @@ class InstallRequest:
     source: str = "github"
     #: Copy this PC's memory, skills and providers to the server.
     bring_memory: bool = True
+    #: An update of a server added before: only the program changes — its settings, memory and
+    #: body keys stay as they are there (the server may have learned and changed things).
+    update: bool = False
 
 
 @dataclass
@@ -107,6 +111,7 @@ class Layout:
     user_service: bool = False
     #: `altair` on the server's PATH, so whoever logs in there talks to the same agent.
     command: str = "/usr/local/bin/altair"
+    guardian_unit_path: str = "/etc/systemd/system/altair-guardian.service"
 
     @classmethod
     def for_login(cls, root_rights: bool, home: str) -> Layout:
@@ -114,7 +119,8 @@ class Layout:
             return cls()
         return cls(install_dir=f"{home}/.local/share/altair", data_dir=f"{home}/.local/share/altair/data",
                    unit_path=f"{home}/.config/systemd/user/altair.service", user_service=True,
-                   command=f"{home}/.local/bin/altair")
+                   command=f"{home}/.local/bin/altair",
+                   guardian_unit_path=f"{home}/.config/systemd/user/altair-guardian.service")
 
 
 @dataclass
@@ -127,6 +133,8 @@ class InstallState:
     host_key_fingerprint: str = ""
     version: str = ""
     body_id: str = ""
+    #: The release folder this install put on the server.
+    release: str = ""
 
 
 # ---------------------------------------------------------------- the release
@@ -231,6 +239,34 @@ def bundle_of_self(settings: Settings, with_memory: bool) -> bytes:
     return buf.getvalue()
 
 
+#: A new release must answer within this long, or the guardian goes back to the one before.
+UPDATE_DEADLINE_S = 300
+
+
+def guardian_source() -> str:
+    """The guardian script as shipped with this app (a data file in the build, see build_app.py)."""
+    return (Path(__file__).resolve().parent / "guardian.py").read_text(encoding="utf-8")
+
+
+def guardian_unit_text(layout: Layout) -> str:
+    target = "default.target" if layout.user_service else "multi-user.target"
+    return f"""[Unit]
+Description=Altair guardian (keeps the agent alive, rolls back a bad update or change)
+After=network-online.target
+
+[Service]
+Environment=APP_PATH={layout.data_dir}
+Environment=ALTAIR_INSTALL_DIR={layout.install_dir}
+Environment=ALTAIR_PORT={SERVER_PORT}
+ExecStart=/usr/bin/env python3 {layout.install_dir}/guardian.py watch
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy={target}
+"""
+
+
 def unit_text(layout: Layout, user_home: str) -> str:
     target = "default.target" if layout.user_service else "multi-user.target"
     return f"""[Unit]
@@ -299,7 +335,12 @@ class Installer:
                     raise InstallError("preflight", "this login needs the sudo password")
                 home = (await remote.run("printf %s \"$HOME\"")).out.strip() or "/root"
                 layout = Layout.for_login(True, home)
-                key_path = await self._put_key(remote)
+                if req.update:
+                    if known is None:
+                        raise InstallError("connect", "this server was never added here: install it first")
+                    key_path = self.store.key_path(known.id)
+                else:
+                    key_path = await self._put_key(remote)
             # From here on: the PC's own key, the pinned host key, no password.
             key_login = Login(host=req.host, port=req.port, user=req.user, key_path=str(key_path),
                               host_key=self.state.host_key)
@@ -309,17 +350,22 @@ class Installer:
                 await self._packages(remote, pre)
                 package = await self._download(remote, pre, layout)
                 await self._unpack(remote, package, layout)
-                await self._configure(remote, layout)
-                await self._identity(remote, layout)
+                if req.update and known is not None:
+                    self.state.body_id = known.body_id
+                else:
+                    await self._configure(remote, layout)
+                    await self._identity(remote, layout)
                 await self._service(remote, layout, home)
-                await self._health(remote)
+                await self._guardian(remote, layout)
+                await self._health(remote, layout)
         except RemoteError as exc:
             raise InstallError("connect", str(exc)) from exc
         record = ServerRecord(
             id=self.state.server_id, name=req.name or (known.name if known else req.host), host=req.host, port=req.port, user=req.user,
             host_key=self.state.host_key, host_key_fingerprint=self.state.host_key_fingerprint,
             body_id=self.state.body_id, arch=pre.package_arch, system=pre.system, version=self.state.version,
-            mode=req.mode, install_dir=layout.install_dir, data_dir=layout.data_dir,
+            mode=known.mode if req.update and known is not None else req.mode,
+            install_dir=layout.install_dir, data_dir=layout.data_dir,
             user_service=layout.user_service, port_remote=SERVER_PORT,
         )
         self.store.save(record)
@@ -412,7 +458,10 @@ class Installer:
     async def _unpack(self, remote: SSHRemote, package: str, layout: Layout) -> None:
         self._step("unpack", self.state.version)
         version = self.state.version
-        release = f"{layout.install_dir}/releases/{version}"
+        # Its own folder per install (the version alone would overwrite the release running now,
+        # and leave nothing to go back to).
+        release = f"{layout.install_dir}/releases/{version}-{time.strftime('%Y%m%d-%H%M%S')}"
+        self.state.release = release
         staging = f"{layout.install_dir}/releases/.staging"
         script = f"""set -e
 rm -rf {staging} && mkdir -p {staging}
@@ -422,6 +471,12 @@ test -x "$root/LocalAIAgent" || chmod +x "$root/LocalAIAgent"
 rm -rf {release} && mv "$root" {release} && rm -rf {staging}
 chmod +x {release}/LocalAIAgent {release}/bin/altair 2>/dev/null || true
 printf %s {shlex.quote(version)} > {release}/VERSION
+# The guardian keeps the new release only if it answers in time; otherwise back to this one.
+mkdir -p {layout.data_dir}/guardian
+prev=$(readlink -f {layout.install_dir}/current 2>/dev/null || true)
+if [ -n "$prev" ] && [ -d "$prev" ] && [ "$prev" != {release} ]; then
+  printf '{{"previous": "%s", "new": "%s", "deadline": %s}}' "$prev" {release} $(( $(date +%s) + {UPDATE_DEADLINE_S} )) > {layout.data_dir}/guardian/pending-update.json
+fi
 ln -sfn {release} {layout.install_dir}/current
 """
         await self._must(remote, script, "unpack", root=True)
@@ -490,14 +545,37 @@ ln -sfn {release} {layout.install_dir}/current
         await self._must(remote, f"{ctl} daemon-reload && {ctl} enable altair >/dev/null 2>&1 && {ctl} restart altair",
                          "service", root=not layout.user_service)
 
-    async def _health(self, remote: SSHRemote, seconds: int = 120) -> None:
+    async def _guardian(self, remote: SSHRemote, layout: Layout) -> None:
+        """The guardian next to the agent: its own service, run by the system's python3."""
+        source = await asyncio.to_thread(guardian_source)
+        script = f"{layout.install_dir}/guardian.py"
+        await self._must(remote, f"cat > {shlex.quote(script)} && chmod 755 {shlex.quote(script)}", "service",
+                         root=not layout.user_service, stdin=source)
+        unit = guardian_unit_text(layout)
+        await self._must(remote, f"cat > {shlex.quote(layout.guardian_unit_path)}", "service",
+                         root=not layout.user_service, stdin=unit)
+        ctl = "systemctl --user" if layout.user_service else "systemctl"
+        await self._must(remote, f"{ctl} daemon-reload && {ctl} enable altair-guardian >/dev/null 2>&1 && "
+                                 f"{ctl} restart altair-guardian", "service", root=not layout.user_service)
+
+    async def _health(self, remote: SSHRemote, layout: Layout | None = None, seconds: int = 120) -> None:
         self._step("health")
         script = (f"for i in $(seq 1 {seconds // 2}); do curl -fsS -m 3 http://127.0.0.1:{SERVER_PORT}/api/health "
                   "&& exit 0; sleep 2; done; exit 1")
         result = await remote.run(script, timeout=seconds + 30)
         if not result.ok:
             logs = await remote.run("journalctl -u altair -n 25 --no-pager 2>/dev/null | tail -25", root=True)
-            raise InstallError("health", "the agent did not start on the server:\n" + (logs.out or logs.err)[-1500:])
+            detail = (logs.out or logs.err)[-1500:]
+            if layout is not None:
+                # Do not leave the server with an agent that does not start: back to the release
+                # that worked, now (the guardian would do it at its deadline anyway).
+                back = await remote.run(f"APP_PATH={shlex.quote(layout.data_dir)} python3 "
+                                        f"{shlex.quote(layout.install_dir)}/guardian.py rollback "
+                                        "'the install health check failed'", root=not layout.user_service)
+                if back.ok:
+                    raise InstallError("health", "the new version did not start, so the server went back to the "
+                                                 "one it ran before (it keeps working):\n" + detail)
+            raise InstallError("health", "the agent did not start on the server:\n" + detail)
 
     async def _must(self, remote: SSHRemote, command: str, step: str, *, root: bool = False,
                     stdin: str | None = None) -> str:
@@ -540,7 +618,9 @@ async def uninstall(settings: Settings, record: ServerRecord, *, keep_data: bool
         pre = await run_preflight(remote)
         remote.sudo = {"root": "", "nopass": "sudo -n"}.get(pre.sudo, remote.sudo)
         report("service", "stop", 0.2)
-        await remote.run(f"{ctl} disable --now altair 2>/dev/null; rm -f {unit}; {ctl} daemon-reload",
+        guardian_unit = unit.replace("altair.service", "altair-guardian.service")
+        await remote.run(f"{ctl} disable --now altair-guardian 2>/dev/null; rm -f {guardian_unit}; "
+                         f"{ctl} disable --now altair 2>/dev/null; rm -f {unit}; {ctl} daemon-reload",
                          root=not record.user_service)
         report("files", "remove", 0.5)
         await remote.run(f"rm -rf {shlex.quote(record.install_dir)} {shlex.quote(data) if data else ''}; "

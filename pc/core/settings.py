@@ -59,7 +59,7 @@ def _env_files() -> list[str]:
         candidates.append(Path(sys.executable).parent / ".env")
     return [str(path) for path in candidates]
 
-ApprovalMode = Literal["manual", "accept_edits", "plan", "allowlist", "bypass"]
+ApprovalMode = Literal["manual", "accept_edits", "autopilot", "plan", "allowlist", "bypass"]
 
 
 _TOKEN_SUFFIX = {"k": 1e3, "к": 1e3, "тыс": 1e3, "m": 1e6, "м": 1e6, "млн": 1e6, "b": 1e9}

@@ -190,6 +190,9 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+server_agent_app: list = [None]
+
+
 @pytest.fixture()
 def server_agent():
     """A real HTTP server on 127.0.0.1 standing for the agent at the far end of the tunnel."""
@@ -213,6 +216,11 @@ def server_agent():
 
         return StreamingResponse(chunks(), media_type="text/plain", headers={"X-From": "server"})
 
+    @remote.post("/api/settings")
+    async def settings_post(payload: dict) -> dict:
+        remote.state.settings_posts = [*getattr(remote.state, "settings_posts", []), payload]
+        return {"ok": True}
+
     @remote.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -229,6 +237,7 @@ def server_agent():
     while not server.started:
         assert time.monotonic() < end and thread.is_alive()
         time.sleep(0.02)
+    server_agent_app[0] = remote
     yield port
     server.should_exit = True
     thread.join(timeout=10)
@@ -350,3 +359,23 @@ def test_a_read_is_tried_again_when_the_connection_breaks_under_it(pc_app, serve
 
         calls["n"] = 0                                         # a change is not sent twice
         assert client.post("/b/srv1/api/echo", json={"a": 1}).status_code == 502 and calls["n"] == 1
+
+
+def test_the_servers_mode_is_changed_there_at_once(pc_app, settings, server_agent):
+    """Settings → Servers → the mode chip: the server's own setting changes through its tunnel."""
+    from core.servers.registry import ServerStore
+
+    record = _record()
+    record.mode = "owner"
+    ServerStore(settings.data_dir).save(record)
+    with TestClient(pc_app) as client:
+        pc_app.state.tunnels = _Tunnels(_OnlineTunnel(record, server_agent))
+        r = client.post("/api/servers/srv1/mode", json={"mode": "autopilot"}).json()
+        assert r == {"ok": True, "mode": "autopilot"}
+        assert server_agent_app[0].state.settings_posts[-1] == {"approval_mode": "autopilot"}
+        assert ServerStore(settings.data_dir).get("srv1").mode == "autopilot"
+        client.post("/api/servers/srv1/mode", json={"mode": "careful"})
+        assert server_agent_app[0].state.settings_posts[-1] == {"approval_mode": "manual"}
+        assert client.post("/api/servers/srv1/mode", json={"mode": "god"}).status_code == 400
+        kinds = [x["kind"] for x in client.get("/api/journal?kind=server.").json()["records"]]
+        assert kinds[:2] == ["server.mode", "server.mode"]

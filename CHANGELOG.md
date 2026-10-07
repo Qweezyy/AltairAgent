@@ -15,6 +15,21 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **A server that looks after itself.** Next to the agent runs a small guardian of its own (plain
+  `python3`, so a broken update cannot break it). An update is kept only if the new version answers;
+  otherwise the guardian switches the server back to the version before and restarts it — checked live
+  with a release that did not start. It also restarts an agent that hangs and frees disk when it runs
+  low (caches, old logs and releases, never your data). Settings → Servers → **Update** (or
+  `altair server update NAME`) installs the latest signed release and keeps the server's own
+  settings, memory and keys.
+- **Changes that cannot lock you out.** `safe_system_change` changes sshd, the firewall, the network
+  or sudoers with the undo armed first and keeps the change only if a new SSH login from the PC still
+  works; a change that cut the way in undoes itself within a couple of minutes.
+- **The "Autopilot" mode.** Commands and edits run by themselves; changing the machine itself —
+  packages, services, users, network, /etc, reboots, disks — asks first. A server's mode can now be
+  changed from its card (or `altair server mode NAME autopilot`).
+- **`self_check`.** The agent looks at itself — its services, the guardian, disk and memory, recent
+  failures and log errors — and names the problems it finds.
 - **One agent, several machines: it decides where to work.** In an ordinary chat on this PC the agent
   runs commands, edits files, searches, uses git, tests and dev servers on a server when that fits
   better — the tools take a `body` ("test-vps", or "test-vps:/srv/app" for a folder there, remembered

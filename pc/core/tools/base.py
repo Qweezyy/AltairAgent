@@ -37,6 +37,7 @@ from core.logging_setup import get_logger
 from core.security.approval import ApprovalRequest, Approver, always_allow
 from core.security.permissions import block_reason, decide, needs_classifier
 from core.security.risk import assess, collect_text, rank
+from core.security.system_change import system_change
 from core.settings import Settings, get_settings
 
 logger = get_logger("tools")
@@ -280,7 +281,7 @@ class Tool(ABC):
             # спрашиваем пользователя, даже если режим «Авто» разрешил бы само.
             injection_guard = (
                 verdict == "allow"
-                and needs_classifier(ctx.settings.approval_mode)
+                and (needs_classifier(ctx.settings.approval_mode) or ctx.settings.approval_mode == "autopilot")
                 and self.category in ("execute", "network")
                 and bool(ctx.scratch.get("injection_flags"))
             )
@@ -312,6 +313,11 @@ class Tool(ABC):
                 and rank(risk.tier) >= rank("high")
                 and ctx.settings.approval_mode != "bypass"
             ):
+                verdict = "ask"
+
+            # "Autopilot": everything goes, except reconfiguring the machine itself.
+            system_why = system_change(scan) if ctx.settings.approval_mode == "autopilot" and scan else ""
+            if verdict == "allow" and system_why:
                 verdict = "ask"
 
             if verdict == "block":

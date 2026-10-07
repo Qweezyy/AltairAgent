@@ -97,6 +97,8 @@ def build() -> Path:
         "--add-data", f"{ROOT / 'static'}{SEP}static",
         "--add-data", f"{ROOT / 'skills'}{SEP}skills",
         "--add-data", f"{ROOT / '.env.example'}{SEP}.",
+        # The server guardian runs as a plain script with the server's own python3 (not frozen).
+        "--add-data", f"{ROOT / 'core' / 'servers' / 'guardian.py'}{SEP}core/servers",
         # Единая версия продукта: core/version.py читает VERSION из корня репо.
         "--add-data", f"{ROOT.parent / 'VERSION'}{SEP}.",
         # Fast search: bundled tgrep/ripgrep (open source, MIT), found in vendor/bin with

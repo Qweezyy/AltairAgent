@@ -232,6 +232,10 @@ CATALOG: dict[str, dict[str, str]] = {
     "api.no_access": {"en": "No access to '{path}': {error}", "ru": "Нет доступа к '{path}': {error}"},
     "move.copy_failed": {"en": "The chat was not moved: copying its folder failed ({why}).",
                          "ru": "Чат не перенесён: не удалось скопировать его папку ({why})."},
+    "appr.system_change": {"en": "System change: {title}. Commands: {commands}. It is undone by itself unless a new "
+                                  "login works within {seconds} s.",
+                           "ru": "Изменение системы: {title}. Команды: {commands}. Само откатится, если новый вход "
+                                 "не получится за {seconds} с."},
     "appr.on_body": {"en": "On the body: {body}.", "ru": "На теле: {body}."},
     "appr.mcp": {"en": "Call the external MCP tool '{tool}' of the server '{server}'.",
                  "ru": "Вызов внешнего MCP-инструмента «{tool}» сервера «{server}»."},

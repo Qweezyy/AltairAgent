@@ -109,6 +109,8 @@ from core.tools.builtin.plan import UpdatePlanTool
 from core.tools.builtin.python_exec import RunPythonTool
 from core.tools.builtin.quality_tools import RunLintTool, RunTestsTool
 from core.tools.builtin.bodies_tools import BodiesTool
+from core.tools.builtin.self_check_tools import SelfCheckTool
+from core.tools.builtin.system_change_tools import SafeSystemChangeTool
 from core.tools.builtin.reminder_tools import (
     CancelReminderTool,
     ListRemindersTool,
@@ -147,6 +149,10 @@ def builtin_tools() -> list[Tool]:
         ToolSearchTool(),
         # the machines this agent works on (this PC, the servers)
         BodiesTool(),
+        # sshd / firewall / network changes on a server, undone by the guardian unless confirmed
+        SafeSystemChangeTool(),
+        # the agent looks at itself: services, guardian, disk, recent failures
+        SelfCheckTool(),
         # диалог с пользователем
         AskTool(),
         RequestSecretTool(),

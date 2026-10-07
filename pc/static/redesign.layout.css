@@ -1523,3 +1523,7 @@ html.body-lost .chat-col, html.body-lost .work { filter: saturate(.6); }
 .srv-labels-in { font-size: var(--fs-xs); padding-top: 6px; padding-bottom: 6px; }
 .tr-body { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: 6px; padding: 0 6px; border-radius: var(--r-full); background: var(--accent-soft); color: var(--accent); font-size: 10px; line-height: 16px; }
 .tr-body .icon { width: 10px; height: 10px; }
+.srv-steps li.is-skip { display: none; }
+button.srv-chip { display: inline-flex; align-items: center; gap: 2px; border: 0; cursor: pointer; font: inherit; font-size: var(--fs-xs); transition: filter var(--dur-1) var(--ease); }
+button.srv-chip:hover { filter: brightness(1.15); }
+button.srv-chip .icon { width: 12px; height: 12px; }

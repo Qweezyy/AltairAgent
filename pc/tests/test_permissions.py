@@ -211,11 +211,13 @@ def test_tool_context_defaults(settings):
 
 
 def test_auto_is_first_in_catalog():
-    """Порядок как в Claude Code: Авто, Ручной, Правки, План, Без подтверждений."""
+    """The order as in Claude Code: Auto, Manual, Edits; then Autopilot (0.3.0: everything but
+    reconfiguring the machine), Plan, No confirmations."""
     assert [item["id"] for item in mode_catalog()] == [
         "auto",
         "manual",
         "accept_edits",
+        "autopilot",
         "plan",
         "bypass",
     ]

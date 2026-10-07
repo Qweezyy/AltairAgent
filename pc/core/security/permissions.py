@@ -61,6 +61,14 @@ MODES: dict[str, dict[str, object]] = {
         "allow": {"read", "edit"},
         "block": set(),
     },
+    # A server where something else runs (0.3.0): the agent works by itself, but asks before it
+    # reconfigures the machine — packages, services, users, network, /etc (system_change.py).
+    "autopilot": {
+        "title": "Автопилот",
+        "hint": "Команды и правки — сам, изменения системы (пакеты, службы, сеть, /etc) — спрашивает",
+        "allow": {"read", "edit", "execute", "network"},
+        "block": set(),
+    },
     "plan": {
         "title": "Планирование",
         "hint": "Только изучает проект, ничего не меняет",

@@ -2836,16 +2836,35 @@ async function renderServersSection(main) {
       const card = el(`<div class="prov-card srv-card">
         <div class="row"><span class="srv-dot" data-live="${on ? "on" : b.state === "offline" || !b.state ? "off" : "wait"}" data-tip="${escAttr(stateText)}"></span><div class="grow" style="min-width:0"><div class="sr-title truncate">${esc(s.name || s.host)}</div>
           <div class="sr-desc mono truncate">${esc(`${s.user}@${s.host}:${s.port}`)}</div></div>
-          <span class="srv-chip">${esc(T(`srv.mode.${s.mode}`))}</span></div>
+          <button class="srv-chip" type="button" data-mode data-tip="${escAttr(T("srv.modeChange"))}">${esc(T(`srv.mode.${s.mode}`))}${iconSvg("chevron-down", "icon icon-sm")}</button></div>
         <div class="srv-facts"><span>${esc(s.system || "")}</span><span>${esc(s.arch || "")}</span><span>Altair ${esc(s.version || "")}</span></div>
         <div class="srv-state dim">${esc(stateText)}</div>
         ${loadHtml}
         <div class="srv-labels"><input class="field srv-labels-in" data-labels placeholder="${escAttr(T("srv.labelsPh"))}" value="${escAttr((b.labels || []).join(", "))}" maxlength="200" /></div>
         <div class="srv-fp mono" data-tip="${escAttr(T("srv.fpTip"))}">${iconSvg("shield", "icon icon-sm")} ${esc(s.host_key_fingerprint || "")}</div>
-        <div class="row srv-actions">${on ? `<button class="btn btn-primary btn-sm" data-open>${esc(T("srv.open"))}</button>` : `<button class="btn btn-outline btn-sm" data-reconnect>${esc(T("srv.reconnect"))}</button>`}<label class="cap-check"><input type="checkbox" data-keep /> ${esc(T("srv.keepData"))}</label><span class="grow"></span>
+        <div class="row srv-actions">${on ? `<button class="btn btn-primary btn-sm" data-open>${esc(T("srv.open"))}</button><button class="btn btn-outline btn-sm" data-update data-tip="${escAttr(T("srv.updateTip"))}">${esc(T("srv.update"))}</button>` : `<button class="btn btn-outline btn-sm" data-reconnect>${esc(T("srv.reconnect"))}</button>`}<label class="cap-check"><input type="checkbox" data-keep /> ${esc(T("srv.keepData"))}</label><span class="grow"></span>
           <button class="btn btn-outline btn-sm" data-remove>${iconSvg("trash", "icon icon-sm")} ${esc(T("srv.remove"))}</button></div>
       </div>`);
       $("[data-open]", card)?.addEventListener("click", () => window.AltairBody.open(s.id));
+      $("[data-mode]", card).addEventListener("click", (e) => openMenu(e.currentTarget, SRV_MODES.map((m) => ({
+        text: T(`srv.mode.${m}`), chosen: m === s.mode,
+        onClick: async () => {
+          if (m === s.mode) return;
+          let r;
+          try { r = await (await fetch(`/api/servers/${encodeURIComponent(s.id)}/mode`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: m }) })).json(); }
+          catch { r = { ok: false }; }
+          if (r.ok) { toast(T("srv.modeChanged", { mode: T(`srv.mode.${m}`) })); drawList(); } else toast(r.error || r.detail || T("t.error"), "error");
+        },
+      })), false));
+      $("[data-update]", card)?.addEventListener("click", async (e) => {
+        e.currentTarget.disabled = true;
+        let r;
+        try { r = await (await fetch(`/api/servers/${encodeURIComponent(s.id)}/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); }
+        catch { r = { ok: false }; }
+        if (!r.ok) { toast(r.error || T("t.error"), "error"); e.currentTarget.disabled = false; return; }
+        const box = $("#srv-form", main); box.hidden = false;
+        followInstall(box, r.job, drawList, () => { box.innerHTML = ""; box.hidden = true; }, "srv.updating");
+      });
       $("[data-reconnect]", card)?.addEventListener("click", async (e) => { e.currentTarget.disabled = true; try { await fetch(`/api/bodies/${encodeURIComponent(s.id)}/reconnect`, { method: "POST" }); } catch {} setTimeout(drawList, 2500); });
       $("[data-labels]", card).addEventListener("change", async (e) => {
         const labels = e.target.value.split(",").map((x) => x.trim()).filter(Boolean);
@@ -2927,8 +2946,8 @@ function drawReport(report, p, L, box, onInstalled, close) {
     followInstall(box, r.job, onInstalled, close);
   });
 }
-function followInstall(box, jobId, onInstalled, close) {
-  box.innerHTML = `<div class="prov-card srv-progress"><div class="sr-title">${esc(T("srv.installing"))}</div><div class="srv-bar"><i style="width:0"></i></div><ol class="srv-steps">${SRV_STEPS.map((s) => `<li data-step="${s}"><span class="srv-step-ico"></span>${esc(T(`srv.step.${s}`))}<span class="srv-step-detail dim"></span></li>`).join("")}</ol><div data-end></div></div>`;
+function followInstall(box, jobId, onInstalled, close, titleKey = "srv.installing") {
+  box.innerHTML = `<div class="prov-card srv-progress"><div class="sr-title">${esc(T(titleKey))}</div><div class="srv-bar"><i style="width:0"></i></div><ol class="srv-steps">${SRV_STEPS.map((s) => `<li data-step="${s}"><span class="srv-step-ico"></span>${esc(T(`srv.step.${s}`))}<span class="srv-step-detail dim"></span></li>`).join("")}</ol><div data-end></div></div>`;
   const bar = $(".srv-bar i", box);
   const tick = async () => {
     let j;
@@ -2937,7 +2956,9 @@ function followInstall(box, jobId, onInstalled, close) {
     SRV_STEPS.forEach((s, i) => {
       const li = $(`[data-step="${s}"]`, box);
       const failed = j.state === "error" && s === (j.failed_step || j.step);
-      li.className = failed ? "is-failed" : (j.state === "done" || i < at || (i === at && j.state !== "running")) ? "is-done" : i === at ? "is-now" : "";
+      // An update skips some steps (settings, keys): they are not shown as done, they are hidden.
+      const reached = (j.steps || []).includes(s);
+      li.className = failed ? "is-failed" : !reached && (j.state === "done" || i < at) ? "is-skip" : (j.state === "done" || i < at || (i === at && j.state !== "running")) ? "is-done" : i === at ? "is-now" : "";
       if (i === at && j.detail) $(".srv-step-detail", li).textContent = j.detail;
     });
     bar.style.width = `${j.state === "done" ? 100 : Math.round(Math.max(0, at) / SRV_STEPS.length * 100 + (j.pct || 0) * 100 / SRV_STEPS.length)}%`;

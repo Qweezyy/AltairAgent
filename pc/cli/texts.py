@@ -125,6 +125,8 @@ TEXTS: dict[str, dict[str, str]] = {
     "srv.step.identity": {"en": "Exchanging body keys", "ru": "Обмен ключами тел"},
     "srv.step.service": {"en": "Starting the service", "ru": "Запуск службы"},
     "srv.step.health": {"en": "Checking that it answers", "ru": "Проверяю, что отвечает"},
+    "srv.updated": {"en": "Done: {name} runs Altair {version} now.", "ru": "Готово: на {name} теперь Altair {version}."},
+    "srv.mode_now": {"en": "{name} is in the “{mode}” mode now.", "ru": "{name} теперь в режиме «{mode}»."},
     "srv.done": {"en": "Done: {name} is a body of Altair now.", "ru": "Готово: {name} теперь тело Altair."},
     "srv.failed": {"en": "Stopped at “{step}”. Once the cause is fixed, running it again is safe.", "ru": "Остановился на шаге «{step}». Когда причина устранена, запускать заново безопасно."},
     "srv.not_found": {"en": "No server matches '{query}'.", "ru": "Нет сервера по запросу «{query}»."},

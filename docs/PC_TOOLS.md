@@ -4,7 +4,7 @@ Catalog of every built-in tool the PC agent exposes to the model. Generated from
 the code (`core/tools/builtin/*`), not from memory. Keep it in sync — see the
 update rule at the bottom.
 
-- **Total: 119 tools** · last updated: 2026-10-07
+- **Total: 121 tools** · last updated: 2026-10-07
 - **Category** — how approval is gated: `read` (auto), `edit` / `execute` /
   `network` (may ask in manual mode). `⚠` marks a tool flagged `dangerous`
   (state-changing, asks by default).
@@ -224,6 +224,8 @@ stricter of the chat's mode and the server's mode.
 | Tool | Cat | Description | Source |
 |------|-----|-------------|--------|
 | `bodies` | read | This PC and the servers: what each has (CPU, RAM, GPU, Docker), state and load now; `action=pick` ranks them for a task (GPU/Docker/memory/arch, where the data is, long work, load, labels). | bodies_tools |
+| `safe_system_change` | execute ⚠ | Change sshd / firewall / network / sudoers on a Linux server with the undo armed in the guardian first; kept only if a new SSH login from the PC works afterwards, otherwise undone by itself (`confirm_within`, 60–600 s). Always asks, except in "No confirmations". | system_change_tools |
+| `self_check` | read | The agent looks at itself: version, its services and guardian (server), pending update or system change, disk and memory, recent Journal failures, log errors — ends with the problems found. | self_check_tools |
 
 ## Phone bridge
 
