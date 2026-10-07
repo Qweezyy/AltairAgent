@@ -77,3 +77,45 @@ async def test_fallback_primary_ok_skips_backup():
     turn = await llm.complete([{"role": "user", "content": "hi"}])
     assert turn.content == "ok:primary"
     assert "backup" not in built  # запасную даже не создаём, если основная ответила
+
+
+async def test_a_providers_bad_period_is_one_interval_in_the_journal(monkeypatch, settings):
+    """A reviewer's point: the breaker opening and closing are events (model, provider, why, for
+    how long), so a bad period reads as one interval, not a scatter of slow attempts."""
+    import core.settings as settings_module
+    from core.journal import get_journal
+    from core.llm import reliability
+
+    reliability.reset_state()
+    monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
+    down = {"primary": True}
+
+    class Flaky(_Stub):
+        async def complete(self, messages, **kwargs):  # type: ignore[override]
+            self._boom = self.model == "primary" and down["primary"]
+            return await super().complete(messages, **kwargs)
+
+    def build(**kw):
+        return Flaky(kw["model"])
+
+    llm = FallbackLLM([{"model": "primary", "base_url": "https://a"}, {"model": "backup", "base_url": "https://b"}],
+                      build)
+    assert (await llm.complete([{"role": "user", "content": "1"}])).content == "ok:backup"
+    assert (await llm.complete([{"role": "user", "content": "2"}])).content == "ok:backup"   # held back: no 2nd open
+    journal = get_journal(settings.data_dir / "journal")
+    opened = [r for r in journal.read(limit=20) if r["kind"].startswith("llm.breaker")]
+    assert [r["kind"] for r in opened] == ["llm.breaker_open"]
+    assert opened[0]["data"]["model"] == "primary" and "не отвечает" in opened[0]["data"]["reason"]
+
+    # Its time runs out: the next request closes it, once, with how long it lasted.
+    key = llm._key(0)
+    reliability.health(key).sick_until = 0
+    reliability.health(key).opened_at -= 600
+    down["primary"] = False
+    assert (await llm.complete([{"role": "user", "content": "3"}])).content == "ok:primary"
+    await llm.complete([{"role": "user", "content": "4"}])
+    kinds = [r["kind"] for r in journal.read(limit=20) if r["kind"].startswith("llm.breaker")]
+    assert kinds == ["llm.breaker_closed", "llm.breaker_open"]
+    closed = journal.read(limit=20, kinds=["llm.breaker_closed"])[0]["data"]
+    assert closed["model"] == "primary" and closed["after_minutes"] >= 10
+    reliability.reset_state()

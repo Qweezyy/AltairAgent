@@ -446,8 +446,8 @@ class OpenAICompatClient(LLMClient):
         if verdict:
             # The protocol's own ending next to our verdict: a gateway that marks its error as a
             # clean "stop" and one that does not call for different fixes.
-            logger.warning("%s: not a real answer (%s, finish_reason=%s, prompt_tokens=%s), %d chars: %r",
-                           self.model, verdict, turn.finish_reason or "-",
+            logger.warning("%s: not a real answer (%s, detector=%s, finish_reason=%s, prompt_tokens=%s), %d chars: %r",
+                           self.model, verdict, reliability.DETECTOR_VERSION, turn.finish_reason or "-",
                            (turn.usage or {}).get("prompt_tokens", "-"), len(turn.content), turn.content[:120])
             raise BadTurn(verdict)
         await flush()

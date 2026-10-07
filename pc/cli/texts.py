@@ -89,6 +89,8 @@ TEXTS: dict[str, dict[str, str]] = {
     "open_hint": {"en": "(ctrl+click or /open)", "ru": "(ctrl+клик или /open)"},
     "ck.passed": {"en": "checks passed", "ru": "проверки прошли"},
     "ck.failed": {"en": "checks failed", "ru": "проверки не прошли"},
+    "ck.changed_after": {"en": "unknown (files changed after the checks)",
+                         "ru": "неизвестно (файлы изменились после проверок)"},
     "ck.not_run": {"en": "not verified (the check could not start)",
                    "ru": "не проверено (проверка не запустилась)"},
     "jr.title": {"en": "Journal", "ru": "Журнал"},

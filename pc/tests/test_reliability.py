@@ -470,3 +470,14 @@ async def test_read_file_numbers_lines_compactly(settings):
     tool = ReadFileTool()
     out = await tool.run(tool.Args(path="a.py"), ToolContext(settings=settings))
     assert "1|x = 1" in out and "2|y = 2" in out and " | " not in out
+
+
+def test_a_rejection_names_the_detector_version():
+    """Decisions are comparable only by version: the rejection says which rules made it."""
+    from pathlib import Path
+
+    from core.llm import reliability
+
+    assert reliability.DETECTOR_VERSION
+    client = (Path(reliability.__file__).parent / "openai_client.py").read_text(encoding="utf-8")
+    assert "detector=%s" in client and "reliability.DETECTOR_VERSION" in client

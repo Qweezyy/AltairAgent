@@ -9,6 +9,7 @@ the tests fail went through the gate, and a check that could not even be started
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -75,6 +76,11 @@ def _finished(emitter: EventCollector) -> RunFinished:
     return [e for e in emitter.events if isinstance(e, RunFinished)][-1]
 
 
+def _verdict(emitter: EventCollector) -> dict:
+    """The run's checks without the tree fingerprints (they are checked on their own)."""
+    return {k: v for k, v in _finished(emitter).checks.items() if not k.startswith("tree_")}
+
+
 async def test_a_wrapper_lying_with_its_exit_code_sends_the_agent_back(settings, monkeypatch):
     """The real gate runs a 'test command' that prints a failure and exits with 0."""
     lying = Command(kind="tests", tool="pytest", description="pytest || true",
@@ -92,7 +98,7 @@ async def test_a_wrapper_lying_with_its_exit_code_sends_the_agent_back(settings,
     assert result.text == "The tests still fail; I could not fix them."
     notes = " ".join(str(m.get("content")) for m in runner.session.messages)
     assert "The exit code was 0, but the output says" in notes
-    assert _finished(emitter).checks == {"executed": True, "passed": False, "acceptance": "unknown", "attempted": True}
+    assert _verdict(emitter) == {"executed": True, "passed": False, "acceptance": "unknown", "attempted": True}
 
 
 async def test_a_check_that_could_not_start_is_unknown_not_absent(settings, monkeypatch):
@@ -111,7 +117,7 @@ async def test_a_check_that_could_not_start_is_unknown_not_absent(settings, monk
     assert result.text == "Changed it, but I could not run the tests: unverified."
     notes = " ".join(str(m.get("content")) for m in runner.session.messages)
     assert "could not be started" in notes and "UNKNOWN" in notes
-    assert _finished(emitter).checks == {"executed": False, "passed": None, "acceptance": "unknown", "attempted": True}
+    assert _verdict(emitter) == {"executed": False, "passed": None, "acceptance": "unknown", "attempted": True}
 
 
 async def test_passing_checks_still_leave_acceptance_unknown(settings, monkeypatch):
@@ -126,7 +132,7 @@ async def test_passing_checks_still_leave_acceptance_unknown(settings, monkeypat
     result = await runner.run("fix it")
     assert result.ok and result.text == "Done."
     # Green tests are not acceptance: nothing checked the requested behaviour itself yet.
-    assert _finished(emitter).checks == {"executed": True, "passed": True, "acceptance": "unknown", "attempted": True}
+    assert _verdict(emitter) == {"executed": True, "passed": True, "acceptance": "unknown", "attempted": True}
 
 
 async def test_a_project_without_tests_says_nothing_ran(settings, monkeypatch):
@@ -138,7 +144,7 @@ async def test_a_project_without_tests_says_nothing_ran(settings, monkeypatch):
         AssistantTurn(content="Done."),
     ], s, emitter)
     await runner.run("fix it")
-    assert _finished(emitter).checks == {"executed": False, "passed": None, "acceptance": "unknown", "attempted": True}
+    assert _verdict(emitter) == {"executed": False, "passed": None, "acceptance": "unknown", "attempted": True}
 
 
 # ------------------------------------------------------------------ what the user sees
@@ -174,3 +180,81 @@ def test_the_window_has_the_chip_in_both_languages():
         assert i18n.count(f'"{key}"') == 2, key
     js = (static / "redesign.js").read_text(encoding="utf-8")
     assert "checksChip(m.checks)" in js and "checks: e.checks" in js   # live answers and the history
+
+
+
+async def test_files_changed_after_the_checks_make_the_verdict_unknown(settings, monkeypatch):
+    """A reviewer's fixture: the tree changed after the checks ran. What they said is not about
+    what is delivered, so the verdict is "unknown", never "passed"."""
+    import core.agent.runner as runner_module
+    from core.quality.tree import tree_fingerprint
+
+    honest = Command(kind="tests", tool="pytest", description="pytest",
+                     argv=[sys.executable, "-c", "print('5 passed in 0.10s')"])
+    monkeypatch.setattr(quality, "detect_test_commands", lambda base: [honest])
+    calls = {"n": 0}
+
+    def fingerprint_then_change(root):
+        calls["n"] += 1
+        if calls["n"] == 2:                      # at the verdict: something touched the tree meanwhile
+            (Path(root) / "late_edit.py").write_text("x = 1\n", encoding="utf-8")
+        return tree_fingerprint(root)
+
+    monkeypatch.setattr(runner_module, "tree_fingerprint", fingerprint_then_change)
+    emitter = EventCollector()
+    runner = _runner([AssistantTurn(tool_calls=[tool_call("write_file", value="x")]),
+                      AssistantTurn(content="Done.")], settings, emitter)
+    await runner.run("fix it")
+    checks = _finished(emitter).checks
+    assert checks["executed"] is True and checks["passed"] is None and checks["changed_after_checks"] is True
+    assert checks["tree_at_checks"] != checks["tree_at_verdict"]
+
+
+async def test_an_untouched_tree_keeps_the_passed_verdict_with_its_fingerprint(settings, monkeypatch):
+    honest = Command(kind="tests", tool="pytest", description="pytest",
+                     argv=[sys.executable, "-c", "print('5 passed in 0.10s')"])
+    monkeypatch.setattr(quality, "detect_test_commands", lambda base: [honest])
+    emitter = EventCollector()
+    runner = _runner([AssistantTurn(tool_calls=[tool_call("write_file", value="x")]),
+                      AssistantTurn(content="Done.")], settings, emitter)
+    await runner.run("fix it")
+    checks = _finished(emitter).checks
+    assert checks["passed"] is True and "changed_after_checks" not in checks
+    assert checks["tree_at_checks"] == checks["tree_at_verdict"] and len(checks["tree_at_checks"]) == 16
+
+
+def test_the_fingerprint_sees_edits_and_ignores_caches(tmp_path):
+    import os
+
+    from core.quality.tree import tree_fingerprint
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("a = 1\n", encoding="utf-8")
+    first = tree_fingerprint(tmp_path)
+    for cache in ("__pycache__", ".pytest_cache", "node_modules", ".git"):
+        (tmp_path / cache).mkdir()
+        (tmp_path / cache / "x").write_text("x", encoding="utf-8")
+    (tmp_path / ".coverage").write_text("c", encoding="utf-8")
+    assert tree_fingerprint(tmp_path) == first                  # the checks' own leftovers
+    (tmp_path / "src" / "a.py").write_text("a = 2\n", encoding="utf-8")
+    assert tree_fingerprint(tmp_path) != first                  # an edit
+    stamp = os.stat(tmp_path / "src" / "a.py")
+    os.utime(tmp_path / "src" / "a.py", ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 10**9))
+    assert tree_fingerprint(tmp_path) != first                  # same size, touched later
+
+
+def test_the_terminal_and_the_window_say_unknown_after_a_late_change():
+    import io
+
+    from rich.console import Console
+
+    from cli.render import Renderer
+    from cli.texts import Texts
+
+    buf = io.StringIO()
+    r = Renderer(Texts("en"), Console(file=buf, force_terminal=True, color_system=None, width=120))
+    r.event({"type": "run.finished", "run_id": "r", "steps": 2, "duration_ms": 900,
+             "checks": {"attempted": True, "executed": True, "passed": None, "changed_after_checks": True}})
+    assert "files changed after the checks" in buf.getvalue()
+    static = Path(__file__).resolve().parents[1] / "static"
+    assert (static / "i18n.js").read_text(encoding="utf-8").count('"ck.changedAfter"') == 2

@@ -55,11 +55,33 @@ class FallbackLLM(LLMClient):
         healthy = [i for i in indexes if not reliability.health(self._key(i)).sick]
         return healthy + [i for i in indexes if i not in healthy]
 
+    async def _breaker(self, kind: str, index: int, **data: Any) -> None:
+        """A breaker opening or closing goes into the Journal: a provider's bad period shows as
+        one interval (opened, why, for how long; closed, after how long), not only a log line."""
+        from core.settings import get_settings
+
+        settings = get_settings()
+        logger.info("breaker %s: %s %s", kind, self._cands[index].get("model"), data)
+        if not getattr(settings, "journal", True):
+            return
+        from core.journal import get_journal
+
+        cand = self._cands[index]
+        try:
+            await asyncio.to_thread(get_journal(settings.data_dir / "journal").append, f"llm.breaker_{kind}",
+                                    model=str(cand.get("model") or ""), provider=self._key(index), **data)
+        except OSError as exc:
+            logger.warning("breaker event not journaled: %s", exc)
+
     async def complete(self, messages: list[dict[str, Any]], **kwargs: Any) -> AssistantTurn:
         from core.settings import get_settings
 
         settings = get_settings()
         last_exc: Exception | None = None
+        for index in range(len(self._cands)):
+            lasted = reliability.health(self._key(index)).closed_now()
+            if lasted:
+                await self._breaker("closed", index, after_minutes=round(lasted / 60, 1))
         order = self._order()
         for pos, index in enumerate(order):
             cand = self._cands[index]
@@ -80,7 +102,8 @@ class FallbackLLM(LLMClient):
                 raise
             except Exception as exc:  # noqa: BLE001 - модель не ответила → следующая
                 last_exc = exc
-                reliability.health(key).failed(settings.llm_breaker_minutes, str(exc)[:120])
+                if reliability.health(key).failed(settings.llm_breaker_minutes, str(exc)[:120]):
+                    await self._breaker("open", index, reason=str(exc)[:200], minutes=settings.llm_breaker_minutes)
                 nxt = self._cands[order[pos + 1]]["model"] if pos + 1 < len(order) else "—"
                 logger.warning("Модель %s не ответила (%s) → пробую %s", cand.get("model"), str(exc)[:120], nxt)
                 continue
@@ -89,6 +112,8 @@ class FallbackLLM(LLMClient):
                                                 settings.llm_breaker_minutes):
                 logger.warning("%s is slow (%s): the next steps go to a backup model for %.0f min",
                                cand.get("model"), reliability.health(key).reason, settings.llm_breaker_minutes)
+                await self._breaker("open", index, reason=reliability.health(key).reason,
+                                    minutes=settings.llm_breaker_minutes)
             if index > 0:
                 logger.info("Основная модель не ответила — использована запасная %s", self.model)
             return turn

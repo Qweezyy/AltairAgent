@@ -27,6 +27,7 @@ from core.agent.run_options import RunOptions
 from core.agent.run_state import RunStateStore
 from core.agent.session import NOTE, TOOL_MEDIA_MARK, Session, estimate_tokens
 from core.checkpoints import CheckpointStore
+from core.quality.tree import tree_fingerprint
 from core.cost import estimate_cost, load_pricing
 from core.errors import AgentError, LLMError
 from core.events import (
@@ -289,6 +290,9 @@ class AgentRunner:
                         ran, ok, report = await self._run_health_checks()
                         if ran:
                             self._checks.update(executed=True, passed=ok)
+                            # Which tree the checks spoke about: compared again at the verdict.
+                            self._checks["tree_at_checks"] = await asyncio.to_thread(
+                                tree_fingerprint, self.settings.workspace)
                         if not ran and not ok and not gate_unknown_noted:
                             # The check could not even be started: its result is unknown, which
                             # is not "there is nothing to check". The agent checks by hand or
@@ -805,6 +809,13 @@ class AgentRunner:
             final_text = tr("run.no_text")
             self.session.add_assistant_turn(AssistantTurn(content=final_text))
 
+        checks = getattr(self, "_checks", None)
+        if checks and checks.get("executed") and checks.get("tree_at_checks"):
+            # The folder changed after the checks: what they said is not about what is delivered.
+            now = await asyncio.to_thread(tree_fingerprint, self.settings.workspace)
+            checks["tree_at_verdict"] = now
+            if now != checks["tree_at_checks"]:
+                checks.update(passed=None, changed_after_checks=True)
         cost = estimate_cost(dict(usage), self.llm.model, pricing or {})
         duration = int((time.perf_counter() - started) * 1000)
         await self._emit(

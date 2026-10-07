@@ -26,6 +26,11 @@ from typing import Any
 
 from core.llm.base import AssistantTurn
 
+#: The version of judge_turn's rules. Bump it with every change to what counts as a fake answer:
+#: a logged rejection then says which rules made it, and a stand can replay old turns through the
+#: old and the new rules and compare (a reviewer's point: decisions are only comparable by version).
+DETECTOR_VERSION = "2026.10.2"
+
 #: Reasoning levels the app uses. "default" sends nothing (the provider decides).
 LEVELS = ("minimal", "low", "medium", "high")
 
@@ -201,18 +206,35 @@ class Health:
     def sick(self) -> bool:
         return time.time() < self.sick_until
 
-    def failed(self, minutes: float, reason: str) -> None:
+    #: When the breaker opened (0 = closed): a provider's bad period is one interval in the
+    #: Journal — opened, then closed with how long it lasted — not a scatter of slow attempts.
+    opened_at: float = 0.0
+
+    def failed(self, minutes: float, reason: str) -> bool:
+        """Holds the provider back for `minutes`. True when this opened the breaker (it was closed)."""
+        opened = not self.opened_at
+        if opened:
+            self.opened_at = time.time()
         self.sick_until = time.time() + minutes * 60
         self.reason = reason
         self.slow_streak = 0
+        return opened
+
+    def closed_now(self) -> float:
+        """The breaker's time ran out since the last look: how long it was open (seconds), once;
+        0 while it is still open or was not open."""
+        if self.opened_at and not self.sick:
+            lasted = time.time() - self.opened_at
+            self.opened_at = 0.0
+            return lasted
+        return 0.0
 
     def answered(self, first_byte_s: float, slow_after: float, minutes: float) -> bool:
         """Records an answer; True when the provider is now taken as sick for being slow."""
         if slow_after and first_byte_s > slow_after:
             self.slow_streak += 1
             if self.slow_streak >= 2:
-                self.failed(minutes, f"slow: first byte after {first_byte_s:.0f} s twice in a row")
-                return True
+                return self.failed(minutes, f"slow: first byte after {first_byte_s:.0f} s twice in a row")
             return False
         self.slow_streak = 0
         return False

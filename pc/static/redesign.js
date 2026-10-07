@@ -890,7 +890,7 @@ function addAnswerFooter(node, m, turn) {
 // acceptance step exists, and the tooltip says so.
 function checksChip(c) {
   if (!c || !c.attempted) return "";
-  const [cls, key] = !c.executed ? ["ck-unknown", "ck.notRun"] : c.passed ? ["ck-ok", "ck.passed"] : ["ck-bad", "ck.failed"];
+  const [cls, key] = !c.executed ? ["ck-unknown", "ck.notRun"] : c.changed_after_checks ? ["ck-unknown", "ck.changedAfter"] : c.passed ? ["ck-ok", "ck.passed"] : ["ck-bad", "ck.failed"];
   const tip = `${T(key + ".tip")} ${T("ck.acceptance")}`;
   return `<span class="checks-chip ${cls}" data-tip="${escAttr(tip)}">${esc(T(key))}</span>`;
 }

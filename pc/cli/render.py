@@ -313,6 +313,8 @@ class Renderer:
             return Text("")
         if not checks.get("executed"):
             return Text(" · " + self.t("ck.not_run"), style=theme.WARN)
+        if checks.get("changed_after_checks"):
+            return Text(" · " + self.t("ck.changed_after"), style=theme.WARN)
         if checks.get("passed"):
             return Text(" · " + self.t("ck.passed"), style=theme.OK)
         return Text(" · " + self.t("ck.failed"), style=theme.ERR)
