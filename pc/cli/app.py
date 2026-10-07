@@ -9,6 +9,7 @@
     altair --chats              list the chats
     altair --journal [N]        the last N records of the Journal (what the agent did)
     altair server …             the agent's servers: list, check HOST, add HOST, remove ID (cli/servers.py)
+    altair --body NAME          the same, on a server's agent (through its tunnel; /body switches)
 
 Exit codes: 0 done, 1 failed or stopped, 2 it needed a person (an approval or a question) and
 there was nobody to ask.
@@ -49,6 +50,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--journal", nargs="?", const=50, type=int, metavar="N",
                    help="print the last N records of the Journal (default 50) and exit")
     p.add_argument("--version", action="version", version=f"altair {__version__}")
+    p.add_argument("--body", metavar="NAME", help="work on a server's agent (by name, id or address; pc = this PC)")
     p.add_argument("--model", help="the model for this run")
     p.add_argument("--mode", choices=MODES, help="the chat's approval mode (kept by the chat)")
     p.add_argument("--cwd", "--workspace", dest="cwd", help="the folder of a new chat (default: the current one)")
@@ -492,6 +494,25 @@ async def amain(args: argparse.Namespace) -> int:
         return 1
     if args.output_format == "text" and joined and not args.print_mode:
         console.print(Text(texts("joined"), style="dim"))
+    if args.body:
+        from cli.bodies_view import list_bodies, live, resolve
+
+        try:
+            target = resolve(await list_bodies(backend.root), args.body)
+        except httpx.HTTPError as exc:
+            target, error = None, str(exc)
+        else:
+            error = ""
+        if target is None:
+            console.print(Text(error or texts("bd.not_found", query=args.body), style="red"))
+            await asyncio.to_thread(backend.stop)
+            return 1
+        if not target.get("self"):
+            if live(target) != "on":
+                console.print(Text(texts("bd.not_online", name=target.get("name") or target["id"]), style="red"))
+                await asyncio.to_thread(backend.stop)
+                return 1
+            backend.body = target["id"]
 
     if use_tui(args):
         from cli.tui import run_tui

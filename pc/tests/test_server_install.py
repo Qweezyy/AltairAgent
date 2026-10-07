@@ -265,6 +265,27 @@ def _api(monkeypatch, settings, server: FakeServer):
     fake = lambda login: FakeRemote(server, login)  # noqa: E731
     monkeypatch.setattr(install_module, "SSHRemote", fake)
     monkeypatch.setattr(remote_module, "SSHRemote", fake)
+    # The tunnels have tests of their own (test_bodies_tunnel.py); here they would log in to the
+    # scripted server too and mix their logins with the installer's.
+    import server.bodies as bodies_module
+
+    class Tunnels:            # records when the list of tunnels is brought in step
+        syncs = 0
+
+        def get(self, sid):
+            return None
+
+        async def sync(self):
+            Tunnels.syncs += 1
+
+        async def stop(self):
+            return None
+
+    async def no_tunnels(app):
+        app.state.tunnels = Tunnels()
+        app.state.tunnel_syncs = Tunnels
+
+    monkeypatch.setattr(bodies_module, "start_tunnels", no_tunnels)
     return TestClient(create_app())
 
 
@@ -306,8 +327,11 @@ def test_the_api_installs_lists_and_removes_a_server(monkeypatch, settings, tmp_
         assert "key_path" not in json.dumps(listed) and "pw" not in json.dumps(listed)
 
         assert client.get("/api/servers/jobs/nope").status_code == 404
+        syncs = client.app.state.tunnel_syncs.syncs
+        assert syncs == 1                                  # installed: its tunnel comes up
         removed = client.post(f"/api/servers/{listed[0]['id']}/uninstall", json={}).json()
         assert removed == {"ok": True}
+        assert client.app.state.tunnel_syncs.syncs == 2    # removed: its tunnel goes down
         assert client.get("/api/servers").json() == {"servers": []}
         assert client.post("/api/servers/nope/uninstall", json={}).status_code == 404
 

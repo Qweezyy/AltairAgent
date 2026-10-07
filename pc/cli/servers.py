@@ -63,7 +63,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
 class Servers:
     def __init__(self, backend: Backend, texts: Texts, console: Console,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self.base = backend.http
+        self.base = backend.root
         self.transport = transport      # tests talk to the app in-process
         self.t = texts
         self.console = console

@@ -83,8 +83,10 @@ class SSHRemote:
         if login.host_key:
             name = login.host if login.port == 22 else f"[{login.host}]:{login.port}"
             known = asyncssh.import_known_hosts(f"{name} {login.host_key}\n")
+        # Keepalives notice a dead link (a sleeping laptop, a dropped Wi-Fi) within ~45 s; the
+        # tunnel then reconnects instead of hanging on a half-open connection.
         options: dict = {"known_hosts": known, "connect_timeout": 25, "username": login.user,
-                         "port": login.port}
+                         "port": login.port, "keepalive_interval": 15, "keepalive_count_max": 3}
         if login.key_path:
             options["client_keys"] = [login.key_path]
             options["password"] = None
@@ -108,6 +110,19 @@ class SSHRemote:
         if key is not None:
             self.host_key = key.export_public_key("openssh").decode("ascii").strip()
             self.host_key_fingerprint = key.get_fingerprint()
+
+    async def forward_local(self, remote_port: int, local_port: int = 0) -> int:
+        """Forwards 127.0.0.1:<local_port> here to 127.0.0.1:<remote_port> on the server (0 = any
+        free port); returns the local port."""
+        if self._conn is None:
+            raise RemoteError("not connected")
+        listener = await self._conn.forward_local_port("127.0.0.1", local_port, "127.0.0.1", remote_port)
+        return int(listener.get_port())
+
+    async def wait_closed(self) -> None:
+        """Returns when the connection is gone (closed here, by the server or by the keepalive)."""
+        if self._conn is not None:
+            await self._conn.wait_closed()
 
     async def close(self) -> None:
         if self._conn is not None:

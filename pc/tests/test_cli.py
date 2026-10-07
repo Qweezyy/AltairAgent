@@ -50,7 +50,8 @@ def live(monkeypatch, settings):
     holder: dict[str, ScriptedLLM] = {"llm": ScriptedLLM([])}
     monkeypatch.setattr(chats_module, "build_llm_client", lambda model=None, **kw: holder["llm"])
     port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="warning"))
+    app = create_app()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     for _ in range(200):
@@ -60,6 +61,7 @@ def live(monkeypatch, settings):
 
     class Live:
         backend = Backend(port)
+        fastapi = app
         store = SessionStore(settings=settings)
 
         @staticmethod

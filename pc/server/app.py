@@ -167,6 +167,14 @@ async def lifespan(app: FastAPI):
     if settings.bridge_lan:
         await app.state.lan.apply(True)
 
+    # A tunnel to every server added (core/servers/tunnel.py): the way to their agents.
+    from server.bodies import start_tunnels, stop_tunnels
+
+    try:
+        await start_tunnels(app)
+    except (OSError, ValueError) as exc:
+        logger.warning("server tunnels did not start: %s", exc)
+
     try:
         yield
     finally:
@@ -176,6 +184,7 @@ async def lifespan(app: FastAPI):
         # First the chats: their runs stop as "the app closed" (waits stay scheduled, the
         # task can be continued) and every chat is stored before anything else goes down.
         await app.state.chats.shutdown()
+        await stop_tunnels(app)
         await app.state.lan.close()
         await stop_proxy()
         await mcp.stop()
@@ -537,14 +546,7 @@ def create_app() -> FastAPI:
 
         return {"token": token, "expires_in": SESSION_SECONDS}
 
-    @app.get("/api/bodies")
-    async def bodies_list(request: Request) -> dict:
-        _local_only(request)
-        from dataclasses import asdict
-
-        trusted = await asyncio.to_thread(_gate().trust.all)
-        return {"self": await asyncio.to_thread(lambda: _gate().identity.card()),
-                "trusted": [{**asdict(b), "revoked": b.revoked} for b in trusted]}
+    # GET /api/bodies (the registry, with the trusted bodies) is in server/bodies.py.
 
     @app.post("/api/bodies")
     async def bodies_add(request: Request, payload: dict) -> dict:
@@ -571,6 +573,15 @@ def create_app() -> FastAPI:
     # ---------------------------------------------------------------- servers (core/servers)
 
     app.state.server_jobs = {}
+    # The bodies: the registry, their status and a server's own API through its tunnel.
+    from server import bodies as bodies_routes
+
+    bodies_routes.install(app)
+
+    async def _tunnels_follow() -> None:
+        tunnels = getattr(app.state, "tunnels", None)
+        if tunnels is not None:
+            await tunnels.sync()
 
     def _server_job_public(job: dict) -> dict:
         return {k: v for k, v in job.items() if not k.startswith("_")}
@@ -643,6 +654,7 @@ def create_app() -> FastAPI:
                 from core.servers.registry import ServerStore
 
                 job.update(state="done", server=ServerStore.public(record))
+                await _tunnels_follow()
                 await _journal_app("server.installed", server=record.id, host=record.host, name=record.name,
                                    mode=record.mode, version=record.version, body=record.body_id)
             except InstallError as exc:
@@ -685,6 +697,7 @@ def create_app() -> FastAPI:
         except RemoteError as exc:
             return {"ok": False, "error": str(exc)}
         await _journal_app("server.removed", server=sid, host=record.host, kept_data=keep)
+        await _tunnels_follow()
         return {"ok": True}
 
     @app.get("/api/journal")

@@ -9,6 +9,10 @@ python-dotenv>=1.0,<2
 # --- Signatures: release updates and the bodies' keys (Ed25519) ---
 cryptography>=42,<50
 
+# --- Bodies: servers over SSH (install, tunnel) and a body's load (CPU, memory, disk) ---
+asyncssh>=2.14,<3
+psutil>=5.9,<8
+
 # --- LLM ---
 openai>=1.40,<2
 

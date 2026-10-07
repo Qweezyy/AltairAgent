@@ -12,7 +12,8 @@ function el(html) { const t = document.createElement("template"); t.innerHTML = 
 const humanSize = (n) => { if (!n) return "0 B"; const u = ["B", "KB", "MB", "GB"]; const i = Math.floor(Math.log(n) / Math.log(1024)); return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`; };
 const fmtCost = (v) => (v >= 0.01 ? `$${v.toFixed(2)}` : `$${v.toFixed(4)}`);
 const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; if (a === 1 && b !== 11) return one; if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return few; return many; };
-const LS = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+const lsKey = (k) => (k === "last_session_id" && window.AltairBody?.id ? `${k}@${window.AltairBody.id}` : k);
+const LS = { get: (k, d) => { try { return localStorage.getItem(lsKey(k)) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(lsKey(k), v); } catch {} } };
 
 // ------------------------------------------------------------------ state
 const state = {
@@ -701,7 +702,7 @@ const HANDLERS = {
     setWorkspace(m.workspace); updateMode(state.mode);
     let restoreId = "";
     if (prevId && prevHadContent) restoreId = prevId;                 // реконнект — не терять чат
-    else if (!prevId) { try { restoreId = LS.get("last_session_id", ""); } catch {} }  // старт — последний чат
+    else if (!prevId) { try { restoreId = window.AltairBody?.chat || LS.get("last_session_id", ""); } catch {} }  // start: the chat asked for, or the last one
     state.freshSession = m.session;   // what to show if the chat to restore is gone
     if (restoreId && restoreId !== m.session_id) { send({ type: "load_session", session_id: restoreId }); }
     else { loadSession(m.session); }
@@ -1109,8 +1110,65 @@ function refreshSessions() {
     const q = ($("#session-search")?.value || "").trim();
     if (q) { renderSearch(q); return; }
     try { state.sessionList = (await (await fetch("/api/sessions")).json()).sessions || []; renderSessions(state.sessionList); } catch {}
+    refreshBodyChats();
   }, 250);
 }
+// ------------------------------------------------------------------ bodies: this PC and the servers
+// The chats of the other bodies sit under this body's own, each group under its body's name;
+// opening one switches the window to that body (static/bodies.js).
+let _bodyChatsAt = 0;
+async function refreshBodyChats(force) {
+  const B = window.AltairBody;
+  if (!B || !B.others().some((b) => b.state === "online")) { state.bodyChats = []; drawBodyChats(); return; }
+  if (!force && Date.now() - _bodyChatsAt < 4000) { drawBodyChats(); return; }
+  _bodyChatsAt = Date.now();
+  state.bodyChats = await B.otherChats();
+  drawBodyChats();
+}
+function bodyName(b) { return b.self ? T("body.thisPc") : (b.name || b.host || b.id); }
+function drawBodyChats() {
+  $$(".body-chats", els.sessions).forEach((x) => x.remove());
+  for (const group of state.bodyChats || []) {
+    if (!group.sessions.length) continue;
+    const key = `body_chats_open@${group.body.id}`;
+    const open = LS.get(key, "0") === "1";
+    const box = el(`<div class="body-chats${open ? " is-open" : ""}"><button class="rail-section-label body-chats-head" type="button">${iconSvg(group.body.self ? "cpu" : "server", "icon icon-sm")}<span class="truncate">${esc(bodyName(group.body))}</span><span class="body-count">${group.sessions.length}</span>${iconSvg("chevron-down", "icon icon-sm body-chev")}</button><div class="body-chats-list"></div></div>`);
+    const list = $(".body-chats-list", box);
+    for (const s of group.sessions) {
+      const row = el(`<div class="session-item body-session${s.running ? " running" : ""}" role="button" tabindex="0">${iconSvg("message", "icon icon-sm")}<span class="s-title truncate">${esc(dispTitle(s.title) || T("side.untitled"))}</span><span class="body-badge" data-tip="${escAttr(T("body.openThere", { name: bodyName(group.body) }))}">${esc(bodyName(group.body))}</span></div>`);
+      row.addEventListener("click", () => window.AltairBody.open(group.body.id, s.id));
+      list.appendChild(row);
+    }
+    $(".body-chats-head", box).addEventListener("click", () => { const now = !box.classList.contains("is-open"); box.classList.toggle("is-open", now); LS.set(key, now ? "1" : "0"); });
+    els.sessions.appendChild(box);
+  }
+}
+// The switcher under the brand: which body this window shows, and how each one is doing.
+function drawBodyBar(list) {
+  const bar = $("#body-bar");
+  if (!bar) return;
+  const B = window.AltairBody;
+  if (!list || list.length < 2) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const cur = B.current();
+  bar.innerHTML = list.map((b) => {
+    const live = b.state === "online" && b.agent !== "down" ? "on" : b.state === "online" || b.state === "connecting" ? "wait" : "off";
+    const tip = b.self ? T("body.thisPcTip") : live === "on" ? T("body.online") : live === "wait" ? T(b.agent === "down" ? "body.agentDown" : "body.connecting") : T("body.offlineTip", { error: b.error || "" });
+    return `<button class="body-pill${cur && cur.id === b.id ? " is-active" : ""}" type="button" data-body="${escAttr(b.id)}" data-live="${live}" data-tip="${escAttr(tip)}"><span class="body-dot"></span>${iconSvg(b.self ? "cpu" : "server", "icon icon-sm")}<span class="truncate">${esc(bodyName(b))}</span></button>`;
+  }).join("");
+  $$(".body-pill", bar).forEach((p) => p.addEventListener("click", () => {
+    const b = list.find((x) => x.id === p.dataset.body);
+    if (!b || (cur && cur.id === b.id)) return;
+    if (!b.self && b.state !== "online") { toast(T("body.notYet", { name: bodyName(b) }), "error"); return; }
+    window.AltairBody.open(b.id);
+  }));
+  // Shown a server that went away: say so where the work is.
+  const lost = cur && !cur.self && cur.state !== "online";
+  document.documentElement.classList.toggle("body-lost", !!lost);
+  if (lost && !state._bodyLostToast) { state._bodyLostToast = true; toast(T("body.lost", { name: bodyName(cur) }), "error"); }
+  if (!lost) state._bodyLostToast = false;
+}
+document.addEventListener("bodies:update", (e) => { drawBodyBar(e.detail); refreshBodyChats(); });
 function sessionRow(s) {
   const title = dispTitle(s.title) || T("side.untitled");
   const item = el(`<div class="session-item ${s.id === state.sessionId ? "active" : ""} ${s.running ? "running" : ""}" role="button" tabindex="0" data-id="${escAttr(s.id)}"${s.running ? ` data-tip="${escAttr(T("side.runningBg"))}"` : ""}>${iconSvg("message", "icon icon-sm")}<span class="s-title truncate">${esc(title)}</span><span class="s-ren btn-icon small" data-tip="${escAttr(T("side.rename"))}">${iconSvg("doc", "icon icon-sm")}</span><span class="s-del btn-icon small" data-tip="${escAttr(T("side.delete"))}">${iconSvg("trash", "icon icon-sm")}</span></div>`);
@@ -1130,6 +1188,7 @@ function renderSessions(list) {
   const all = [...pending, ...list];
   els.sessions.innerHTML = `<div class="rail-section-label">${esc(T("side.chats"))}</div>` + (all.length ? "" : altiEmpty(T("side.empty"), "sleep", 48));
   for (const s of all) els.sessions.appendChild(sessionRow(s));
+  drawBodyChats();
 }
 // Inline rename in the rail (also from the chat title in the header).
 function startRename(row, id, current) {
@@ -1678,6 +1737,16 @@ function updateWorkspaceLock() {
   b.setAttribute("data-tip", locked ? T("ws.locked") : T("composer.workspace"));
 }
 async function pickWorkspaceNative() {
+  // A server has no screen for a folder dialog: its path is typed.
+  if (window.AltairBody?.id) {
+    const { overlay, close } = openModal({ title: T("body.folderTitle"), bodyHtml: `<div class="form-row"><input class="field mono" id="body-ws" spellcheck="false" value="${escAttr(isChatFolder(state.workspace) ? "" : state.workspace || "")}" placeholder="/var/lib/altair/workspace" /><span class="form-help">${esc(T("body.folderHelp"))}</span></div>`, footHtml: `<button class="btn" data-close>${esc(T("cf.cancel"))}</button><button class="btn btn-primary" id="body-ws-ok">${esc(T("cf.ok"))}</button>` });
+    const input = $("#body-ws", overlay);
+    const ok = () => { const v = input.value.trim(); if (v) { chooseWorkspace(v); close(); } };
+    $("#body-ws-ok", overlay).addEventListener("click", ok);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") ok(); });
+    input.focus(); input.select();
+    return;
+  }
   try {
     const d = await (await fetch("/api/dialog/select-folder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initial_dir: state.workspace }) })).json();
     if (d.ok && d.path) chooseWorkspace(d.path);
@@ -2737,17 +2806,36 @@ async function renderServersSection(main) {
     let servers = [];
     try { servers = (await (await fetch("/api/servers")).json()).servers || []; } catch { list.innerHTML = `<div class="dim">${esc(T("t.error"))}</div>`; return; }
     if (!servers.length) { list.innerHTML = `<div class="srv-empty dim">${esc(T("srv.none"))}</div>`; return; }
+    let live = {};
+    try { live = Object.fromEntries((((await (await fetch("/api/bodies")).json()).bodies) || []).map((b) => [b.id, b])); } catch { /* the cards show without the live part */ }
     list.innerHTML = "";
     servers.forEach((s) => {
+      const b = live[s.id] || {};
+      const on = b.state === "online" && b.agent !== "down";
+      const ld = (b.status && b.status.load) || null;
+      const st = b.status || {};
+      const pct = (used, total) => (total ? Math.max(0, Math.min(100, Math.round(used / total * 100))) : 0);
+      const meter = (label, value, text) => `<div class="srv-meter"><span class="srv-k">${esc(label)}</span><span class="srv-meter-bar"><i style="width:${value}%"></i></span><span class="srv-meter-v">${esc(text)}</span></div>`;
+      const stateText = on ? T("body.online") : b.state === "online" ? T("body.agentDown") : b.state === "connecting" ? T("body.connecting") : T("body.offlineTip", { error: b.error || "" });
+      const loadHtml = ld ? `<div class="srv-load">${meter(T("srv.cpu"), Math.round(ld.cpu_pct || 0), `${Math.round(ld.cpu_pct || 0)}%`)}${meter(T("srv.f.memory"), pct(ld.mem_used_mb, st.mem_mb), `${(ld.mem_used_mb / 1024).toFixed(1)} / ${((st.mem_mb || 0) / 1024).toFixed(1)} ${T("srv.gb")}`)}${meter(T("srv.f.disk"), pct(ld.disk_total_mb - ld.disk_free_mb, ld.disk_total_mb), `${(ld.disk_free_mb / 1024).toFixed(1)} ${T("srv.gb")} ${T("srv.free")}`)}<div class="srv-tasks dim">${esc(T("srv.tasks", { n: ld.tasks || 0 }))}</div></div>` : "";
       const card = el(`<div class="prov-card srv-card">
-        <div class="row"><span class="srv-dot"></span><div class="grow" style="min-width:0"><div class="sr-title truncate">${esc(s.name || s.host)}</div>
+        <div class="row"><span class="srv-dot" data-live="${on ? "on" : b.state === "offline" || !b.state ? "off" : "wait"}" data-tip="${escAttr(stateText)}"></span><div class="grow" style="min-width:0"><div class="sr-title truncate">${esc(s.name || s.host)}</div>
           <div class="sr-desc mono truncate">${esc(`${s.user}@${s.host}:${s.port}`)}</div></div>
           <span class="srv-chip">${esc(T(`srv.mode.${s.mode}`))}</span></div>
         <div class="srv-facts"><span>${esc(s.system || "")}</span><span>${esc(s.arch || "")}</span><span>Altair ${esc(s.version || "")}</span></div>
+        <div class="srv-state dim">${esc(stateText)}</div>
+        ${loadHtml}
+        <div class="srv-labels"><input class="field srv-labels-in" data-labels placeholder="${escAttr(T("srv.labelsPh"))}" value="${escAttr((b.labels || []).join(", "))}" maxlength="200" /></div>
         <div class="srv-fp mono" data-tip="${escAttr(T("srv.fpTip"))}">${iconSvg("shield", "icon icon-sm")} ${esc(s.host_key_fingerprint || "")}</div>
-        <div class="row srv-actions"><label class="cap-check"><input type="checkbox" data-keep /> ${esc(T("srv.keepData"))}</label><span class="grow"></span>
+        <div class="row srv-actions">${on ? `<button class="btn btn-primary btn-sm" data-open>${esc(T("srv.open"))}</button>` : `<button class="btn btn-outline btn-sm" data-reconnect>${esc(T("srv.reconnect"))}</button>`}<label class="cap-check"><input type="checkbox" data-keep /> ${esc(T("srv.keepData"))}</label><span class="grow"></span>
           <button class="btn btn-outline btn-sm" data-remove>${iconSvg("trash", "icon icon-sm")} ${esc(T("srv.remove"))}</button></div>
       </div>`);
+      $("[data-open]", card)?.addEventListener("click", () => window.AltairBody.open(s.id));
+      $("[data-reconnect]", card)?.addEventListener("click", async (e) => { e.currentTarget.disabled = true; try { await fetch(`/api/bodies/${encodeURIComponent(s.id)}/reconnect`, { method: "POST" }); } catch {} setTimeout(drawList, 2500); });
+      $("[data-labels]", card).addEventListener("change", async (e) => {
+        const labels = e.target.value.split(",").map((x) => x.trim()).filter(Boolean);
+        try { const r = await (await fetch(`/api/bodies/${encodeURIComponent(s.id)}/labels`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labels }) })).json(); if (r.ok) { e.target.value = r.labels.join(", "); toast(T("t.saved")); } } catch { toast(T("t.error"), "error"); }
+      });
       $("[data-remove]", card).addEventListener("click", async (e) => {
         const keep = $("[data-keep]", card).checked;
         const ok = await confirmDialog({ title: T("srv.removeTitle", { name: s.name || s.host }), message: T(keep ? "srv.removeMsgKeep" : "srv.removeMsg"), confirmText: T("srv.remove"), danger: true });

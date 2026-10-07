@@ -24,14 +24,21 @@ START_TIMEOUT = 90.0
 class Backend:
     port: int
     proc: subprocess.Popen | None = None  # ours to stop; None = someone else's (the window's)
+    #: A server shown through this PC's backend (its tunnel, server/bodies.py); "" = this PC.
+    body: str = ""
 
     @property
-    def http(self) -> str:
+    def root(self) -> str:
+        """This PC's own backend, whatever body is shown (the bodies, the servers' setup)."""
         return f"http://127.0.0.1:{self.port}"
 
     @property
+    def http(self) -> str:
+        return self.root + (f"/b/{self.body}" if self.body else "")
+
+    @property
     def ws(self) -> str:
-        return f"ws://127.0.0.1:{self.port}/ws"
+        return f"ws://127.0.0.1:{self.port}" + (f"/b/{self.body}" if self.body else "") + "/ws"
 
     def stop(self) -> None:
         """Our own backend stops gracefully: closing its stdin asks it to (main.py)."""

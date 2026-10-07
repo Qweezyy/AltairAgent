@@ -571,3 +571,59 @@ def test_the_status_words_shimmer(tmp_path):
     parts = tui._shimmer("Thinking…")
     assert "".join(t for _, t in parts) == "Thinking…"
     assert len({style for style, _ in parts}) > 2, "the light runs over the words: several shades at once"
+
+
+async def test_body_lists_the_bodies_and_switches_to_a_server_and_back(live, screen):  # noqa: F811
+    """/body: the server here is this very backend reached through its own /b/<id>/ way (the
+    path a real server's tunnel takes), so the switch runs over the real proxy and socket."""
+    from core.servers.registry import ServerRecord, ServerStore
+
+    record = ServerRecord(id="srv1", name="test-vps", host="203.0.113.7", port=22, user="root")
+    app = live.fastapi
+    ServerStore(app.state.settings.data_dir).save(record)
+
+    class Tunnel:
+        state, agent, local_port = "online", "ok", live.backend.port
+
+        def __init__(self):
+            self.record = record
+
+        def public(self):
+            return {"state": "online", "agent": "ok", "error": "", "port": self.local_port,
+                    "status": {"mem_mb": 2048, "load": {"cpu_pct": 7, "mem_used_mb": 512}},
+                    "last_seen": 1.0, "online_since": 1.0}
+
+    class Tunnels:
+        def get(self, sid):
+            return Tunnel() if sid == "srv1" else None
+
+        async def sync(self):
+            return None
+
+        async def stop(self):
+            return None
+
+    await app.state.tunnels.stop()
+    app.state.tunnels = Tunnels()
+    async with screen("bypass") as s:
+        first = s.tui.client.session["id"]
+        await s.type("/body\r")
+        try:
+            await wait_until(lambda: "test-vps" in s.out and "This PC" in s.out and "CPU 7%" in s.out)
+        except AssertionError:
+            raise AssertionError(s.out[-1500:]) from None
+
+        await s.type("/body nope\r")
+        await wait_until(lambda: "No body matches 'nope'" in s.out)
+
+        await s.type("/body test-vps\r")
+        try:
+            await wait_until(lambda: "Now on test-vps" in s.out)
+        except AssertionError:
+            raise AssertionError(s.out[-1500:]) from None
+        assert s.tui.client.backend.body == "srv1" and s.tui.http.endswith("/b/srv1")
+        assert s.tui.client.session["id"] != first            # a new chat over there
+
+        await s.type("/body pc\r")
+        await wait_until(lambda: "Now on This PC" in s.out)
+        assert s.tui.client.backend.body == "" and not s.tui.http.endswith("/b/srv1")

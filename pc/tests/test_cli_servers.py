@@ -34,6 +34,14 @@ async def world(monkeypatch, settings, tmp_path):
     fake = lambda login: FakeRemote(server, login)  # noqa: E731
     monkeypatch.setattr(install_module, "SSHRemote", fake)
     monkeypatch.setattr(remote_module, "SSHRemote", fake)
+    # The tunnels have tests of their own (test_bodies_tunnel.py); here they would log in to the
+    # scripted server too and mix their logins with the installer's.
+    import server.bodies as bodies_module
+
+    async def no_tunnels(app):
+        app.state.tunnels = None
+
+    monkeypatch.setattr(bodies_module, "start_tunnels", no_tunnels)
 
     async def fake_release(arch, repo=install_module.REPO):
         return ReleaseRef(version="0.3.0", name="Altair-0.3.0-linux-x64.zip", url="https://example/pkg.zip",
@@ -98,3 +106,26 @@ async def test_a_failed_install_names_the_step(world, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("pw\n"))
     assert await client.add(cli_servers.parse(["add", "h", "--password-stdin", "-y"])) == 1
     assert Texts()("srv.failed", step=Texts()("srv.step.download")) in out.getvalue()
+
+
+def test_a_body_is_reached_through_this_pcs_backend():
+    pc = Backend(port=8765)
+    assert pc.http == pc.root == "http://127.0.0.1:8765" and pc.ws == "ws://127.0.0.1:8765/ws"
+    pc.body = "srv1"
+    assert pc.http == "http://127.0.0.1:8765/b/srv1" and pc.ws == "ws://127.0.0.1:8765/b/srv1/ws"
+    assert pc.root == "http://127.0.0.1:8765"          # the bodies and the servers stay this PC's
+
+
+def test_a_body_is_found_by_name_id_address_or_pc():
+    from cli.bodies_view import live, resolve
+
+    bodies = [{"id": "me", "self": True, "name": "desk", "state": "online"},
+              {"id": "fb9a83ba2580", "name": "test-vps", "host": "203.0.113.7", "state": "online", "agent": "ok"},
+              {"id": "c0ffee", "name": "test-gpu", "host": "198.51.100.2", "state": "offline"}]
+    assert resolve(bodies, "pc")["id"] == "me"
+    assert resolve(bodies, "TEST-VPS")["id"] == "fb9a83ba2580"
+    assert resolve(bodies, "203.0.113.7")["id"] == "fb9a83ba2580"
+    assert resolve(bodies, "fb9a")["id"] == "fb9a83ba2580"         # a unique beginning
+    assert resolve(bodies, "test") is None                           # two match: no guessing
+    assert resolve(bodies, "nothing") is None
+    assert [live(b) for b in bodies[1:]] == ["on", "off"]

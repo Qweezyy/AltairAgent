@@ -15,6 +15,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **A server is one more body of the same agent, right in the window.** This PC keeps an SSH tunnel to
+  every server it installed Altair on (nothing is opened to the outside; it reconnects by itself after
+  sleep or a reboot) and asks each one for its load every 15 s. A switcher under the logo shows the
+  bodies with their state; picking a server shows its chats, terminal, files and settings in the same
+  panels, and a task typed there runs on the server. The other bodies' chats are listed under this
+  one's, each opening on its own body. Settings → Servers shows each server's CPU, memory and disk,
+  takes labels ("builds", "prod") and reconnects on demand. In the terminal: `altair --body NAME` and
+  `/body` to list the bodies or switch.
 - **Altair installs itself on your server.** Settings → Servers (or `altair server add HOST`): give
   an SSH login and Altair first looks the server over without changing anything (system, processor,
   memory, disk, rights, the server key's fingerprint to compare with your provider's), recommends how

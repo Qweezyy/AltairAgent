@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import websockets
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import Application, get_app_or_none
 from prompt_toolkit.buffer import Buffer
@@ -921,6 +922,7 @@ class Tui:
         add("compact", self.c_compact)
         add("history", self.c_history)
         add("journal", self.c_journal)
+        add("body", self.c_body)
         add("stop", self.c_stop)
         add("exit", self.c_exit, "quit", "q")
 
@@ -1297,6 +1299,63 @@ class Tui:
         await print_journal(self.client, limit, chat)
         return False
 
+    async def c_body(self, rest: str) -> bool:
+        """The bodies (this PC, the servers); "/body NAME" switches this terminal to that body."""
+        from cli.bodies_view import list_bodies, live, resolve, table
+
+        backend = self.client.backend
+        try:
+            bodies = await list_bodies(backend.root)
+        except httpx.HTTPError as exc:
+            self.r.print(Text(str(exc), style="red"))
+            return False
+        if not rest.strip():
+            self.r.print(table(bodies, self.t, backend.body), gap=True)
+            return False
+        target = resolve(bodies, rest)
+        if target is None:
+            self.r.print(Text(self.t("bd.not_found", query=rest.strip()), style="red"))
+            return False
+        name = self.t("bd.this_pc") if target.get("self") else (target.get("name") or target["id"])
+        wanted = "" if target.get("self") else target["id"]
+        if wanted == backend.body:
+            return False
+        if wanted and live(target) != "on":
+            self.r.print(Text(self.t("bd.not_online", name=name), style="red"))
+            return False
+        if self.client.running:
+            self.r.print(Text(self.t("bd.busy"), style="dim"))
+        # A new socket to the other body; a new chat there, in its own default folder. The event
+        # pump stops meanwhile: the old socket's end is not "the backend is gone", and the new
+        # one's first events are read here.
+        self._pump_task.cancel()
+        await asyncio.gather(self._pump_task, return_exceptions=True)
+        previous = backend.body
+        try:
+            await self.client.close()
+            for body in (wanted, previous):
+                self.client.events = asyncio.Queue()
+                backend.body = body
+                self.http = backend.http
+                try:
+                    await self.client.open()
+                    await self.client.send({"type": "new_session"})
+                    self.client._apply_loaded(await self.client._wait_for("session.loaded"))
+                    break
+                except (OSError, ConnectionError, TimeoutError, websockets.WebSocketException) as exc:
+                    # Could not get there: back where it was, with the reason.
+                    self.r.print(Text(str(exc) or type(exc).__name__, style=theme.ERR))
+                    await self.client.close()
+                    if body == previous:
+                        raise
+        finally:
+            self._pump_task = asyncio.create_task(self._pump())
+        await self._load_config()
+        if backend.body != wanted:
+            return False
+        self.r.print(Text(self.t("bd.switched", name=name), style="bold"), gap=True)
+        return False
+
     async def c_history(self, rest: str) -> bool:
         sid = self.client.session.get("id")
         data = await self._get(f"/api/sessions/{sid}")
@@ -1349,7 +1408,7 @@ class Tui:
             self.welcome(profile)
             self.show_history()
             self._started = True
-            pump = asyncio.create_task(self._pump())
+            self._pump_task = asyncio.create_task(self._pump())
             try:
                 if self.client.running:
                     self.r.run_started = time.monotonic()
@@ -1382,10 +1441,10 @@ class Tui:
                 if not self._closed:
                     self.goodbye()
             finally:
-                pump.cancel()
+                self._pump_task.cancel()
                 if self._bg is not None:
                     self._bg.cancel()
-                await asyncio.gather(pump, *([self._bg] if self._bg else []), return_exceptions=True)
+                await asyncio.gather(self._pump_task, *([self._bg] if self._bg else []), return_exceptions=True)
                 for item in self._modals:
                     if not item.done.done():
                         item.done.set_result(None)
