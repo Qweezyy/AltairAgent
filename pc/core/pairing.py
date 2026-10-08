@@ -50,6 +50,30 @@ def _ip_score(ip: str) -> int:
     return 40  # прочие маршрутизируемые — лучше, чем ничего
 
 
+def physical_ip() -> str:
+    """The physical adapter's address as the browser's network watcher sees it (core/browser_net:
+    tunnels and virtual adapters skipped); "" when it is not running or found none."""
+    from core.browser_net import get_proxy
+
+    net = get_proxy()
+    topology = getattr(net, "topology", None) if net is not None else None
+    return str(getattr(topology, "physical_ip", "") or "")
+
+
+def route_ip() -> str:
+    """The address of the interface the default route goes out of ("" when there is none). A UDP
+    socket "connected" to a public address sends nothing, but the OS picks that interface."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.0.2.1", 9))           # TEST-NET-1: routed like the internet, never reached
+        return s.getsockname()[0]
+    except OSError as exc:
+        logger.debug("no default route: %s", exc)
+        return ""
+    finally:
+        s.close()
+
+
 def local_ip() -> str:
     """IP-адрес ПК в локальной сети (для доступа с телефона по Wi-Fi).
 
@@ -115,7 +139,11 @@ def bridge_base_url(settings: Settings | None = None, port: int | None = None,
     """
     settings = settings or get_settings()
     candidates = [ip for ip in (listening or []) if _ip_score(ip) >= 0]
-    ip = max(candidates, key=_ip_score) if candidates else local_ip()
+    # Equal ranks (Wi-Fi 192.168.8.x and a Hyper-V/WSL switch 192.168.144.1, say): the physical
+    # adapter wins (the browser's network watcher knows it, VPN or not), else the default route's
+    # — a virtual switch is out of the phone's reach.
+    preferred = physical_ip() or route_ip()
+    ip = max(candidates, key=lambda c: (_ip_score(c), c == preferred)) if candidates else local_ip()
     return f"http://{ip}:{port or settings.port}"
 
 

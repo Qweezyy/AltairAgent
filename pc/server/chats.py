@@ -766,6 +766,8 @@ class ChatState:
             await self.send(payload)
             if not self.viewers:
                 await self.hub.announce(self, [tr("ws.approval_waiting", name=request.name)], attention=True)
+                # In the Journal too: a phone polling for news (GET /api/notices) learns of it.
+                await self.journal("approval.waiting", name=request.name, reason=request.reason[:300])
 
             try:
                 answer = await future

@@ -2845,10 +2845,11 @@ async function renderServersSection(main) {
         ${loadHtml}
         <div class="srv-labels"><input class="field srv-labels-in" data-labels placeholder="${escAttr(T("srv.labelsPh"))}" value="${escAttr((b.labels || []).join(", "))}" maxlength="200" /></div>
         <div class="srv-fp mono" data-tip="${escAttr(T("srv.fpTip"))}">${iconSvg("shield", "icon icon-sm")} ${esc(s.host_key_fingerprint || "")}</div>
-        <div class="row srv-actions">${on ? `<button class="btn btn-primary btn-sm" data-open>${esc(T("srv.open"))}</button><button class="btn btn-outline btn-sm" data-update data-tip="${escAttr(T("srv.updateTip"))}">${esc(T("srv.update"))}</button>` : `<button class="btn btn-outline btn-sm" data-reconnect>${esc(T("srv.reconnect"))}</button>`}<label class="cap-check"><input type="checkbox" data-keep /> ${esc(T("srv.keepData"))}</label><span class="grow"></span>
+        <div class="row srv-actions">${on ? `<button class="btn btn-primary btn-sm" data-open>${esc(T("srv.open"))}</button><button class="btn btn-outline btn-sm" data-update data-tip="${escAttr(T("srv.updateTip"))}">${esc(T("srv.update"))}</button><button class="btn btn-outline btn-sm" data-phone data-tip="${escAttr(T("ph.tip"))}">${iconSvg("phone", "icon icon-sm")} ${esc(T("ph.button"))}</button>` : `<button class="btn btn-outline btn-sm" data-reconnect>${esc(T("srv.reconnect"))}</button>`}<label class="cap-check"><input type="checkbox" data-keep /> ${esc(T("srv.keepData"))}</label><span class="grow"></span>
           <button class="btn btn-outline btn-sm" data-remove>${iconSvg("trash", "icon icon-sm")} ${esc(T("srv.remove"))}</button></div>
       </div>`);
       $("[data-open]", card)?.addEventListener("click", () => window.AltairBody.open(s.id));
+      $("[data-phone]", card)?.addEventListener("click", () => openPhonePairing(s));
       $("[data-mode]", card).addEventListener("click", (e) => openMenu(e.currentTarget, SRV_MODES.map((m) => ({
         text: T(`srv.mode.${m}`), chosen: m === s.mode,
         onClick: async () => {
@@ -3042,6 +3043,39 @@ async function openMoveChat() {
     toast(T("move.done", { name: (servers.find((b) => b.id === r.body) || {}).name || "" }));
     B.open(r.body, r.chat);
   });
+}
+// Pairing the phone with a server (0.3.0 stage 6): the QR carries the way through this PC and,
+// when the server's own door is on, the direct one with its pinned certificate.
+async function openPhonePairing(server) {
+  const { overlay, close } = openModal({ title: T("ph.title", { name: server.name || server.host }), bodyHtml: `<div class="ph-body"><div class="dim">${esc(T("pair.loading"))}</div></div>` });
+  const body = $(".ph-body", overlay);
+  const draw = async () => {
+    let d;
+    try { d = await (await fetch(`/api/servers/${encodeURIComponent(server.id)}/phone`)).json(); } catch { d = { ok: false }; }
+    if (!d.ok) { body.innerHTML = `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(d.error || d.detail || T("t.error"))}</span></div>`; return; }
+    const ways = [d.relay ? T("ph.viaPc") : "", d.direct ? T("ph.direct") : ""].filter(Boolean).join(" · ");
+    body.innerHTML = `<p class="sr-desc" style="margin-bottom:12px">${esc(T("ph.desc"))}</p>
+      ${!d.relay && !d.direct ? `<div class="pair-warn">${iconSvg("alert", "icon icon-sm")}<span>${esc(T("ph.noWay"))}</span></div>` : ""}
+      <div class="pair-grid"><div class="pair-qr-box">${d.qr_svg || esc(T("pair.qrUnavailable"))}</div>
+        <div class="pair-side">
+          <div class="pair-field"><span class="form-label">${esc(T("ph.code"))}</span><code class="pair-addr">${esc(d.code)}</code></div>
+          <div class="pair-field"><span class="form-label">${esc(T("ph.ways"))}</span><span class="sr-desc">${esc(ways || "—")}</span></div>
+          <div class="form-help">${esc(T("ph.expires", { min: Math.round((d.expires_in || 600) / 60) }))}</div>
+          <button class="btn btn-outline btn-sm" data-copy>${iconSvg("copy", "icon icon-sm")} ${esc(T("pair.copy"))}</button>
+        </div></div>
+      <div class="setting-row" style="margin-top:14px"><div class="sr-main"><div class="sr-title">${esc(T("ph.directTitle"))}</div><div class="sr-desc">${esc(T("ph.directDesc"))}</div></div>
+        <div class="sr-control"><button class="btn btn-sm ${d.direct ? "btn-outline" : "btn-primary"}" data-direct="${d.direct ? "off" : "on"}">${esc(T(d.direct ? "ph.directOff" : "ph.directOn"))}</button></div></div>`;
+    $("[data-copy]", body).addEventListener("click", () => { navigator.clipboard?.writeText(d.link); toast(T("pair.copied")); });
+    $("[data-direct]", body).addEventListener("click", async (e) => {
+      e.currentTarget.disabled = true;
+      let r;
+      try { r = await (await fetch(`/api/servers/${encodeURIComponent(server.id)}/remote-access`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: e.currentTarget.dataset.direct === "on" }) })).json(); }
+      catch { r = { ok: false }; }
+      if (!r.ok) toast(r.error || T("t.error"), "error");
+      draw();
+    });
+  };
+  draw();
 }
 async function renderPairSection(main) {
   main.innerHTML = `<div class="settings-section"><h2>${esc(T("pair.title"))}</h2><div class="dim" id="pair-body">${esc(T("pair.loading"))}</div></div>`;

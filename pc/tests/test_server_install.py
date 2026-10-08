@@ -149,6 +149,7 @@ async def test_a_server_is_installed_step_by_step(settings, tmp_path, release):
     env = server.files["/var/lib/altair/.env"]
     assert "LLM_API_KEY=sk-secret-1234" in env and "DEFAULT_MODEL=glm-5.3-flash" in env
     assert "HOST=127.0.0.1" in env and "APPROVAL_MODE=bypass" in env and "BODY_KIND=server" in env
+    assert "BODY_NAME=vps" in env      # its card (and its notices) carry the owner's name, not the hostname
     assert "D:\\Projects" not in env and "0.0.0.0" not in env and "BRIDGE_TOKEN" not in env and "C:\\x" not in env
     unit = server.files["/etc/systemd/system/altair.service"]
     assert "Restart=always" in unit and "APP_PATH=/var/lib/altair" in unit and "--host 127.0.0.1" in unit

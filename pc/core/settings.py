@@ -173,6 +173,8 @@ class Settings(BaseSettings):
     #: What kind of body this install is (core/bodies.py): "pc", or "server" for an agent the
     #: owner installed on a server; the other bodies see it in this body's card.
     body_kind: Literal["pc", "phone", "server"] = "pc"
+    #: This body's name for the others (a server: the name the owner gave it); empty = the hostname.
+    body_name: str = ""
     #: The Journal: every action of the agent appended to a hash-chained, read-only log in the
     #: data folder (core/journal.py). What the owner reads to know what happened unattended.
     journal: bool = True
@@ -307,6 +309,10 @@ class Settings(BaseSettings):
     #: следующем запуске). Нужно, чтобы телефон достучался до моста по Wi-Fi.
     #: Удалённый доступ всё равно защищён bridge_token. Меняется из UI связывания.
     bridge_lan: bool = False
+    #: A server's own TLS door for the phone (server/remote_access.py): off by default, turned on
+    #: from the PC; entered only with a trusted body's key.
+    remote_access: bool = False
+    remote_port: int = 8443
     #: How the built-in browser reaches sites when a VPN is on: "auto" (direct first, the VPN
     #: when a site is unreachable directly), "direct" (always bypass the VPN) or "vpn".
     browser_network: str = "auto"

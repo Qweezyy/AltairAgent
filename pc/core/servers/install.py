@@ -201,7 +201,7 @@ def _version_of_package(path: Path) -> str:
 # ---------------------------------------------------------------- what the server gets from this PC
 
 
-def server_env(pc_env_text: str, mode: str, layout: Layout) -> str:
+def server_env(pc_env_text: str, mode: str, layout: Layout, name: str = "") -> str:
     """The server's .env: this PC's model and agent settings (keys included — they travel only
     over SSH and land in a file only the agent's user can read), without what belongs to this PC
     (its paths, its ports, its bridge), plus what the server needs."""
@@ -220,6 +220,7 @@ def server_env(pc_env_text: str, mode: str, layout: Layout) -> str:
         "HOST=127.0.0.1",
         f"PORT={SERVER_PORT}",
         "BODY_KIND=server",
+        *([f"BODY_NAME={name}"] if name else []),
         f"APPROVAL_MODE={MODE_APPROVAL.get(mode, 'manual')}",
         f"WORKSPACE_PATH={SANDBOX_DATA if mode == 'sandbox' else layout.data_dir}/workspace",
         # In the sandbox the granted folders are at /work/<name>: the file tools may use them.
@@ -601,7 +602,7 @@ ln -sfn {release} {layout.install_dir}/current
             pc_env = await asyncio.to_thread(config_path(self.settings).read_text, encoding="utf-8")
         except OSError as exc:
             logger.info("no settings file to bring over: %s", exc)
-        env_text = server_env(pc_env, self.req.mode, layout)
+        env_text = server_env(pc_env, self.req.mode, layout, self.req.name or self.req.host)
         bundle = await asyncio.to_thread(bundle_of_self, self.settings, self.req.bring_memory)
         data = layout.data_dir
         await self._must(remote, f"umask 077; mkdir -p {data}/workspace && chmod 700 {data}", "configure", root=True)

@@ -174,6 +174,13 @@ async def lifespan(app: FastAPI):
         await start_tunnels(app)
     except (OSError, ValueError) as exc:
         logger.warning("server tunnels did not start: %s", exc)
+    # A server's own TLS door for the phone, when the owner turned it on (server/remote_access.py).
+    from server.phone import start_remote, stop_remote
+
+    try:
+        await start_remote(app)
+    except (OSError, ValueError) as exc:
+        logger.warning("remote access did not start: %s", exc)
 
     try:
         yield
@@ -185,6 +192,7 @@ async def lifespan(app: FastAPI):
         # task can be continued) and every chat is stored before anything else goes down.
         await app.state.chats.shutdown()
         await stop_tunnels(app)
+        await stop_remote(app)
         await app.state.lan.close()
         await stop_proxy()
         await mcp.stop()
@@ -222,6 +230,10 @@ def _bridge_authorized(websocket: WebSocket) -> bool:
     """
     host = (websocket.client.host if websocket.client else "") or ""
     if host in _LOOPBACK_HOSTS:
+        return True
+    # A trusted body signed in with its key (the phone at a server's door): checked by the
+    # middleware already (server/remote_auth.py), which marks how it came in.
+    if websocket.scope.get("altair_auth") == "body":
         return True
     token = get_settings().bridge_token.strip()
     if not token:
@@ -586,6 +598,9 @@ def create_app() -> FastAPI:
     from server import chat_move
 
     chat_move.install(app)
+    from server import phone as phone_routes
+
+    phone_routes.install(app)
 
     async def _tunnels_follow() -> None:
         tunnels = getattr(app.state, "tunnels", None)

@@ -33,6 +33,12 @@ KINDS = ("pc", "phone", "server")
 #: How long a challenge may be answered, and how long a session token lives.
 CHALLENGE_SECONDS = 60
 SESSION_SECONDS = 12 * 3600
+#: One-time pairing codes: how long they live, how they look, how many wrong ones lock pairing.
+PAIR_CODE_SECONDS = 600
+PAIR_CODE_LEN = 8
+PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # no 0/O, 1/I: read off a screen
+PAIR_MAX_FAILURES = 5
+PAIR_FAILURE_WINDOW = 600
 #: What a body signs: the purpose, the challenge and who asked, so a signature made for one
 #: server cannot be replayed to another.
 SIGNED_PREFIX = "altair-body-auth:v1"
@@ -53,13 +59,23 @@ def signed_message(nonce: str, verifier_id: str) -> bytes:
 # ---------------------------------------------------------------- this body
 
 
+def _configured_name() -> str:
+    """BODY_NAME, when set (a server: the name its owner gave it on the PC)."""
+    try:
+        from core.settings import get_settings
+
+        return (get_settings().body_name or "").strip()
+    except Exception:  # noqa: BLE001 - no settings (a bare test): the hostname is fine
+        return ""
+
+
 class Identity:
     """This body's key pair (created on first use) and its public description."""
 
     def __init__(self, folder: Path, kind: str = "pc", name: str = "") -> None:
         self.folder = Path(folder)
         self.kind = kind if kind in KINDS else "pc"
-        self.name = name or socket.gethostname()
+        self.name = name or _configured_name() or socket.gethostname()
         self._private = None
         # Re-entrant: making the key logs its id, which reads the key again.
         self._lock = threading.RLock()
@@ -200,7 +216,36 @@ class Gate:
         self.trust = trust
         self._challenges: dict[str, tuple[str, float]] = {}     # nonce -> (body id, expires)
         self._sessions: dict[str, tuple[str, float]] = {}       # token -> (body id, expires)
+        self._pair_codes: dict[str, float] = {}                 # sha256(code) -> expires
+        self._pair_failures: list[float] = []
         self._lock = threading.Lock()
+
+    # --- a new body by a one-time code (the phone scanning the PC's QR, 0.3.0 stage 6) ----------
+
+    def new_pair_code(self, seconds: float = PAIR_CODE_SECONDS) -> str:
+        """A one-time code another body uses once to be trusted here; it lives `seconds`. Only its
+        hash is kept, in memory: a restart voids the codes not used yet."""
+        code = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(PAIR_CODE_LEN))
+        now = time.time()
+        with self._lock:
+            self._pair_codes = {h: t for h, t in self._pair_codes.items() if t > now}
+            self._pair_codes[_hash_code(code)] = now + seconds
+        return code
+
+    def pair(self, code: str, card: dict[str, Any]) -> TrustedBody | None:
+        """Trusts `card` if `code` is a live one-time code (used up either way it is right). Wrong
+        codes are counted: after PAIR_MAX_FAILURES in PAIR_FAILURE_WINDOW nothing pairs until the
+        window passes — a code of 8 letters is not guessed at that pace."""
+        now = time.time()
+        with self._lock:
+            self._pair_failures = [t for t in self._pair_failures if t > now - PAIR_FAILURE_WINDOW]
+            if len(self._pair_failures) >= PAIR_MAX_FAILURES:
+                return None
+            expires = self._pair_codes.pop(_hash_code((code or "").strip().upper()), None)
+            if expires is None or expires < now:
+                self._pair_failures.append(now)
+                return None
+        return self.trust.add(card)
 
     def challenge(self, bid: str) -> dict[str, str]:
         nonce = secrets.token_urlsafe(32)
@@ -253,6 +298,10 @@ class Gate:
             for t in gone:
                 self._sessions.pop(t, None)
         return len(gone)
+
+
+def _hash_code(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
 _GATES: dict[str, Gate] = {}

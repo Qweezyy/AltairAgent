@@ -33,13 +33,27 @@ logger = get_logger("server.bodies")
 _LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 #: Hop-by-hop headers and ones httpx sets itself: not passed through.
 _SKIP_REQUEST = {"host", "connection", "keep-alive", "transfer-encoding", "upgrade", "content-length",
-                 "accept-encoding", "te", "trailer", "proxy-authorization", "proxy-connection"}
+                 "accept-encoding", "te", "trailer", "proxy-authorization", "proxy-connection",
+                 "authorization"}       # the PC's bridge token stays with the PC
 _SKIP_RESPONSE = {"connection", "keep-alive", "transfer-encoding", "content-encoding", "content-length", "te",
                   "trailer", "upgrade"}
 
 
 def _local(host: str | None) -> bool:
     return (host or "") in _LOOPBACK
+
+
+def _phone_may(scope: dict) -> bool:
+    """The phone with the PC's bridge token may see the bodies and reach a server through this
+    PC (0.3.0 stage 6) — it can already run the agent here; another body's key may not."""
+    return scope.get("altair_auth") in ("loopback", "bridge")
+
+
+def _without_token(query: str) -> str:
+    """The PC's bridge token stays with the PC: it is not passed on to the server."""
+    from urllib.parse import parse_qsl, urlencode
+
+    return urlencode([(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k != "token"])
 
 
 def _self_card(app: FastAPI) -> dict[str, Any]:
@@ -184,7 +198,7 @@ def install(app: FastAPI) -> None:
 
     @app.get("/api/bodies")
     async def bodies_list(request: Request) -> dict:
-        if not _local(request.client.host if request.client else ""):
+        if not (_local(request.client.host if request.client else "") or _phone_may(request.scope)):
             raise HTTPException(status_code=403, detail=tr("api.local_only"))
         from core.body_labels import BodyLabels
         from core.body_status import status
@@ -243,11 +257,11 @@ def install(app: FastAPI) -> None:
 
     @app.api_route("/b/{bid}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def body_proxy(request: Request, bid: str, path: str) -> Response:
-        if not _local(request.client.host if request.client else ""):
+        if not (_local(request.client.host if request.client else "") or _phone_may(request.scope)):
             raise HTTPException(status_code=403, detail=tr("api.local_only"))
         port = port_of(bid)
         headers = {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_REQUEST}
-        target = httpx.URL(f"http://127.0.0.1:{port}/{path}", query=request.url.query.encode())
+        target = httpx.URL(f"http://127.0.0.1:{port}/{path}", query=_without_token(request.url.query).encode())
         content = await request.body()
         # A read can be sent again if the connection broke under it; a change is never repeated.
         tries = 2 if request.method in ("GET", "HEAD") else 1
@@ -267,7 +281,7 @@ def install(app: FastAPI) -> None:
 
     @app.websocket("/b/{bid}/{path:path}")
     async def body_proxy_ws(websocket: WebSocket, bid: str, path: str) -> None:
-        if not _local(websocket.client.host if websocket.client else ""):
+        if not (_local(websocket.client.host if websocket.client else "") or _phone_may(websocket.scope)):
             await websocket.close(code=4403)
             return
         try:
@@ -278,7 +292,7 @@ def install(app: FastAPI) -> None:
         from websockets.asyncio.client import connect
         from websockets.exceptions import WebSocketException
 
-        query = websocket.url.query
+        query = _without_token(websocket.url.query)
         url = f"ws://127.0.0.1:{port}/{path}" + (f"?{query}" if query else "")
         try:
             upstream = await connect(url, max_size=None, open_timeout=15)
@@ -435,12 +449,16 @@ async def start_tunnels(app: FastAPI) -> None:
     from server.notices import notices_loop
 
     app.state.notices_task = asyncio.create_task(notices_loop(app), name="body-notices")
+    if app.state.settings.body_kind == "server":
+        from server.notices import self_notices_loop
+
+        app.state.self_notices_task = asyncio.create_task(self_notices_loop(app), name="self-notices")
 
 
 async def stop_tunnels(app: FastAPI) -> None:
     from core.bodies_routing import set_tunnels
 
-    for name in ("sync_task", "guardian_task", "notices_task"):
+    for name in ("sync_task", "guardian_task", "notices_task", "self_notices_task"):
         task = getattr(app.state, name, None)
         if task is not None:
             task.cancel()

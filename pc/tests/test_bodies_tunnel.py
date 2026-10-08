@@ -300,7 +300,7 @@ def test_the_window_reaches_the_servers_api_and_socket_through_the_tunnel(pc_app
         assert client.get("/b/srv1/api/nothing").status_code == 404      # the server's own 404
 
         with client.websocket_connect("/b/srv1/ws?token=abc") as ws:
-            assert ws.receive_json() == {"hello": "abc"}
+            assert ws.receive_json() == {"hello": ""}      # the PC's own token is not passed on (stage 6)
             ws.send_text("ping")
             assert ws.receive_text() == "server got ping"
 

@@ -40,15 +40,19 @@ def supplied_token(scope: Scope) -> str:
 
 
 #: Where a body proves itself: open without a token, or nobody could ever sign in.
-OPEN_PATHS = frozenset({"/api/bodies/challenge", "/api/bodies/login", "/api/health"})
+OPEN_PATHS = frozenset({"/api/bodies/challenge", "/api/bodies/login", "/api/bodies/pair", "/api/health"})
 
 
 def is_authorized(scope: Scope) -> bool:
     client = scope.get("client")
     host = (client[0] if client else "") or ""
+    # How it came in, for the routes that care (scope["altair_auth"]): this machine, a trusted body
+    # with its key, the phone with the bridge token, or an open path.
     if host in LOOPBACK_HOSTS:
+        scope["altair_auth"] = "loopback"
         return True
     if scope.get("type") == "http" and scope.get("path") in OPEN_PATHS:
+        scope["altair_auth"] = "open"
         return True
     given = supplied_token(scope)
     if not given:
@@ -60,11 +64,15 @@ def is_authorized(scope: Scope) -> bool:
     body = get_gate(settings.data_dir / "identity").who(given)
     if body:
         scope["altair_body"] = body
+        scope["altair_auth"] = "body"
         return True
     token = settings.bridge_token.strip()
     if not token:
         return False  # the LAN bridge stays closed until its secret is set
-    return hmac.compare_digest(given, token)
+    if hmac.compare_digest(given, token):
+        scope["altair_auth"] = "bridge"
+        return True
+    return False
 
 
 class LocalAliasMiddleware:

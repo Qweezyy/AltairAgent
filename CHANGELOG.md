@@ -15,6 +15,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **The phone can reach your servers (server side; the Android app follows).** Settings → Servers →
+  **Phone** shows a QR: through this PC (the phone's bridge, its token kept on the PC) and, when you
+  turn on the server's own door, directly — TLS on port 8443 with a certificate the phone pins, and
+  only bodies signed in with their own key get in. The phone pairs with a one-time code (10 minutes,
+  locked after 5 wrong tries), then signs in with its key. On the server it gets the same chats,
+  status, Journal, a stop-everything button and news — pushed while connected, or polled in the
+  background (`/api/notices`); "the agent waits for your permission" is news too. The contract for
+  the app: `pc/server/PHONE_SERVER_SPEC.md`.
 - **The "Sandbox" mode for a server where something important already runs.** The agent lives in a
   Docker container of its own: inside it does anything by itself, but it sees only its own data and
   the folders you grant it (each at `/work/<name>`; an existing folder keeps its owner — the agent

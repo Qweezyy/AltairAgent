@@ -42,6 +42,7 @@ NOTABLE: dict[str, tuple[str, str]] = {
     "guardian.change.rolled_back": ("ntc.change_rolled_back", "error"),
     "guardian.agent.restarted": ("ntc.agent_restarted", "warning"),
     "guardian.disk.cleaned": ("ntc.disk_cleaned", "info"),
+    "approval.waiting": ("ntc.approval_waiting", "warning"),
 }
 
 
@@ -63,6 +64,8 @@ def notice_of(record: dict[str, Any], server: str) -> dict[str, Any] | None:
         text = plain(str(data.get("answer") or ""))[:240]
     elif kind == "run.failed":
         text = str(data.get("message") or "")[:240]
+    elif kind == "approval.waiting":
+        text = plain(str(data.get("reason") or data.get("name") or ""))[:240]
     elif kind.startswith("guardian.change"):
         text = str(data.get("title") or "")
     elif kind == "guardian.update.rolled_back":
@@ -159,3 +162,31 @@ async def notices_loop(app: FastAPI) -> None:
         except Exception:  # noqa: BLE001 - notices must not stop; the next round tries again
             logger.exception("notices round failed")
         await asyncio.sleep(EVERY_S)
+
+
+async def self_notices_loop(app: FastAPI) -> None:
+    """On a server: its own news to whoever is connected to it right now (the phone, directly or
+    through the PC). Missed while nobody listened? The phone asks GET /api/notices?since=N."""
+    from core.bodies import get_gate
+    from core.journal import get_journal
+
+    settings = app.state.settings
+    journal = get_journal(settings.data_dir / "journal")
+    name = get_gate(settings.data_dir / "identity", settings.body_kind).identity.card().get("name") or ""
+    latest = await asyncio.to_thread(journal.read, limit=1)
+    mark = int(latest[0]["seq"]) if latest else 0
+    while True:
+        await asyncio.sleep(EVERY_S)
+        try:
+            records = await asyncio.to_thread(journal.read, since=mark, limit=200)
+            for record in sorted(records, key=lambda r: int(r["seq"])):
+                mark = max(mark, int(record["seq"]))
+                notice = notice_of(record, name)
+                chats = getattr(app.state, "chats", None)
+                if notice is not None and chats is not None:
+                    notice["body_id"] = "self"
+                    await chats.broadcast(notice)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - the next round tries again
+            logger.exception("self notices round failed")

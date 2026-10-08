@@ -248,6 +248,11 @@ CATALOG: dict[str, dict[str, str]] = {
                               "sees only the folders you give it.",
                         "ru": "Здесь уже работают другие службы (порты {ports}): агент в своём контейнере видит "
                               "только выданные ему папки."},
+    "phone.sandbox_direct": {"en": "In the sandbox the agent's port is open only on the server itself: the phone reaches "
+                                    "it through this PC. A direct door needs another mode.",
+                             "ru": "В песочнице порт агента открыт только на самом сервере: телефон ходит к нему "
+                                   "через этот ПК. Прямой вход — в другом режиме."},
+    "ntc.approval_waiting": {"en": "{name}: the agent waits for your permission", "ru": "{name}: агент ждёт вашего разрешения"},
     "ntc.run_finished": {"en": "{name}: the task is done", "ru": "{name}: задача готова"},
     "ntc.run_failed": {"en": "{name}: the task failed", "ru": "{name}: задача упала"},
     "ntc.update_rolled_back": {"en": "{name}: the update did not start and was rolled back",
