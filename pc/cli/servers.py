@@ -26,7 +26,7 @@ from cli.backend import Backend, connect
 from cli.texts import Texts
 
 COMMANDS = ("list", "check", "add", "remove", "update", "mode")
-MODES = ("owner", "autopilot", "careful")
+MODES = ("owner", "autopilot", "careful", "sandbox")
 STEPS = ("connect", "preflight", "key", "packages", "download", "unpack", "configure", "identity", "service",
          "health")
 
@@ -51,6 +51,10 @@ def parse(argv: list[str]) -> argparse.Namespace:
             c.add_argument("--name", default="")
             c.add_argument("--no-memory", action="store_true", help="do not bring memory and skills from this PC")
             c.add_argument("-y", "--yes", action="store_true", help="do not ask before installing")
+            c.add_argument("--folder", action="append", default=[], metavar="PATH",
+                           help="sandbox: a server folder the agent may see (repeat for more)")
+            c.add_argument("--cpus", type=float, default=0, help="sandbox: CPUs (default: all but one)")
+            c.add_argument("--memory", type=int, default=0, metavar="MB", help="sandbox: memory (default: 75%%)")
     u = sub.add_parser("update", help="the latest signed release on a server (its settings, memory and keys stay)")
     u.add_argument("server", help="id, name or address")
     u.add_argument("--source", default="github", help="github (default), a package zip here, or server:/path there")
@@ -171,7 +175,9 @@ class Servers:
         if report.get("sudo") == "password":
             sudo = await asyncio.to_thread(getpass.getpass, self.t("srv.sudo_password"))
         started = await self._post("/api/servers/install", {**login, "mode": mode, "name": args.name,
-                                                            "sudo_password": sudo, "bring_memory": not args.no_memory})
+                                                            "sudo_password": sudo, "bring_memory": not args.no_memory,
+                                                            "folders": args.folder, "cpus": args.cpus,
+                                                            "memory_mb": args.memory})
         login["password"] = ""
         if not started.get("ok"):
             self.console.print(Text(started.get("error") or "?", style="red"))

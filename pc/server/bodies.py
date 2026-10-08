@@ -431,12 +431,16 @@ async def start_tunnels(app: FastAPI) -> None:
 
     app.state.sync_task = asyncio.create_task(delayed(), name="bodies-sync")
     app.state.guardian_task = asyncio.create_task(_guardian_loop(app), name="guardian-events")
+    # What the servers did while you were not looking (a task done, a rollback, gone offline).
+    from server.notices import notices_loop
+
+    app.state.notices_task = asyncio.create_task(notices_loop(app), name="body-notices")
 
 
 async def stop_tunnels(app: FastAPI) -> None:
     from core.bodies_routing import set_tunnels
 
-    for name in ("sync_task", "guardian_task"):
+    for name in ("sync_task", "guardian_task", "notices_task"):
         task = getattr(app.state, name, None)
         if task is not None:
             task.cancel()

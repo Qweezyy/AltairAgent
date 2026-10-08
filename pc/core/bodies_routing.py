@@ -50,7 +50,7 @@ BODY_HELP = ("Where to run it: leave out for this machine; a server's name (the 
 _STRICTNESS = {"plan": 0, "manual": 1, "allowlist": 1, "auto": 2, "accept_edits": 3, "autopilot": 3.5,
                "bypass": 4}
 #: The server's mode → the approval mode it stands for (core/servers/install.py MODE_APPROVAL).
-_SERVER_APPROVAL = {"owner": "bypass", "autopilot": "autopilot", "careful": "manual"}
+_SERVER_APPROVAL = {"owner": "bypass", "autopilot": "autopilot", "careful": "manual", "sandbox": "bypass"}
 
 _LOCAL_NAMES = {"", "pc", "local", "this", "here"}
 _PATH_START = re.compile(r"(/|~|[A-Za-z]:[/\\])")

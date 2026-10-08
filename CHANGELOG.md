@@ -15,6 +15,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the ve
 _Changes landing on `main` but not yet part of a tagged release go here._
 
 ### Added
+- **The "Sandbox" mode for a server where something important already runs.** The agent lives in a
+  Docker container of its own: inside it does anything by itself, but it sees only its own data and
+  the folders you grant it (each at `/work/<name>`; an existing folder keeps its owner — the agent
+  gets read and write by ACL), runs as a user without rights with every privilege dropped, and is
+  held to the CPUs and memory you set (by default all CPUs but one and three quarters of the
+  memory). Docker is installed when it is missing. Every release gets its own image, so the guardian
+  rolls a bad update back the same way. Recommended when the check finds other services running.
+  Going into or out of the sandbox is a reinstall, and the app says so.
+- **Notices from your servers on this PC.** A task on a server done or failed, an update or a system
+  change the guardian rolled back, an agent it restarted, a server gone for more than a minute and
+  back: a toast in the window, a system notification when the window is in the background (click
+  opens that chat on that server), a line in the terminal. Only news, each once — not the history.
 - **A server that looks after itself.** Next to the agent runs a small guardian of its own (plain
   `python3`, so a broken update cannot break it). An update is kept only if the new version answers;
   otherwise the guardian switches the server back to the version before and restarts it — checked live

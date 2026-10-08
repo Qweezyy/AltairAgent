@@ -300,6 +300,9 @@ class Settings(BaseSettings):
     #: localhost (веб-интерфейс). Никогда не логируется. Чтобы телефон достучался,
     #: сервер должен слушать не только 127.0.0.1 (host=0.0.0.0 или адрес Tailscale).
     bridge_token: str = Field(default="", repr=False)
+    #: Addresses that are this machine too (comma-separated): in the sandbox mode, the gateway of
+    #: the agent's own Docker network, which the PC's tunnel arrives from (set by the installer).
+    local_aliases: str = ""
     #: Разрешить подключение по локальной сети (сервер слушает 0.0.0.0 при
     #: следующем запуске). Нужно, чтобы телефон достучался до моста по Wi-Fi.
     #: Удалённый доступ всё равно защищён bridge_token. Меняется из UI связывания.

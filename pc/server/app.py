@@ -56,7 +56,7 @@ from server.files import (
 )
 from server.folder_dialog import has_native_window, pick_files, pick_folder
 from server.lan_bridge import LanBridge
-from server.remote_auth import RemoteAuthMiddleware
+from server.remote_auth import LocalAliasMiddleware, RemoteAuthMiddleware
 from server.swarm_ws import SwarmConnection, default_config
 from server.terminal_ws import serve_terminal
 from server.uploads import save_uploads
@@ -256,6 +256,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Altair", version=__version__, lifespan=lifespan)
     # Every route, not only /ws: in LAN mode the whole server is on the network.
     app.add_middleware(RemoteAuthMiddleware)
+    # Added last, so it runs first: the sandbox's own gateway counts as this machine (see there).
+    app.add_middleware(LocalAliasMiddleware)
 
     @app.exception_handler(StarletteHTTPException)
     async def _not_found_page(request: Request, exc: StarletteHTTPException) -> Response:
@@ -602,6 +604,8 @@ def create_app() -> FastAPI:
             sudo_password=str(payload.get("sudo_password") or ""), name=str(payload.get("name") or "").strip(),
             mode=str(payload.get("mode") or "owner"), source=str(payload.get("source") or "github"),
             bring_memory=bool(payload.get("bring_memory", True)),
+            folders=[str(f).strip() for f in payload.get("folders") or [] if str(f).strip()],
+            cpus=float(payload.get("cpus") or 0), memory_mb=int(payload.get("memory_mb") or 0),
         )
 
     @app.get("/api/servers")
@@ -716,6 +720,9 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=f"mode: one of {', '.join(MODES)}")
         store = ServerStore(app.state.settings.data_dir)
         record = await asyncio.to_thread(store.get, sid)
+        if record is not None and "sandbox" in (mode, record.mode) and mode != record.mode:
+            # Not a setting: the agent runs another way (in its container or on the server itself).
+            return {"ok": False, "error": tr("srv.sandbox_switch")}
         tunnels = getattr(app.state, "tunnels", None)
         tunnel = tunnels.get(sid) if tunnels is not None else None
         if record is None or tunnel is None:

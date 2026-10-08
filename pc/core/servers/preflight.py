@@ -121,8 +121,10 @@ def _judge(p: Preflight) -> None:
         p.problems.append(tr("srv.p.sudo"))
     # Other services already listen here: the agent should not get the run of this machine.
     if p.busy_ports:
-        p.recommended_mode = "autopilot"
-        p.why = tr("srv.why.busy", ports=", ".join(p.busy_ports[:6]))
+        # Other services here: the agent in its own container when Docker is there or can be put in.
+        p.recommended_mode = "sandbox" if (p.docker or p.apt) and p.sudo != "none" else "autopilot"
+        key = "srv.why.sandbox" if p.recommended_mode == "sandbox" else "srv.why.busy"
+        p.why = tr(key, ports=", ".join(p.busy_ports[:6]))
     else:
         p.recommended_mode = "owner"
         p.why = tr("srv.why.empty")

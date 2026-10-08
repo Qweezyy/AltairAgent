@@ -67,6 +67,30 @@ def is_authorized(scope: Scope) -> bool:
     return hmac.compare_digest(given, token)
 
 
+class LocalAliasMiddleware:
+    """In the sandbox the agent runs in a container: what comes from the server itself (the PC's
+    tunnel, `altair` there) reaches it from the gateway of its own Docker network, not from
+    127.0.0.1. LOCAL_ALIASES names those addresses; a request from one is seen as this machine's by
+    every check after this one. The network is the agent's alone (altair-net): no other container
+    shares that gateway."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            aliases = _local_aliases()
+            client = scope.get("client")
+            if aliases and client and client[0] in aliases:
+                scope = {**scope, "client": ("127.0.0.1", client[1])}
+        await self.app(scope, receive, send)
+
+
+def _local_aliases() -> frozenset[str]:
+    raw = (get_settings().local_aliases or "").strip()
+    return frozenset(a.strip() for a in raw.split(",") if a.strip())
+
+
 class RemoteAuthMiddleware:
     """Rejects non-loopback HTTP and WebSocket requests without the bridge token."""
 

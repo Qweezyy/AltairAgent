@@ -224,7 +224,11 @@ def test_the_preflight_reads_the_server_and_recommends_a_mode():
     assert bare.can_install and bare.package_arch == "x64" and bare.sudo == "root" and bare.missing == ["unzip"]
     assert bare.recommended_mode == "owner"
     busy = parse(GOOD_PROBE.replace("ports=22 53", "ports=22 53 80 443 5432"))
-    assert busy.recommended_mode == "autopilot" and "80" in busy.why
+    # Other services there: the agent in its own container (Docker can be put in with apt)…
+    assert busy.recommended_mode == "sandbox" and "80" in busy.why
+    # …and without apt or Docker, Autopilot.
+    no_docker = parse(GOOD_PROBE.replace("ports=22 53", "ports=22 53 80").replace("apt=yes", "apt=no"))
+    assert no_docker.recommended_mode == "autopilot"
     no_rights = parse(GOOD_PROBE.replace("uid=0", "uid=1000").replace("sudo_nopass=yes", "sudo_nopass=no")
                       .replace("sudo=yes", "sudo=no"))
     assert not no_rights.can_install and "sudo" in " ".join(no_rights.problems)
@@ -473,3 +477,63 @@ def test_an_update_changes_only_the_program(monkeypatch, settings, tmp_path, rel
         kinds = [r["kind"] for r in client.get("/api/journal?kind=server.").json()["records"]]
         assert kinds[0] == "server.updated"
         assert client.post("/api/servers/nope/update", json={}).status_code == 404
+
+
+async def test_the_sandbox_puts_the_agent_in_a_container_that_sees_only_its_folders(settings, tmp_path, release):
+    server = FakeServer(tmp_path)
+    req = InstallRequest(host="h", password="p", mode="sandbox", folders=["/srv/shop", "/home/ann/shop"])
+    record = await _installer(settings, server, req).run()
+
+    sent = "\n".join(server.commands)
+    assert any("apt-get" in c and " install " in c and "docker.io" in c for c in server.commands)   # no Docker yet
+    assert "FROM ubuntu:22.04" in server.files["/opt/altair/Dockerfile"]
+    assert "USER 1000" in server.files["/opt/altair/Dockerfile"]
+    assert "docker build -q -t altair:0.3.0-" in sent
+    run = server.files["/opt/altair/sandbox-run.sh"]
+    assert "-v /var/lib/altair:/data" in run and "-v /srv/shop:/work/shop" in run and "-v /home/ann/shop:/work/shop-2" in run
+    assert "-p 127.0.0.1:8137:8137" in run and "--cap-drop ALL" in run and "--security-opt no-new-privileges" in run
+    assert "--cpus 1 " in run and "--memory 1472m" in run and "--user 1000:1000" in run   # the server's size
+    unit = server.files["/etc/systemd/system/altair.service"]
+    assert "sandbox-run.sh" in unit and "Requires=docker.service" in unit and "Restart=always" in unit
+    assert "chown -R 1000:1000 /var/lib/altair" in sent
+    # Granted folders keep their owner: the agent's user gets them by ACL (found live: root-owned
+    # /srv/... was not writable inside), and the file tools may use /work.
+    assert "setfacl -R -m u:1000:rwX /srv/shop" in sent and "chown -R 1000:1000 /srv/shop" not in sent
+    assert any("apt-get" in c and " install " in c and " acl" in c for c in server.commands)
+    assert "docker exec $tty altair /opt/altair/app/bin/altair" in server.files["/usr/local/bin/altair"]
+    env = server.files["/var/lib/altair/.env"]
+    assert "WORKSPACE_PATH=/data/workspace" in env and "APPROVAL_MODE=bypass" in env   # the box is the boundary
+    assert "EXTRA_ALLOWED_ROOTS=/work" in env
+    assert record.mode == "sandbox" and record.sandbox_folders == ["/srv/shop", "/home/ann/shop"]
+    assert (record.sandbox_cpus, record.sandbox_memory_mb) == (1.0, 1472)
+
+    # An update keeps its folders and limits; removing it takes the container and images away.
+    server.commands.clear()
+    await _installer(settings, server, InstallRequest(host="h", update=True, mode="owner")).run()
+    assert "-v /srv/shop:/work/shop" in server.files["/opt/altair/sandbox-run.sh"]
+    assert ServerStore(settings.data_dir).get(record.id).mode == "sandbox"
+    server.commands.clear()
+    import core.servers.install as m
+    real = m.SSHRemote
+    m.SSHRemote = lambda login: FakeRemote(server, login)
+    try:
+        await uninstall(settings, ServerStore(settings.data_dir).get(record.id))
+    finally:
+        m.SSHRemote = real
+    assert any("docker rm -f altair" in c and "docker rmi" in c for c in server.commands)
+
+
+async def test_no_docker_and_no_way_to_put_it_in_means_no_sandbox(settings, tmp_path, release):
+    server = FakeServer(tmp_path)
+    server.probe = GOOD_PROBE.replace("apt=yes", "apt=no").replace("unzip=no", "unzip=yes")
+    with pytest.raises(InstallError) as err:
+        await _installer(settings, server, InstallRequest(host="h", password="p", mode="sandbox")).run()
+    assert err.value.step == "preflight" and "needs Docker" in str(err.value)
+
+
+@pytest.mark.parametrize("bad", ["/", "relative/path", ""])
+async def test_a_sandbox_folder_must_be_a_real_absolute_one(settings, tmp_path, release, bad):
+    server = FakeServer(tmp_path)
+    with pytest.raises(InstallError) as err:
+        await _installer(settings, server, InstallRequest(host="h", password="p", mode="sandbox", folders=[bad])).run()
+    assert "absolute path" in str(err.value)

@@ -23,6 +23,8 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = ["image-png", "webview-data-url"] }
 tauri-plugin-log = "2"
+# System notifications: what a server did while the window was in the background (server/notices.py).
+tauri-plugin-notification = "2"
 
 [target.'cfg(windows)'.dependencies]
 # The built-in browser's tabs are WebView2 controls created directly (src/browser.rs),

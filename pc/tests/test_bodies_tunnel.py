@@ -379,3 +379,40 @@ def test_the_servers_mode_is_changed_there_at_once(pc_app, settings, server_agen
         assert client.post("/api/servers/srv1/mode", json={"mode": "god"}).status_code == 400
         kinds = [x["kind"] for x in client.get("/api/journal?kind=server.").json()["records"]]
         assert kinds[:2] == ["server.mode", "server.mode"]
+
+
+def test_the_sandbox_is_not_switched_on_the_fly(pc_app, settings, server_agent):
+    """Going into or out of the sandbox changes how the agent runs: a reinstall, said plainly."""
+    from core.servers.registry import ServerStore
+
+    record = _record()
+    record.mode = "owner"
+    ServerStore(settings.data_dir).save(record)
+    with TestClient(pc_app) as client:
+        pc_app.state.tunnels = _Tunnels(_OnlineTunnel(record, server_agent))
+        r = client.post("/api/servers/srv1/mode", json={"mode": "sandbox"}).json()
+        assert r["ok"] is False and "install it again" in r["error"]
+        assert ServerStore(settings.data_dir).get("srv1").mode == "owner"
+
+
+async def test_the_sandboxs_own_gateway_counts_as_this_machine(pc_app, settings, monkeypatch):
+    """Found live: in the container the PC's tunnel arrives from the Docker network's gateway, and
+    every request but /api/health was refused. LOCAL_ALIASES makes that address this machine;
+    any other address is still a stranger."""
+    import core.settings as settings_module
+
+    async with pc_app.router.lifespan_context(pc_app):
+        def get(host):
+            transport = httpx.ASGITransport(app=pc_app, client=(host, 40000))
+            return httpx.AsyncClient(transport=transport, base_url="http://agent")
+
+        async with get("172.18.0.1") as gateway, get("172.18.0.5") as neighbour:
+            assert (await gateway.get("/api/bodies")).status_code in (401, 403)     # not set: a stranger
+            import server.remote_auth as remote_auth
+
+            settings.local_aliases = "172.18.0.1"
+            monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
+            monkeypatch.setattr(remote_auth, "get_settings", lambda: settings)
+            assert (await gateway.get("/api/bodies")).status_code == 200
+            assert (await gateway.get("/api/body/status")).status_code == 200
+            assert (await neighbour.get("/api/bodies")).status_code in (401, 403)   # anyone else: still not

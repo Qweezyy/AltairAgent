@@ -43,6 +43,11 @@ class ServerRecord:
     service: str = "altair"
     user_service: bool = False
     port_remote: int = 8137
+    #: The "sandbox" mode: the host folders the agent's container sees (each at /work/<name>),
+    #: and its limits (0 = the installer's default from the server's size).
+    sandbox_folders: list[str] = field(default_factory=list)
+    sandbox_cpus: float = 0.0
+    sandbox_memory_mb: int = 0
     added_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 

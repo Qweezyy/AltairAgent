@@ -240,6 +240,27 @@ CATALOG: dict[str, dict[str, str]] = {
     "appr.mcp": {"en": "Call the external MCP tool '{tool}' of the server '{server}'.",
                  "ru": "Вызов внешнего MCP-инструмента «{tool}» сервера «{server}»."},
     "srv.need_host": {"en": "Enter the server's address.", "ru": "Укажите адрес сервера."},
+    "srv.sandbox_switch": {"en": "The sandbox is not a setting: the agent runs another way there. To go into "
+                                  "or out of it, remove the server and install it again in the new mode.",
+                           "ru": "Песочница — не настройка: агент там запущен иначе. Чтобы перейти в неё или "
+                                 "из неё, удалите сервер и установите его заново в нужном режиме."},
+    "srv.why.sandbox": {"en": "Other services already run here (ports {ports}): the agent in its own container "
+                              "sees only the folders you give it.",
+                        "ru": "Здесь уже работают другие службы (порты {ports}): агент в своём контейнере видит "
+                              "только выданные ему папки."},
+    "ntc.run_finished": {"en": "{name}: the task is done", "ru": "{name}: задача готова"},
+    "ntc.run_failed": {"en": "{name}: the task failed", "ru": "{name}: задача упала"},
+    "ntc.update_rolled_back": {"en": "{name}: the update did not start and was rolled back",
+                               "ru": "{name}: обновление не запустилось и откачено"},
+    "ntc.rollback_impossible": {"en": "{name}: the update failed and there was nothing to roll back to",
+                                "ru": "{name}: обновление не удалось, и откатиться было некуда"},
+    "ntc.change_rolled_back": {"en": "{name}: a system change was not confirmed and was undone",
+                               "ru": "{name}: изменение системы не подтвердилось и откачено"},
+    "ntc.agent_restarted": {"en": "{name}: the agent hung and was restarted", "ru": "{name}: агент завис и перезапущен"},
+    "ntc.disk_cleaned": {"en": "{name}: the disk ran low and was cleaned", "ru": "{name}: кончалось место, диск почищен"},
+    "ntc.freed": {"en": "{mb} MB freed", "ru": "освобождено {mb} МБ"},
+    "ntc.offline": {"en": "{name} is not connected", "ru": "{name} не на связи"},
+    "ntc.online": {"en": "{name} is back online", "ru": "{name} снова на связи"},
     "srv.p.arch": {"en": "The processor architecture '{arch}' has no Altair package (x64 and arm64 do).",
                    "ru": "Для архитектуры процессора «{arch}» нет пакета Altair (есть x64 и arm64)."},
     "srv.p.systemd": {"en": "There is no systemd: the agent could not run as a service that restarts by itself.",

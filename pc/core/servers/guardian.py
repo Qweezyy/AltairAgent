@@ -230,6 +230,8 @@ class Guardian:
         for p in others[: max(0, len(others) - KEEP_RELEASES)]:
             shutil.rmtree(p, ignore_errors=True)
             removed.append(p.name)
+            if shutil.which("docker"):        # its sandbox image goes with it
+                self.ops.shell(f"docker image rm -f altair:{p.name} >/dev/null 2>&1; true")
         return removed
 
     def _disk(self) -> None:
@@ -249,7 +251,8 @@ class Guardian:
                         old_logs += 1
                 except OSError:
                     continue
-        for command in ("journalctl --vacuum-size=200M", "apt-get clean", "rm -f /tmp/altair-move-*.tar.gz"):
+        for command in ("journalctl --vacuum-size=200M", "apt-get clean", "rm -f /tmp/altair-move-*.tar.gz",
+                        "command -v docker >/dev/null && docker image prune -f >/dev/null 2>&1; true"):
             self.ops.shell(command)
         self.event("disk.cleaned", freed_mb=self.ops.free_mb() - before, releases=removed, old_logs=old_logs,
                    free_mb=self.ops.free_mb())

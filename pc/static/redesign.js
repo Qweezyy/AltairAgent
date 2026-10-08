@@ -740,6 +740,9 @@ const HANDLERS = {
     if (state.freshSession) loadSession(state.freshSession); else showWelcome();
   },
   "session.title"(m) { applySessionTitle(m); },
+  // A server did something worth knowing (server/notices.py): a toast, and a system notification
+  // when the window is in the background; a click opens that chat on that server.
+  "notice"(m) { showNotice(m); },
   // The chat went to a server (from this window or another): follow it there.
   "session.moved"(m) { if (m.session_id === state.sessionId) { toast(T("move.done", { name: m.name || "" })); window.AltairBody?.open(m.body, m.session_id); } else refreshSessions(); },
   "workspace.updated"(m) { setWorkspace(m.workspace); toast(T("ev.wsUpdated")); },
@@ -2810,7 +2813,7 @@ async function renderSecretsSection(main, prefill) {
 // The agent installs itself on a server from an SSH login: check first (read-only), then install
 // with live steps. The password goes to this PC's backend once and is not kept anywhere.
 const SRV_STEPS = ["connect", "preflight", "key", "packages", "download", "unpack", "configure", "identity", "service", "health"];
-const SRV_MODES = ["owner", "autopilot", "careful"];
+const SRV_MODES = ["owner", "autopilot", "careful", "sandbox"];
 async function renderServersSection(main) {
   main.innerHTML = `<div class="settings-section"><h2>${esc(T("srv.title"))}</h2><p class="sr-desc" style="margin-bottom:16px">${esc(T("srv.desc"))}</p>
     <div id="srv-list" class="srv-list"></div>
@@ -2930,13 +2933,24 @@ function drawReport(report, p, L, box, onInstalled, close) {
     ${problems}
     ${p.can_install ? `<div class="form-label" style="margin-top:14px">${esc(T("srv.modeLabel"))}</div><div class="srv-why dim">${esc(p.why || "")}</div><div class="srv-modes">${modes}</div>
       ${p.sudo === "password" ? `<div class="form-row"><label class="form-label">${esc(T("srv.sudoPassword"))}</label><input class="field" data-f="sudo" type="password" autocomplete="new-password" /><span class="form-help">${esc(T("srv.sudoHelp"))}</span></div>` : ""}
+      <div class="srv-sandbox" data-sandbox ${p.recommended_mode === "sandbox" ? "" : "hidden"}>
+        <div class="form-row"><label class="form-label">${esc(T("srv.sbFolders"))}</label><textarea class="field mono" data-f="folders" rows="3" spellcheck="false" placeholder="/srv/myproject"></textarea><span class="form-help">${esc(T("srv.sbFoldersHelp"))}</span></div>
+        <div class="srv-sb-limits"><div class="form-row"><label class="form-label">${esc(T("srv.sbCpus"))}</label><input class="field" data-f="cpus" inputmode="decimal" value="${Math.max(1, (p.cpus || 1) - 1)}" /></div>
+        <div class="form-row"><label class="form-label">${esc(T("srv.sbMemory"))}</label><input class="field" data-f="memory_mb" inputmode="numeric" value="${Math.max(512, Math.round((p.mem_mb || 1024) * 0.75))}" /></div></div>
+        ${p.docker ? "" : `<div class="form-help">${esc(T("srv.sbDocker"))}</div>`}
+      </div>
       <div class="form-row"><label class="form-label">${esc(T("srv.name"))}</label><input class="field" data-f="name" placeholder="${escAttr(L.host)}" maxlength="40" /></div>
       <label class="cap-check"><input type="checkbox" data-f="memory" checked /> ${esc(T("srv.bringMemory"))}</label>
       <div class="row" style="margin-top:14px"><button class="btn btn-primary" data-install>${esc(T("srv.install"))}</button></div>` : ""}
   </div>`;
+  $$('input[name="srv-mode"]', report).forEach((r) => r.addEventListener("change", () => {
+    const box = $("[data-sandbox]", report); if (box) box.hidden = r.value !== "sandbox" || !r.checked;
+  }));
   $("[data-install]", report)?.addEventListener("click", async (e) => {
     e.currentTarget.disabled = true;
-    const payload = { ...L, mode: $('input[name="srv-mode"]:checked', report)?.value || p.recommended_mode, name: $('[data-f="name"]', report).value.trim(), sudo_password: $('[data-f="sudo"]', report)?.value || "", bring_memory: $('[data-f="memory"]', report).checked };
+    const payload = { ...L, mode: $('input[name="srv-mode"]:checked', report)?.value || p.recommended_mode, name: $('[data-f="name"]', report).value.trim(), sudo_password: $('[data-f="sudo"]', report)?.value || "", bring_memory: $('[data-f="memory"]', report).checked,
+      folders: ($('[data-f="folders"]', report)?.value || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean),
+      cpus: parseFloat($('[data-f="cpus"]', report)?.value || "0") || 0, memory_mb: parseInt($('[data-f="memory_mb"]', report)?.value || "0", 10) || 0 };
     // The passwords leave the page with this request and are not kept in the form.
     $$('input[type="password"]', box).forEach((i) => { i.value = ""; });
     let r;
@@ -2974,6 +2988,30 @@ function followInstall(box, jobId, onInstalled, close, titleKey = "srv.installin
     $("[data-close-form]", end).addEventListener("click", close);
   };
   tick();
+}
+function showNotice(m) {
+  const B = window.AltairBody;
+  const watching = B && m.body_id && B.id === m.body_id && m.chat && m.chat === state.sessionId;
+  const t = toast(m.text ? `${m.title} — ${m.text}` : m.title, m.level === "error" ? "error" : "");
+  if (m.body_id && m.chat && !watching) {
+    t.classList.add("clickable");
+    t.addEventListener("click", () => B?.open(m.body_id, m.chat));
+  }
+  if (!watching) refreshBodyChats(true);
+  if (document.hasFocus() && !document.hidden) return;
+  // In the background: a system notification (the desktop shell's), else the browser's own.
+  const body = String(m.text || "").slice(0, 180);
+  const N = window.__TAURI__?.notification;
+  if (N?.sendNotification) {
+    Promise.resolve(N.isPermissionGranted?.()).then(async (ok) => {
+      if (!ok && N.requestPermission) ok = (await N.requestPermission()) === "granted";
+      if (ok !== false) N.sendNotification({ title: m.title, body });
+    }).catch(() => {});
+  } else if ("Notification" in window) {
+    if (Notification.permission === "granted") new Notification(m.title, { body });
+    else if (Notification.permission === "default") Notification.requestPermission();
+  }
+  state.appWin?.requestUserAttention?.(2)?.catch?.(() => {});
 }
 // Moving this chat to a server: it goes on there with this PC switched off (server/chat_move.py).
 async function openMoveChat() {

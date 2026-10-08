@@ -102,6 +102,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "srv.mode.owner": {"en": "Owner", "ru": "Хозяин"},
     "srv.mode.autopilot": {"en": "Autopilot", "ru": "Автопилот"},
     "srv.mode.careful": {"en": "Careful", "ru": "Осторожно"},
+    "srv.mode.sandbox": {"en": "Sandbox", "ru": "Песочница"},
     "srv.need_password": {"en": "A new server needs its SSH password: run in a terminal or use --password-stdin.", "ru": "Новому серверу нужен пароль SSH: запустите в терминале или передайте --password-stdin."},
     "srv.password": {"en": "Password for {login} (used once, not saved): ", "ru": "Пароль для {login} (нужен один раз, не сохраняется): "},
     "srv.checking": {"en": "Connecting and looking around (read-only)…", "ru": "Подключаюсь и осматриваюсь (только чтение)…"},

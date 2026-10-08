@@ -52,9 +52,10 @@ logger = get_logger("servers.install")
 
 STEPS = ("connect", "preflight", "key", "packages", "download", "unpack", "configure", "identity", "service",
          "health")
-MODES = ("owner", "autopilot", "careful")
+MODES = ("owner", "autopilot", "careful", "sandbox")
 #: The approval mode the agent works in on the server, per server mode.
-MODE_APPROVAL = {"owner": "bypass", "autopilot": "autopilot", "careful": "manual"}
+# In the sandbox the agent may do anything: the container is the boundary, not the confirmations.
+MODE_APPROVAL = {"owner": "bypass", "autopilot": "autopilot", "careful": "manual", "sandbox": "bypass"}
 REPO = "Qweezyy/AltairAgent"
 SERVER_PORT = 8137
 #: Settings of this PC that make no sense on a server (they are set for the server instead).
@@ -91,6 +92,11 @@ class InstallRequest:
     #: An update of a server added before: only the program changes — its settings, memory and
     #: body keys stay as they are there (the server may have learned and changed things).
     update: bool = False
+    #: The "sandbox" mode: host folders the agent may see (at /work/<name> inside), CPU and memory
+    #: for its container (0 = from the server's size: all CPUs but one, 75 % of the memory).
+    folders: list[str] = field(default_factory=list)
+    cpus: float = 0.0
+    memory_mb: int = 0
 
 
 @dataclass
@@ -215,7 +221,9 @@ def server_env(pc_env_text: str, mode: str, layout: Layout) -> str:
         f"PORT={SERVER_PORT}",
         "BODY_KIND=server",
         f"APPROVAL_MODE={MODE_APPROVAL.get(mode, 'manual')}",
-        f"WORKSPACE_PATH={layout.data_dir}/workspace",
+        f"WORKSPACE_PATH={SANDBOX_DATA if mode == 'sandbox' else layout.data_dir}/workspace",
+        # In the sandbox the granted folders are at /work/<name>: the file tools may use them.
+        *(["EXTRA_ALLOWED_ROOTS=/work"] if mode == "sandbox" else []),
         "JOURNAL=true",
         "BRIDGE_LAN=false",
     ]
@@ -241,6 +249,97 @@ def bundle_of_self(settings: Settings, with_memory: bool) -> bytes:
 
 #: A new release must answer within this long, or the guardian goes back to the one before.
 UPDATE_DEADLINE_S = 300
+
+# ---------------------------------------------------------------- the sandbox mode
+
+#: Inside the container: the agent's data (the host's data folder) and the user it runs as.
+SANDBOX_DATA = "/data"
+SANDBOX_UID = 1000
+
+#: The image of a release: the release itself on Ubuntu 22.04 (the glibc it is built for), with
+#: what the agent's tools expect to find (git, python3, curl), run as a user without rights.
+SANDBOX_DOCKERFILE = f"""FROM ubuntu:22.04
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
+      ca-certificates curl git python3 python3-venv tini && rm -rf /var/lib/apt/lists/* \\
+ && useradd -m -u {SANDBOX_UID} altair
+COPY . /opt/altair/app
+ENV APP_PATH={SANDBOX_DATA} HOME={SANDBOX_DATA}/home PYTHONUNBUFFERED=1
+USER {SANDBOX_UID}
+WORKDIR {SANDBOX_DATA}
+EXPOSE {SERVER_PORT}
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/opt/altair/app/LocalAIAgent", "--server", "--host", "0.0.0.0", "--port", "{SERVER_PORT}"]
+"""
+
+
+def sandbox_limits(cpus: float, memory_mb: int, pre: Preflight | None) -> tuple[float, int]:
+    """CPU and memory for the container: as asked, or from the server's size — all CPUs but one
+    and three quarters of the memory, so the services already there keep room."""
+    if cpus <= 0:
+        total = (pre.cpus if pre else 0) or 1
+        cpus = float(max(1, total - 1))
+    if memory_mb <= 0:
+        memory_mb = max(512, int(((pre.mem_mb if pre else 0) or 1024) * 0.75))
+    return cpus, memory_mb
+
+
+def sandbox_mounts(folders: list[str]) -> list[tuple[str, str]]:
+    """Host folder → /work/<its name> (names made unique); absolute paths only."""
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for raw in folders:
+        host = str(raw).strip().rstrip("/")
+        if not host.startswith("/") or host in ("", "/"):
+            raise InstallError("preflight", f"a sandbox folder must be an absolute path other than /: {raw!r}")
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", host.rsplit("/", 1)[-1]) or "folder"
+        base, n = name, 2
+        while name in seen:
+            name, n = f"{base}-{n}", n + 1
+        seen.add(name)
+        out.append((host, f"/work/{name}"))
+    return out
+
+
+def sandbox_run_script(layout: Layout, mounts: list[tuple[str, str]], cpus: float, memory_mb: int) -> str:
+    """What the service runs: the container of the release `current` points to (built when its
+    image is missing — after a rollback to an old release, say). The guardian switches `current`
+    and restarts the service, exactly as without a sandbox."""
+    volumes = " ".join(f"-v {shlex.quote(h)}:{shlex.quote(c)}" for h, c in mounts)
+    return f"""#!/bin/sh
+# Written by the Altair server installer (the "sandbox" mode).
+set -e
+rel=$(readlink -f {layout.install_dir}/current)
+tag="altair:$(basename "$rel")"
+docker image inspect "$tag" >/dev/null 2>&1 || docker build -q -t "$tag" -f {layout.install_dir}/Dockerfile "$rel" >/dev/null
+docker rm -f altair >/dev/null 2>&1 || true
+# Its own network: nothing else shares the gateway the server's own requests come from.
+docker network inspect altair-net >/dev/null 2>&1 || docker network create altair-net >/dev/null
+gw=$(docker network inspect altair-net -f '{{{{(index .IPAM.Config 0).Gateway}}}}')
+exec docker run --rm --name altair --network altair-net -e LOCAL_ALIASES="$gw" \\
+  -p 127.0.0.1:{SERVER_PORT}:{SERVER_PORT} \\
+  -v {layout.data_dir}:{SANDBOX_DATA} {volumes} \\
+  --cpus {cpus:g} --memory {memory_mb}m --pids-limit 1024 \\
+  --cap-drop ALL --security-opt no-new-privileges \\
+  --user {SANDBOX_UID}:{SANDBOX_UID} "$tag"
+"""
+
+
+def sandbox_unit_text(layout: Layout) -> str:
+    return f"""[Unit]
+Description=Altair agent (server body, in its sandbox container)
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+ExecStart={layout.install_dir}/sandbox-run.sh
+ExecStop=/usr/bin/docker stop -t 20 altair
+Restart=always
+RestartSec=5
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
+"""
 
 
 def guardian_source() -> str:
@@ -317,11 +416,17 @@ class Installer:
     async def run(self) -> ServerRecord:
         req = self.req
         if req.mode not in MODES:
-            raise InstallError("preflight", f"unknown mode '{req.mode}' (owner, autopilot, careful)")
+            raise InstallError("preflight", f"unknown mode '{req.mode}' ({', '.join(MODES)})")
         self._step("connect", f"{req.user}@{req.host}:{req.port}")
         login, known = login_for(self.store, req)
         if known is not None:
             self.state.server_id = known.id
+        # An update keeps the server's mode and, in the sandbox, its folders and limits.
+        mode = known.mode if req.update and known is not None else req.mode
+        if req.update and known is not None and mode == "sandbox":
+            req.folders = list(known.sandbox_folders)
+            req.cpus, req.memory_mb = known.sandbox_cpus, known.sandbox_memory_mb
+        self.mode = mode
         try:
             async with self.remote_factory(login) as remote:
                 self.state.host_key, self.state.host_key_fingerprint = remote.host_key, remote.host_key_fingerprint
@@ -333,6 +438,8 @@ class Installer:
                     raise InstallError("preflight", "; ".join(pre.problems))
                 if pre.sudo == "password" and not req.sudo_password:
                     raise InstallError("preflight", "this login needs the sudo password")
+                if mode == "sandbox":
+                    self._sandbox_preflight(pre)
                 home = (await remote.run("printf %s \"$HOME\"")).out.strip() or "/root"
                 layout = Layout.for_login(True, home)
                 if req.update:
@@ -350,6 +457,8 @@ class Installer:
                 await self._packages(remote, pre)
                 package = await self._download(remote, pre, layout)
                 await self._unpack(remote, package, layout)
+                if mode == "sandbox":
+                    await self._sandbox_image(remote, layout)
                 if req.update and known is not None:
                     self.state.body_id = known.body_id
                 else:
@@ -364,10 +473,12 @@ class Installer:
             id=self.state.server_id, name=req.name or (known.name if known else req.host), host=req.host, port=req.port, user=req.user,
             host_key=self.state.host_key, host_key_fingerprint=self.state.host_key_fingerprint,
             body_id=self.state.body_id, arch=pre.package_arch, system=pre.system, version=self.state.version,
-            mode=known.mode if req.update and known is not None else req.mode,
-            install_dir=layout.install_dir, data_dir=layout.data_dir,
+            mode=mode, install_dir=layout.install_dir, data_dir=layout.data_dir,
             user_service=layout.user_service, port_remote=SERVER_PORT,
         )
+        if mode == "sandbox":
+            record.sandbox_folders = list(req.folders)
+            record.sandbox_cpus, record.sandbox_memory_mb = sandbox_limits(req.cpus, req.memory_mb, pre)
         self.store.save(record)
         self._step("done", record.name, 1.0)
         return record
@@ -528,8 +639,35 @@ ln -sfn {release} {layout.install_dir}/current
                          root=True)
         self.state.body_id = str(card["id"])
 
+    def _sandbox_preflight(self, pre: Preflight) -> None:
+        """The sandbox needs Docker: there, or installable (apt and root rights); and setfacl, to
+        give the agent's user the granted folders without changing their owner."""
+        if pre.apt and "acl" not in pre.missing:
+            pre.missing.append("acl")
+        if pre.docker:
+            return
+        if not pre.apt:
+            raise InstallError("preflight", "the sandbox mode needs Docker, and it is not there and cannot be "
+                                            "installed here (no apt-get): install Docker or pick another mode")
+        if "docker.io" not in pre.missing:
+            pre.missing.append("docker.io")
+
+    async def _sandbox_image(self, remote: SSHRemote, layout: Layout) -> None:
+        """The release's container image, built now: an install fails here, not at the first start."""
+        self._step("unpack", "building the sandbox image")
+        release = self.state.release
+        tag = "altair:" + release.rsplit("/", 1)[-1]
+        await self._must(remote, f"cat > {layout.install_dir}/Dockerfile", "unpack", root=True,
+                         stdin=SANDBOX_DOCKERFILE)
+        await self._must(remote, f"systemctl enable --now docker >/dev/null 2>&1; docker build -q -t {shlex.quote(tag)} "
+                                 f"-f {layout.install_dir}/Dockerfile {shlex.quote(release)}", "unpack", root=True,
+                         timeout=1800)
+
     async def _service(self, remote: SSHRemote, layout: Layout, home: str) -> None:
         self._step("service")
+        if getattr(self, "mode", "") == "sandbox":
+            await self._sandbox_service(remote, layout)
+            return
         unit = unit_text(layout, home)
         result = await remote.run(f"cat > {layout.unit_path}", root=True, stdin=unit)
         if not result.ok:
@@ -544,6 +682,32 @@ ln -sfn {release} {layout.install_dir}/current
         ctl = "systemctl --user" if layout.user_service else "systemctl"
         await self._must(remote, f"{ctl} daemon-reload && {ctl} enable altair >/dev/null 2>&1 && {ctl} restart altair",
                          "service", root=not layout.user_service)
+
+    async def _sandbox_service(self, remote: SSHRemote, layout: Layout) -> None:
+        """The service runs the container of `current`; the data folder belongs to the container's
+        user; `altair` on the server talks to the agent inside it."""
+        mounts = sandbox_mounts(self.req.folders)
+        cpus, memory = sandbox_limits(self.req.cpus, self.req.memory_mb, self.state.preflight)
+        script = f"{layout.install_dir}/sandbox-run.sh"
+        await self._must(remote, f"cat > {script} && chmod 755 {script}", "service", root=True,
+                         stdin=sandbox_run_script(layout, mounts, cpus, memory))
+        await self._must(remote, f"cat > {layout.unit_path}", "service", root=True, stdin=sandbox_unit_text(layout))
+        await self._must(remote, f"mkdir -p {layout.data_dir}/workspace {layout.data_dir}/home && "
+                                 f"chown -R {SANDBOX_UID}:{SANDBOX_UID} {layout.data_dir}", "service", root=True)
+        for host, _inside in mounts:
+            # A folder that is not there yet is the agent's; one that is keeps its owner (a web
+            # server's site, say) — the agent's user gets read and write by ACL, new files too.
+            q = shlex.quote(host)
+            await self._must(remote, f"if [ -e {q} ]; then setfacl -R -m u:{SANDBOX_UID}:rwX {q} && "
+                                     f"find {q} -type d -exec setfacl -m d:u:{SANDBOX_UID}:rwX {{}} +; "
+                                     f"else mkdir -p {q} && chown {SANDBOX_UID}:{SANDBOX_UID} {q}; fi",
+                             "service", root=True)
+        wrapper = ('#!/bin/sh\nif [ -t 0 ] && [ -t 1 ]; then tty=-it; else tty=-i; fi\n'
+                   'exec docker exec $tty altair /opt/altair/app/bin/altair "$@"\n')
+        await self._must(remote, f"cat > {shlex.quote(layout.command)} && chmod 755 {shlex.quote(layout.command)}",
+                         "service", root=True, stdin=wrapper)
+        await self._must(remote, "systemctl daemon-reload && systemctl enable altair >/dev/null 2>&1 && "
+                                 "systemctl restart altair", "service", root=True)
 
     async def _guardian(self, remote: SSHRemote, layout: Layout) -> None:
         """The guardian next to the agent: its own service, run by the system's python3."""
@@ -578,8 +742,11 @@ ln -sfn {release} {layout.install_dir}/current
             raise InstallError("health", "the agent did not start on the server:\n" + detail)
 
     async def _must(self, remote: SSHRemote, command: str, step: str, *, root: bool = False,
-                    stdin: str | None = None) -> str:
-        result = await remote.run(command, root=root, stdin=stdin)
+                    stdin: str | None = None, timeout: float | None = None) -> str:
+        if timeout is None:
+            result = await remote.run(command, root=root, stdin=stdin)
+        else:
+            result = await remote.run(command, root=root, stdin=stdin, timeout=timeout)
         if not result.ok:
             detail = (result.err or result.out).strip()[-500:]
             raise InstallError(step, f"{detail or 'exit code ' + str(result.code)}")
@@ -619,6 +786,9 @@ async def uninstall(settings: Settings, record: ServerRecord, *, keep_data: bool
         remote.sudo = {"root": "", "nopass": "sudo -n"}.get(pre.sudo, remote.sudo)
         report("service", "stop", 0.2)
         guardian_unit = unit.replace("altair.service", "altair-guardian.service")
+        if record.mode == "sandbox":
+            await remote.run("docker rm -f altair >/dev/null 2>&1; docker images -q altair | xargs -r docker rmi -f "
+                             ">/dev/null 2>&1; docker network rm altair-net >/dev/null 2>&1; true", root=True)
         await remote.run(f"{ctl} disable --now altair-guardian 2>/dev/null; rm -f {guardian_unit}; "
                          f"{ctl} disable --now altair 2>/dev/null; rm -f {unit}; {ctl} daemon-reload",
                          root=not record.user_service)
