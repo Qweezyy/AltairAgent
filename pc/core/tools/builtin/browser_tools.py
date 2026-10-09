@@ -15,22 +15,35 @@ quarantine; moving one out is a separate, approved step.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
+from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from core.browser_downloads import user_downloads_dir
-from core.browser_session import PageView, get_agent_browser
+from core.browser_session import (
+    LOG_KEEP,
+    SNAPSHOT_LIMIT,
+    PageView,
+    Step,
+    explain_failure,
+    get_agent_browser,
+    png_size,
+)
 from core.errors import ToolError
 from core.events import ArtifactCreated, BrowserHandoff
 from core.i18n import tr
+from core.logging_setup import get_logger
 from core.security.paths import resolve_path, safe_relpath
 from core.security.permissions import decide
 from core.tools.base import Tool, ToolContext, ToolResult
 from core.tools.external_content import guard_external
+
+logger = get_logger("browser_tools")
 
 
 async def _guarded(ctx: ToolContext, view: PageView) -> str:
@@ -47,14 +60,59 @@ class _ReadOnly(Tool):
         return "allow"
 
 
-# ------------------------------------------------------------ navigate / read / find
+# ------------------------------------------------------------ steps
+
+
+class _StepTool(Tool):
+    """An interaction with the page. It runs on its own (and returns the page after it) or as
+    one step of browser_batch, where the page is read only once, at the end."""
+
+    category = "network"
+    dangerous = True
+    timeout = 60.0
+
+    @abstractmethod
+    def step(self, args: Any, ctx: ToolContext) -> Step:
+        """The action this tool performs, for running it alone or in a batch."""
+
+    async def run(self, args: Any, ctx: ToolContext) -> str:
+        s = self.step(args, ctx)
+        view = await get_agent_browser().act(s.action, s.ref, dialog=s.dialog, sandbox=ctx.settings,
+                                            label=s.label)
+        return await _guarded(ctx, view)
+
+
+class _LookingStep(_StepTool):
+    """A step that only looks or moves the pointer: nothing is sent, so nothing is asked."""
+
+    category = "read"
+    dangerous = False
+
+    def auto_verdict(self, args, ctx) -> str:  # type: ignore[override]
+        return "allow"
+
+
+def _label(name: str, args: BaseModel) -> str:
+    """How a batch step is named in its log: the tool and the arguments that are not defaults."""
+    shown = []
+    for key, value in args.model_dump(exclude_defaults=True).items():
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        shown.append(f"{key}={text if len(text) <= 60 else text[:57] + '…'}")
+    return f"{name.removeprefix('browser_')} {' '.join(shown)}".strip()
+
+
+def _point(x: float | None, y: float | None) -> tuple[float, float] | None:
+    return (x, y) if x is not None and y is not None else None
+
+
+# ------------------------------------------------------------ navigate / read / find / text
 
 
 class NavigateArgs(BaseModel):
     url: str = Field(description="Address (https:// is added if missing) or a search query")
 
 
-class BrowserNavigateTool(_ReadOnly):
+class BrowserNavigateTool(_LookingStep):
     category = "network"  # it goes out to the internet: normal network approval
     name = "browser_navigate"
     description = (
@@ -69,6 +127,14 @@ class BrowserNavigateTool(_ReadOnly):
 
     def approval_reason(self, args) -> str:  # type: ignore[override]
         return tr("appr.br_open", url=args.url)
+
+    def step(self, args: NavigateArgs, ctx: ToolContext) -> Step:
+        b = get_agent_browser()
+
+        async def action(page, target) -> None:
+            await b.open_in(page, args.url, ctx.settings)
+
+        return Step(_label(self.name, args), action)
 
     async def run(self, args: NavigateArgs, ctx: ToolContext) -> str:
         try:
@@ -115,13 +181,29 @@ def _network_hint(url: str) -> str:
     )
 
 
+class ReadArgs(BaseModel):
+    ref: str = Field(default="", description="Read only this element's subtree (a form, a dialog, a list)")
+    interactive: bool = Field(
+        default=False, description="Only elements you can act on (and headings): a long page in a fraction of the size")
+    depth: int | None = Field(default=None, ge=1, le=50, description="Only this many levels of the tree")
+    max_chars: int = Field(default=SNAPSHOT_LIMIT, ge=1000, le=60_000, description="Cut the result at this size")
+
+
 class BrowserReadTool(_ReadOnly):
     name = "browser_read"
-    description = "Reads the active tab again: the fresh accessibility tree with [ref=…] handles."
+    description = (
+        "Reads the active tab again: the fresh accessibility tree with [ref=…] handles. Narrow it "
+        "on big pages: ref= reads one part (a form, a dialog, a results list), interactive=true "
+        "lists only what can be clicked or filled. For the page's text use browser_text."
+    )
+    Args = ReadArgs
     timeout = 45.0
+    max_output_chars = 62_000
 
-    async def run(self, args, ctx: ToolContext) -> str:
-        return await _guarded(ctx, await get_agent_browser().snapshot())
+    async def run(self, args: ReadArgs, ctx: ToolContext) -> str:
+        view = await get_agent_browser().read(ref=args.ref, interactive=args.interactive, depth=args.depth,
+                                              limit=args.max_chars)
+        return await _guarded(ctx, view)
 
 
 class FindArgs(BaseModel):
@@ -143,37 +225,90 @@ class BrowserFindTool(_ReadOnly):
         return await guard_external(ctx, found, source=page.url)
 
 
+class TextArgs(BaseModel):
+    ref: str = Field(default="", description="Only this element's text (an article, a table, a comment)")
+    start: int = Field(default=0, ge=0, description="Character to start from (to read a long page in parts)")
+    max_chars: int = Field(default=20_000, ge=500, le=100_000)
+
+
+class BrowserTextTool(_ReadOnly):
+    name = "browser_text"
+    description = (
+        "The readable text of the active tab — its main content when the page marks one (article, "
+        "main), else the whole page; or of one element by ref. Several times cheaper than the "
+        "accessibility tree when you need to read, not act: articles, results, documentation, "
+        "messages. A long text comes in parts (start=…)."
+    )
+    Args = TextArgs
+    timeout = 45.0
+    max_output_chars = 102_000
+
+    async def run(self, args: TextArgs, ctx: ToolContext) -> str:
+        b = get_agent_browser()
+        text, total = await b.page_text(ref=args.ref, start=args.start, limit=args.max_chars)
+        page = await b.page()
+        head = f"URL: {page.url}\nTitle: {await page.title()}\n\n"
+        end = args.start + len(text)
+        if not total:
+            body = "(the page has no text yet — it may still be loading, or it is drawn on a canvas)"
+        elif args.start >= total:
+            body = f"(the text is {total} characters long; start={args.start} is past its end)"
+        else:
+            body = text + (f"\n\n[characters {args.start}–{end} of {total}; next part: start={end}]"
+                           if end < total else "")
+        return await guard_external(ctx, head + body, source=page.url)
+
+
 # ------------------------------------------------------------ interactions
 
 
 class ClickArgs(BaseModel):
-    ref: str = Field(description="The element's ref from the latest snapshot, e.g. 'e12'")
+    ref: str = Field(default="", description="The element's ref from the latest snapshot, e.g. 'e12'")
+    x: float | None = Field(default=None, description="Or click at this point (CSS pixels of a browser_screenshot)")
+    y: float | None = Field(default=None)
     double: bool = Field(default=False, description="Double-click")
     button: Literal["left", "right", "middle"] = Field(default="left")
+    modifiers: list[Literal["Alt", "Control", "Meta", "Shift"]] = Field(
+        default_factory=list, description="Keys held during the click (Control = open a link in a new tab)")
     dialog: Literal["", "accept", "dismiss"] = Field(
         default="", description="How to answer a confirm/prompt dialog the click opens (default: dismiss)"
     )
 
+    @model_validator(mode="after")
+    def _where(self) -> ClickArgs:
+        if not self.ref and _point(self.x, self.y) is None:
+            raise ValueError("give ref, or both x and y")
+        return self
 
-class BrowserClickTool(Tool):
+
+class BrowserClickTool(_StepTool):
     name = "browser_click"
-    description = "Clicks an element by its [ref=…] from the latest snapshot."
+    description = (
+        "Clicks an element by its [ref=…] from the latest snapshot — or at x/y of a screenshot, for "
+        "what the tree does not show (a canvas, a map, a custom widget)."
+    )
     Args = ClickArgs
-    category = "network"
-    dangerous = True
-    timeout = 60.0
 
     def approval_reason(self, args) -> str:  # type: ignore[override]
-        return tr("appr.br_click", ref=args.ref)
+        return tr("appr.br_click", ref=args.ref or f"x={args.x:g}, y={args.y:g}")
 
-    async def run(self, args: ClickArgs, ctx: ToolContext) -> str:
+    def step(self, args: ClickArgs, ctx: ToolContext) -> Step:
+        count = 2 if args.double else 1
+        mods = list(args.modifiers)
+
         async def action(page, target) -> None:
-            if args.double:
-                await target.dblclick(button=args.button, timeout=15000)
+            if target is None:
+                for key in mods:
+                    await page.keyboard.down(key)
+                try:
+                    await page.mouse.click(args.x, args.y, button=args.button, click_count=count)
+                finally:
+                    for key in reversed(mods):
+                        await page.keyboard.up(key)
             else:
-                await target.click(button=args.button, timeout=15000)
+                await target.click(button=args.button, click_count=count, modifiers=mods or None, timeout=8000)
 
-        return await _guarded(ctx, await get_agent_browser().act(action, args.ref, dialog=args.dialog, sandbox=ctx.settings))
+        return Step(_label(self.name, args), action, args.ref or None, args.dialog)
 
 
 class TypeArgs(BaseModel):
@@ -181,37 +316,40 @@ class TypeArgs(BaseModel):
     text: str = Field(description="Text to enter")
     submit: bool = Field(default=False, description="Press Enter afterwards (send the form/search)")
     replace: bool = Field(default=True, description="Replace the field's current text (false = append)")
+    slowly: bool = Field(
+        default=False, description="Type key by key (for fields that react to each key: suggestions, masks)")
 
 
-class BrowserTypeTool(Tool):
+class BrowserTypeTool(_StepTool):
     name = "browser_type"
     description = "Types into a text field by ref; submit=true presses Enter after it."
     Args = TypeArgs
-    category = "network"
-    dangerous = True
-    timeout = 60.0
 
     def approval_reason(self, args) -> str:  # type: ignore[override]
         text = args.text if len(args.text) <= 120 else args.text[:117] + "…"
         return tr("appr.br_type_submit" if args.submit else "appr.br_type", text=text, ref=args.ref)
 
-    async def run(self, args: TypeArgs, ctx: ToolContext) -> str:
+    def step(self, args: TypeArgs, ctx: ToolContext) -> Step:
         async def action(page, target) -> None:
-            if args.replace:
-                try:
-                    await target.fill(args.text, timeout=10000)
-                except Exception:  # noqa: BLE001 — rich editors refuse fill(): type like a person
-                    await target.click(timeout=10000)
-                    await page.keyboard.press("Control+A")
-                    await page.keyboard.type(args.text, delay=15)
-            else:
-                await target.click(timeout=10000)
-                await page.keyboard.press("End")
-                await page.keyboard.type(args.text, delay=15)
+            await _enter_text(page, target, args.text, replace=args.replace, slowly=args.slowly)
             if args.submit:
                 await target.press("Enter")
 
-        return await _guarded(ctx, await get_agent_browser().act(action, args.ref, sandbox=ctx.settings))
+        return Step(_label(self.name, args), action, args.ref)
+
+
+async def _enter_text(page: Any, target: Any, text: str, *, replace: bool = True, slowly: bool = False) -> None:
+    if replace and not slowly:
+        try:
+            await target.fill(text, timeout=8000)
+            return
+        except Exception:  # noqa: BLE001 — rich editors refuse fill(): type like a person
+            logger.debug("fill refused; typing instead", exc_info=True)
+    await target.click(timeout=8000)
+    await page.keyboard.press("Control+A" if replace else "End")
+    if replace:
+        await page.keyboard.press("Delete")
+    await page.keyboard.type(text, delay=20 if slowly else 5)
 
 
 class PressArgs(BaseModel):
@@ -219,25 +357,23 @@ class PressArgs(BaseModel):
     ref: str = Field(default="", description="Focus this element first (optional)")
 
 
-class BrowserPressTool(Tool):
+class BrowserPressTool(_StepTool):
     name = "browser_press"
     description = "Presses a key or a key combination in the page (optionally on an element)."
     Args = PressArgs
-    category = "network"
-    dangerous = True
     timeout = 30.0
 
     def approval_reason(self, args) -> str:  # type: ignore[override]
         return tr("appr.br_press", combo=args.key)
 
-    async def run(self, args: PressArgs, ctx: ToolContext) -> str:
+    def step(self, args: PressArgs, ctx: ToolContext) -> Step:
         async def action(page, target) -> None:
             if target is not None:
-                await target.press(args.key, timeout=10000)
+                await target.press(args.key, timeout=8000)
             else:
                 await page.keyboard.press(args.key)
 
-        return await _guarded(ctx, await get_agent_browser().act(action, args.ref or None, sandbox=ctx.settings))
+        return Step(_label(self.name, args), action, args.ref or None)
 
 
 class SelectArgs(BaseModel):
@@ -245,42 +381,116 @@ class SelectArgs(BaseModel):
     values: list[str] = Field(description="Option labels or values to select")
 
 
-class BrowserSelectTool(Tool):
+class BrowserSelectTool(_StepTool):
     name = "browser_select"
     description = "Chooses option(s) in a drop-down list by ref."
     Args = SelectArgs
-    category = "network"
-    dangerous = True
     timeout = 30.0
 
     def approval_reason(self, args) -> str:  # type: ignore[override]
         return tr("appr.br_select", values=", ".join(args.values), ref=args.ref)
 
-    async def run(self, args: SelectArgs, ctx: ToolContext) -> str:
+    def step(self, args: SelectArgs, ctx: ToolContext) -> Step:
         async def action(page, target) -> None:
-            try:
-                await target.select_option(label=args.values, timeout=10000)
-            except Exception:  # noqa: BLE001 — the values may be option values, not labels
-                await target.select_option(args.values, timeout=10000)
+            await _choose(target, args.values)
 
-        return await _guarded(ctx, await get_agent_browser().act(action, args.ref, sandbox=ctx.settings))
+        return Step(_label(self.name, args), action, args.ref)
+
+
+async def _choose(target: Any, values: list[str]) -> None:
+    try:
+        await target.select_option(label=values, timeout=8000)
+    except Exception:  # noqa: BLE001 — the values may be option values, not labels
+        await target.select_option(values, timeout=8000)
+
+
+class FieldValue(BaseModel):
+    ref: str = Field(description="Ref of a text field, checkbox, radio, switch or <select>")
+    value: str | bool | float = Field(description="Text, a number, true/false for a checkbox, or an option's label")
+
+
+class FillArgs(BaseModel):
+    fields: list[FieldValue] = Field(min_length=1, max_length=60, description="The fields and their values")
+
+
+# What kind of field an element is, to set it the right way.
+_FIELD_KIND = """(el) => {
+  const type = (el.getAttribute("type") || "").toLowerCase();
+  const role = el.getAttribute("role") || "";
+  if (el.tagName === "SELECT") return "select";
+  if (["checkbox", "radio"].includes(type) || ["checkbox", "radio", "switch", "menuitemcheckbox"].includes(role))
+    return "check";
+  return "text";
+}"""
+
+
+class BrowserFillTool(_StepTool):
+    name = "browser_fill"
+    description = (
+        "Fills in a whole form in one call: text fields, checkboxes/radios/switches (true/false) and "
+        "drop-downs (an option's label), each by ref. Sets the values directly, so it is fast and "
+        "exact; it does not submit — click the button (or use browser_batch to do both)."
+    )
+    Args = FillArgs
+
+    def approval_reason(self, args) -> str:  # type: ignore[override]
+        shown = ", ".join(f"{f.ref}={str(f.value)[:40]}" for f in args.fields[:12])
+        return tr("appr.br_fill", fields=shown + (" …" if len(args.fields) > 12 else ""))
+
+    def step(self, args: FillArgs, ctx: ToolContext) -> Step:
+        b = get_agent_browser()
+
+        async def action(page, target) -> str:
+            for item in args.fields:
+                field = await b.locate(item.ref)
+                kind = await field.evaluate(_FIELD_KIND)
+                try:
+                    if kind == "check":
+                        on = item.value if isinstance(item.value, bool) else str(item.value).strip().lower() in (
+                            "true", "1", "yes", "on", "checked")
+                        await field.set_checked(on, timeout=8000)
+                    elif kind == "select":
+                        await _choose(field, [str(item.value)])
+                    else:
+                        value = item.value
+                        if isinstance(value, float) and value.is_integer():
+                            value = int(value)
+                        await _enter_text(page, field, str(value).lower() if isinstance(value, bool) else str(value))
+                except ToolError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    raise ToolError(f"Field [ref={item.ref}]: {explain_failure(exc)}") from exc
+            return f"filled {len(args.fields)} field(s)"
+
+        return Step(_label(self.name, args), action)
 
 
 class HoverArgs(BaseModel):
-    ref: str = Field(description="Ref of the element to hover (opens hover menus/tooltips)")
+    ref: str = Field(default="", description="Ref of the element to hover (opens hover menus/tooltips)")
+    x: float | None = Field(default=None, description="Or hover this point (CSS pixels of a screenshot)")
+    y: float | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _where(self) -> HoverArgs:
+        if not self.ref and _point(self.x, self.y) is None:
+            raise ValueError("give ref, or both x and y")
+        return self
 
 
-class BrowserHoverTool(_ReadOnly):
+class BrowserHoverTool(_LookingStep):
     name = "browser_hover"
-    description = "Moves the mouse over an element — for menus and tooltips that appear on hover."
+    description = "Moves the mouse over an element (or a point) — for menus and tooltips that appear on hover."
     Args = HoverArgs
     timeout = 30.0
 
-    async def run(self, args: HoverArgs, ctx: ToolContext) -> str:
+    def step(self, args: HoverArgs, ctx: ToolContext) -> Step:
         async def action(page, target) -> None:
-            await target.hover(timeout=10000)
+            if target is None:
+                await page.mouse.move(args.x, args.y)
+            else:
+                await target.hover(timeout=8000)
 
-        return await _guarded(ctx, await get_agent_browser().act(action, args.ref, sandbox=ctx.settings))
+        return Step(_label(self.name, args), action, args.ref or None)
 
 
 class UploadArgs(BaseModel):
@@ -335,7 +545,7 @@ _CAUGHT_INPUT = """() => {
 }"""
 
 
-class BrowserUploadTool(Tool):
+class BrowserUploadTool(_StepTool):
     name = "browser_upload"
     description = (
         "Attaches workspace files to a file-upload field of the page. Give the ref of the input or of "
@@ -343,14 +553,11 @@ class BrowserUploadTool(Tool):
         "which you cannot operate."
     )
     Args = UploadArgs
-    category = "network"
-    dangerous = True
-    timeout = 60.0
 
     def approval_reason(self, args: UploadArgs) -> str:
         return tr("appr.upload", paths=", ".join(args.paths))
 
-    async def run(self, args: UploadArgs, ctx: ToolContext) -> str:
+    def step(self, args: UploadArgs, ctx: ToolContext) -> Step:
         files = [str(resolve_path(p, settings=ctx.settings, must_exist=True, must_be_file=True)) for p in args.paths]
 
         async def action(page, target) -> None:
@@ -358,7 +565,7 @@ class BrowserUploadTool(Tool):
                 raise ToolError("Give the ref of the file input or of the upload button.")
             await upload_files(page, target, files)
 
-        return await _guarded(ctx, await get_agent_browser().act(action, args.ref, sandbox=ctx.settings))
+        return Step(_label(self.name, args), action, args.ref)
 
 
 async def upload_files(page: Any, target: Any, files: list[str]) -> str:
@@ -400,49 +607,323 @@ async def upload_files(page: Any, target: Any, files: list[str]) -> str:
 
 
 class ScrollArgs(BaseModel):
-    direction: Literal["down", "up"] = Field(default="down")
+    direction: Literal["down", "up", "left", "right"] = Field(default="down")
     amount: int = Field(default=3, ge=1, le=20, description="Wheel steps (~1/3 screen each)")
     ref: str = Field(default="", description="Scroll this element into view instead")
+    x: float | None = Field(
+        default=None, description="Scroll the area under this point (a list or panel with its own scrollbar)")
+    y: float | None = Field(default=None)
 
 
-class BrowserScrollTool(_ReadOnly):
+class BrowserScrollTool(_LookingStep):
     name = "browser_scroll"
-    description = "Scrolls the page (or brings an element into view) and returns the updated snapshot."
+    description = (
+        "Scrolls the page — or the panel under x/y (lists, chats, maps with their own scrollbar) — or "
+        "brings an element into view by ref, and returns the updated page."
+    )
     Args = ScrollArgs
     timeout = 30.0
 
-    async def run(self, args: ScrollArgs, ctx: ToolContext) -> str:
+    def step(self, args: ScrollArgs, ctx: ToolContext) -> Step:
         async def action(page, target) -> None:
             if target is not None:
-                await target.scroll_into_view_if_needed(timeout=10000)
+                await target.scroll_into_view_if_needed(timeout=8000)
+                return
+            point = _point(args.x, args.y)
+            if point is not None:
+                await page.mouse.move(*point)
             else:
-                await page.mouse.wheel(0, 300 * args.amount * (1 if args.direction == "down" else -1))
+                size = page.viewport_size or {"width": 1280, "height": 800}
+                await page.mouse.move(size["width"] / 2, size["height"] / 2)
+            step = 300 * args.amount * (1 if args.direction in ("down", "right") else -1)
+            await page.mouse.wheel(step if args.direction in ("left", "right") else 0,
+                                   step if args.direction in ("down", "up") else 0)
 
-        return await _guarded(ctx, await get_agent_browser().act(action, args.ref or None, sandbox=ctx.settings))
+        return Step(_label(self.name, args), action, args.ref or None)
 
 
 class WaitArgs(BaseModel):
     text: str = Field(default="", description="Wait until this text is on the page")
     gone: str = Field(default="", description="Or wait until this text disappears (e.g. 'Loading')")
+    url: str = Field(default="", description="Or wait until the address contains this")
     seconds: float = Field(default=0, ge=0, le=60, description="Or just wait this long")
+    timeout: float = Field(default=15, ge=1, le=60, description="Give up after this many seconds")
 
 
-class BrowserWaitTool(_ReadOnly):
+class BrowserWaitTool(_LookingStep):
     name = "browser_wait"
-    description = "Waits for text to appear or disappear (or a fixed time), then returns the page."
+    description = "Waits for text to appear or disappear, for the address to change (or a fixed time), then returns the page."
     Args = WaitArgs
     timeout = 90.0
 
-    async def run(self, args: WaitArgs, ctx: ToolContext) -> str:
-        async def action(page, target) -> None:
-            if args.text:
-                await page.get_by_text(args.text).first.wait_for(state="visible", timeout=45000)
-            elif args.gone:
-                await page.get_by_text(args.gone).first.wait_for(state="hidden", timeout=45000)
-            else:
-                await asyncio.sleep(args.seconds or 1)
+    def step(self, args: WaitArgs, ctx: ToolContext) -> Step:
+        limit = args.timeout * 1000
 
-        return await _guarded(ctx, await get_agent_browser().act(action, sandbox=ctx.settings))
+        async def action(page, target) -> None:
+            try:
+                if args.text:
+                    await page.get_by_text(args.text).first.wait_for(state="visible", timeout=limit)
+                elif args.gone:
+                    await page.get_by_text(args.gone).first.wait_for(state="hidden", timeout=limit)
+                elif args.url:
+                    await page.wait_for_url(lambda u: args.url in u, timeout=limit, wait_until="commit")
+                else:
+                    await asyncio.sleep(args.seconds or 1)
+            except Exception as exc:  # noqa: BLE001 - only a timeout gets the friendly wording
+                if "Timeout" not in type(exc).__name__:
+                    raise
+                what = args.text or args.gone or args.url
+                raise ToolError(f"Waited {args.timeout:g} s: '{what}' did not "
+                                f"{'appear' if args.text else 'go away' if args.gone else 'show in the address'}.") from exc
+
+        return Step(_label(self.name, args), action)
+
+
+# ------------------------------------------------------------ JavaScript
+
+
+class JsArgs(BaseModel):
+    code: str = Field(description=(
+        "JavaScript to run in the page. The value of the last expression is the result; "
+        "top-level await works. Example: [...document.querySelectorAll('tr')].map(r => r.innerText)"))
+
+
+class BrowserJsTool(_StepTool):
+    name = "browser_js"
+    description = (
+        "Runs JavaScript in the active tab, like the DevTools console: top-level await works and the "
+        "value of the last expression is returned (data as JSON, elements as their HTML). Use it to "
+        "read exact data in one call (table rows, field values, prices, all links), to check state "
+        "(what the app stored, which element has focus, computed styles) and for what the other tools "
+        "cannot do. The script runs as the page, with the user's logins: never put secrets in it and "
+        "never send page data anywhere."
+    )
+    Args = JsArgs
+    max_output_chars = 30_000
+
+    def approval_reason(self, args: JsArgs) -> str:  # type: ignore[override]
+        code = args.code if len(args.code) <= 600 else args.code[:597] + "…"
+        return tr("appr.br_js", url=get_agent_browser().active_url() or "?", code=code)
+
+    def step(self, args: JsArgs, ctx: ToolContext) -> Step:
+        b = get_agent_browser()
+
+        async def action(page, target) -> str:
+            return await b.run_js(page, args.code)
+
+        return Step(_label(self.name, args), action)
+
+    async def run(self, args: JsArgs, ctx: ToolContext) -> str:
+        s = self.step(args, ctx)
+        view = await get_agent_browser().act(s.action, sandbox=ctx.settings, look=False, label=s.label)
+        notes = "".join(f"\nNote: {n}" for n in view.notes)
+        return await guard_external(ctx, f"Result: {view.output}{notes}", source=view.url)
+
+
+# ------------------------------------------------------------ batch
+
+
+class BatchStep(BaseModel):
+    tool: str = Field(description="navigate, click, type, press, select, fill, hover, scroll, wait, js or upload")
+    args: dict[str, Any] = Field(default_factory=dict, description="That tool's arguments, as for a single call")
+
+
+class BatchArgs(BaseModel):
+    steps: list[BatchStep] = Field(min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def _known(self) -> BatchArgs:
+        for number, step in enumerate(self.steps, 1):
+            tool = step_tool(step.tool)
+            if tool is None:
+                raise ValueError(f"step {number}: '{step.tool}' cannot be a step (use: {', '.join(_step_names())})")
+            try:
+                tool.Args.model_validate(step.args)
+            except ValidationError as exc:
+                problems = "; ".join(f"{'.'.join(map(str, e['loc'])) or 'args'}: {e['msg']}" for e in exc.errors())
+                raise ValueError(f"step {number} ({tool.name}): {problems}") from exc
+        return self
+
+
+class BrowserBatchTool(Tool):
+    name = "browser_batch"
+    description = (
+        "Several browser actions in one call, the page read once at the end: fill a form and send "
+        "it, open a page and click through a menu, type and wait for the result. Use it whenever you "
+        "can tell two or more steps ahead — each step saves a full round trip. Steps run in order "
+        "and stop at the first failure; the reply lists every step and shows the page."
+    )
+    Args = BatchArgs
+    category = "network"
+    dangerous = True
+    timeout = 300.0
+    max_output_chars = 62_000
+
+    def _plan(self, args: BatchArgs) -> list[tuple[_StepTool, BaseModel]]:
+        plan = []
+        for step in args.steps:
+            tool = step_tool(step.tool)
+            assert tool is not None  # checked by BatchArgs
+            plan.append((tool, tool.Args.model_validate(step.args)))
+        return plan
+
+    def auto_verdict(self, args: BatchArgs, ctx: ToolContext) -> str:  # type: ignore[override]
+        verdicts = {tool.auto_verdict(parsed, ctx) for tool, parsed in self._plan(args)}
+        return "allow" if verdicts == {"allow"} else "ask"
+
+    def approval_reason(self, args: BatchArgs) -> str:  # type: ignore[override]
+        steps = "\n".join(f"{n}. {tool.approval_reason(parsed)}" for n, (tool, parsed) in enumerate(self._plan(args), 1))
+        return tr("appr.br_batch", steps=steps)
+
+    async def run(self, args: BatchArgs, ctx: ToolContext) -> str:
+        steps = [tool.step(parsed, ctx) for tool, parsed in self._plan(args)]
+        view = await get_agent_browser().run_steps(steps, ctx.settings)
+        return await _guarded(ctx, view)
+
+
+_STEP_TOOLS: dict[str, _StepTool] = {}
+
+
+def step_tool(name: str) -> _StepTool | None:
+    """The tool a batch step names ("click" or "browser_click")."""
+    if not _STEP_TOOLS:
+        for tool in (BrowserNavigateTool(), BrowserClickTool(), BrowserTypeTool(), BrowserPressTool(),
+                     BrowserSelectTool(), BrowserFillTool(), BrowserHoverTool(), BrowserScrollTool(),
+                     BrowserWaitTool(), BrowserJsTool(), BrowserUploadTool()):
+            _STEP_TOOLS[tool.name] = tool
+    key = name.strip().lower()
+    return _STEP_TOOLS.get(key if key.startswith("browser_") else f"browser_{key}")
+
+
+def _step_names() -> list[str]:
+    step_tool("click")
+    return [n.removeprefix("browser_") for n in _STEP_TOOLS]
+
+
+# ------------------------------------------------------------ console and requests
+
+
+class ConsoleArgs(BaseModel):
+    pattern: str = Field(default="", description="Only messages containing this text")
+    only_errors: bool = Field(default=False, description="Only errors (and uncaught exceptions)")
+    limit: int = Field(default=50, ge=1, le=300, description="The newest this many")
+    clear: bool = Field(default=False, description="Empty the log after reading (to see only what comes next)")
+
+
+class BrowserConsoleTool(_ReadOnly):
+    name = "browser_console"
+    description = (
+        "What the active tab printed to its console: logs, warnings, errors and uncaught exceptions "
+        "(collected since the tab was opened). The first place to look when a page you build or "
+        "test misbehaves."
+    )
+    Args = ConsoleArgs
+    timeout = 20.0
+
+    async def run(self, args: ConsoleArgs, ctx: ToolContext) -> str:
+        b = get_agent_browser()
+        page = await b.page()
+        entries = b.console_log(page)
+        # Page loads and the agent's own actions stay in any filter: they tell which step a
+        # message came from.
+        marks = ("page", "action")
+        if args.only_errors:
+            entries = [e for e in entries if e["type"] in ("error", "assert", *marks)]
+        if args.pattern:
+            entries = [e for e in entries if e["type"] in marks or args.pattern.lower() in e["text"].lower()]
+        if args.clear:
+            b.clear_logs(page)
+        messages = sum(1 for e in entries if e["type"] not in marks)
+        if not messages:
+            return "No console messages" + (" match." if args.pattern or args.only_errors else " yet.")
+        shown = entries[-args.limit:]
+        lines = [f"{_clock(e['at'])} [{e['type']}] {e['text'][:800]}" + (f"  ({e['where']})" if e["where"] else "")
+                 for e in shown]
+        head = f"Now {_clock(time.time())}. Oldest first; [page] = a page load, [action] = your action"
+        head += f" ({len(shown)} of {len(entries)} lines):\n" if len(entries) > len(shown) else ":\n"
+        return await guard_external(ctx, head + "\n".join(lines), source=page.url)
+
+
+def _clock(at: float) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(at)) + f".{int(at % 1 * 10)}"
+
+
+class RequestsArgs(BaseModel):
+    url_pattern: str = Field(default="", description="Only requests whose address contains this")
+    only_failed: bool = Field(default=False, description="Only failed requests and error statuses (4xx/5xx)")
+    api_only: bool = Field(default=False, description="Only fetch/XHR calls (what an app asks its server)")
+    limit: int = Field(default=50, ge=1, le=300)
+    id: str = Field(default="", description="Show this request in full: its body and the response body")
+    clear: bool = Field(default=False, description="Empty the log after reading")
+
+
+class BrowserRequestsTool(_ReadOnly):
+    name = "browser_requests"
+    description = (
+        "The network requests of the active tab: method, status, type, time and address; id=… shows "
+        "one request with its body and the response body. For debugging an app (which API call "
+        "failed and why) and for taking data straight from the JSON a site loads."
+    )
+    Args = RequestsArgs
+    timeout = 30.0
+    max_output_chars = 40_000
+
+    async def run(self, args: RequestsArgs, ctx: ToolContext) -> str:
+        b = get_agent_browser()
+        page = await b.page()
+        entries = b.request_log(page)
+        if args.id:
+            entry = next((e for e in entries if e["id"] == args.id), None)
+            if entry is None:
+                return f"No request '{args.id}' in the log (it keeps the newest {LOG_KEEP})."
+            return await guard_external(ctx, await _request_details(entry), source=page.url)
+        if args.api_only:
+            entries = [e for e in entries if e["type"] in ("fetch", "xhr")]
+        if args.only_failed:
+            entries = [e for e in entries if e["failure"] or (e["status"] or 0) >= 400]
+        if args.url_pattern:
+            entries = [e for e in entries if args.url_pattern in e["url"]]
+        if args.clear:
+            b.clear_logs(page)
+        if not entries:
+            return "No requests match." if args.url_pattern or args.only_failed or args.api_only else "No requests yet."
+        shown = entries[-args.limit:]
+        lines = []
+        for e in shown:
+            status = str(e["status"]) if e["status"] is not None else (e["failure"] or "pending")
+            if e["failure"] and e["status"] is not None:
+                status += f" ({e['failure']})"  # a 404 whose body the page never read ends "aborted"
+            took = f" {e['ms']}ms" if e["ms"] is not None else ""
+            url = e["url"] if len(e["url"]) <= 300 else e["url"][:297] + "…"
+            lines.append(f"[{e['id']}] {e['method']} {status} {e['type']}{took} {url}")
+        head = f"{len(shown)} of {len(entries)} request(s), oldest first:\n" if len(entries) > len(shown) else ""
+        return await guard_external(ctx, head + "\n".join(lines), source=page.url)
+
+
+async def _request_details(entry: dict[str, Any]) -> str:
+    lines = [f"{entry['method']} {entry['url']}", f"type: {entry['type']}",
+             f"status: {entry['failure'] or entry['status'] or 'pending'}"]
+    request = entry.get("request")
+    body = None
+    try:
+        body = request.post_data if request is not None else None
+    except Exception:  # noqa: BLE001 - binary bodies cannot be shown as text
+        body = "(binary)"
+    if body:
+        lines.append(f"request body: {body[:4000]}")
+    response = entry.get("response")
+    if response is None:
+        lines.append("no response (yet)")
+        return "\n".join(lines)
+    headers = await response.all_headers()
+    lines.append(f"content-type: {headers.get('content-type', '?')}")
+    try:
+        text = await response.text()
+    except Exception as exc:  # noqa: BLE001 - the browser no longer holds the body (or it is binary)
+        lines.append(f"response body unavailable: {str(exc).splitlines()[0][:200]}")
+        return "\n".join(lines)
+    lines.append(f"response body ({len(text)} chars):\n{text[:30_000]}")
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------ screenshot
@@ -451,13 +932,23 @@ class BrowserWaitTool(_ReadOnly):
 class ScreenshotArgs(BaseModel):
     question: str = Field(default="", description="What to look at (e.g. 'where is the pay button'); empty = describe")
     full_page: bool = Field(default=False, description="The whole page, not just the visible part")
+    ref: str = Field(default="", description="Only this element")
+    region: list[float] = Field(
+        default_factory=list, description="Zoom into [x0, y0, x1, y1] of the visible page (CSS pixels): small text, icons")
+
+    @model_validator(mode="after")
+    def _region(self) -> ScreenshotArgs:
+        if self.region and len(self.region) != 4:
+            raise ValueError("region is [x0, y0, x1, y1]")
+        return self
 
 
 class BrowserScreenshotTool(_ReadOnly):
     name = "browser_screenshot"
     description = (
         "Takes a screenshot of the active tab and attaches it to this conversation so you can see "
-        "it yourself. Use when the snapshot is not enough (layout, images, charts, captcha)."
+        "it yourself. Use when the snapshot is not enough (layout, images, charts, captcha). The "
+        "picture is in CSS pixels: a point on it is the x/y for browser_click. region= zooms in."
     )
     Args = ScreenshotArgs
     timeout = 60.0
@@ -465,8 +956,9 @@ class BrowserScreenshotTool(_ReadOnly):
     async def run(self, args: ScreenshotArgs, ctx: ToolContext) -> ToolResult:
         from core.tools.builtin.vision_tools import _queue_vision
 
-        png = await get_agent_browser().screenshot_png(full_page=args.full_page)
-        name = f".screenshots/browser-{int(time.time())}.png"
+        region = tuple(args.region) if args.region else None
+        png = await get_agent_browser().screenshot_png(full_page=args.full_page, ref=args.ref, region=region)
+        name = f".screenshots/browser-{int(time.time() * 1000)}.png"
         destination = resolve_path(name, settings=ctx.settings)
         destination.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(destination.write_bytes, png)
@@ -474,7 +966,19 @@ class BrowserScreenshotTool(_ReadOnly):
         await ctx.emitter(ArtifactCreated(path=relative, name=relative.split("/")[-1], kind="image", size_bytes=len(png)))
         prompt = args.question.strip() or f"What is on this page screenshot ({relative})? Describe what matters."
         _queue_vision(ctx, png, "image/png", prompt)
-        return ToolResult(content=f"Screenshot {relative} is attached to the conversation as the next message.")
+        width, height = png_size(png)
+        if region is not None:
+            scale = width / max(region[2] - region[0], 1)
+            where = (f"a zoom (x{scale:.1f}) of the region {region[0]:g},{region[1]:g}–{region[2]:g},{region[3]:g}: "
+                     f"page x = {region[0]:g} + picture x / {scale:.1f} (same for y)")
+        elif args.ref:
+            where = f"element [ref={args.ref}] only"
+        elif args.full_page:
+            where = "the whole page; browser_click x/y are of the visible part, so scroll there first"
+        else:
+            where = "page coordinates in CSS pixels — use them as x/y for browser_click"
+        return ToolResult(content=f"Screenshot {relative} ({width}x{height}, {where}) is attached to the "
+                                  "conversation as the next message.")
 
 
 # ------------------------------------------------------------ tabs

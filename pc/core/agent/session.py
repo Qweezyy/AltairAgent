@@ -59,6 +59,9 @@ FULL_PAGE_MARK = "Page (accessibility tree"
 PAGE_CHANGES_MARK = "Page changes since your previous look"
 #: Keep this many of the newest page snapshots / tool screenshots in full.
 KEEP_PAGE_STATES = 2
+#: Browser tools that return data taken from a page, not the state of the page: a later look
+#: does not make them stale.
+BROWSER_DATA_TOOLS = frozenset({"browser_text", "browser_js", "browser_console", "browser_requests"})
 
 #: Tools whose outputs are never cleared: user answers and skill recipes are not
 #: reproducible by re-running a tool.
@@ -478,6 +481,7 @@ class Session:
         """
         pages = [i for i, m in enumerate(self.messages)
                  if m.get("role") == "tool" and str(m.get("name") or "").startswith("browser_")
+                 and m.get("name") not in BROWSER_DATA_TOOLS
                  and isinstance(m.get("content"), str) and VIEW not in m and not m.get(HIDDEN)]
         full = [i for i in pages if FULL_PAGE_MARK in self.messages[i]["content"]
                 or len(self.messages[i]["content"]) >= 1_500 and PAGE_CHANGES_MARK not in self.messages[i]["content"]]

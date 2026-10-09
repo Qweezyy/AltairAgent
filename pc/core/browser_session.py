@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import difflib
+import json
 import os
 import re
 import shutil
@@ -31,6 +32,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,6 +69,107 @@ _CLICKABLE_ROLES = frozenset({"link", "button", "tab", "menuitem", "menuitemchec
 _UNNAMED_WRAPPER = re.compile(r"\s*- generic \[ref=[^\]]+\]:")
 _ROLE = re.compile(r"\s*- (\w+)")
 _URL_LINE = re.compile(r"^(\s*- /url: )(\S+)(.*)$")
+
+#: A page is settled when its content has not changed this long and no request is pending.
+#: (Waiting for "network idle" instead cost 2.5 s after every action on any page that polls.)
+QUIET_MS = 300
+#: A request still pending after this long is long-polling or a stream, not the page loading.
+STALE_REQUEST_S = 2.0
+#: The longest an action or a page load waits for the page to settle.
+SETTLE_ACTION_S = 3.0
+SETTLE_LOAD_S = 6.0
+#: Requests that mean "the page is still loading its content".
+_LOADING_TYPES = frozenset({"document", "fetch", "xhr"})
+#: How many console messages and requests are kept per tab.
+LOG_KEEP = 500
+
+# Time since the page's content last changed. The first call of a settle resets the clock, so
+# a change the action causes a moment later (a timer, a fetch) is still waited for.
+_QUIET_PROBE = """(reset) => {
+  const w = window;
+  if (!w.__altairQuiet) {
+    w.__altairQuiet = { at: performance.now() };
+    try {
+      new MutationObserver(() => { w.__altairQuiet.at = performance.now(); })
+        .observe(document, { subtree: true, childList: true, characterData: true });
+    } catch (e) { /* no document yet: the next probe installs it */ }
+  }
+  if (reset) w.__altairQuiet.at = performance.now();
+  return [document.readyState, performance.now() - w.__altairQuiet.at];
+}"""
+
+# The readable text of the page (or of one element): the main content when the page marks it.
+_PAGE_TEXT = """(el) => {
+  if (el) return el.innerText || el.textContent || "";
+  const body = document.body;
+  if (!body) return "";
+  const all = body.innerText || "";
+  const main = document.querySelector("main, [role=main], article");
+  const text = main ? main.innerText || "" : "";
+  return text.length >= 0.4 * all.length ? text : all;
+}"""
+
+# What a JavaScript result is, as text: JSON for data, markup for elements.
+_SERIALIZE = """function () {
+  const seen = new WeakSet();
+  const node = (n) => n.nodeType === 1 ? n.outerHTML.slice(0, 1000) : String(n.textContent).slice(0, 1000);
+  const fix = (key, v) => {
+    if (typeof Node !== "undefined" && v instanceof Node) return node(v);
+    if (typeof v === "bigint") return v + "n";
+    if (typeof v === "function") return "[function " + (v.name || "anonymous") + "]";
+    if (v === undefined) return "[undefined]";
+    if (v && typeof v === "object") {
+      if (seen.has(v)) return "[circular]";
+      seen.add(v);
+      if (v instanceof Map) return Object.fromEntries(v);
+      if (v instanceof Set || v instanceof NodeList || v instanceof HTMLCollection) return Array.from(v);
+      if (v instanceof Error) return v.stack || String(v);
+    }
+    return v;
+  };
+  if (typeof Node !== "undefined" && this instanceof Node) return node(this);
+  try {
+    const out = JSON.stringify(this, fix);
+    return out === undefined ? String(this) : out;
+  } catch (e) {
+    return String(this);
+  }
+}"""
+
+#: Playwright explains a failed click in its call log; these lines say why and what to do.
+_FAILURE_HINTS = (
+    ("intercepts pointer events", "something covers the element (a dialog, a cookie banner, an overlay): "
+                                  "close it first, or click by x/y from a screenshot"),
+    ("element is not visible", "the element is hidden: open the menu or section that holds it first"),
+    ("element is not enabled", "the element is disabled: something must be filled in or chosen first"),
+    ("element is outside of the viewport", "the element is off screen: scroll to it (browser_scroll ref=…)"),
+    ("element is not stable", "the element is still moving (an animation): wait a moment and retry"),
+    ("not an <input>", "this is not a text field: give the ref of the field itself"),
+)
+
+
+def explain_failure(exc: BaseException) -> str:
+    """A Playwright error as one useful sentence: its first line and why the action did not go."""
+    lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
+    head = (lines[0] if lines else type(exc).__name__)[:300]
+    for marker, hint in _FAILURE_HINTS:
+        for line in lines:
+            if marker in line:
+                return f"{head} — {line.lstrip('- ')[:300]}; {hint}."
+    return head
+
+
+def interactive_only(tree: str) -> str:
+    """Only what can be acted on (and the headings, to tell the parts of the page apart),
+    one per line: a long page in a fraction of the characters."""
+    out: list[str] = []
+    for line in tree.splitlines():
+        role = _ROLE.match(line)
+        if not role or "[ref=" not in line:
+            continue
+        if role.group(1) in _CLICKABLE_ROLES or role.group(1) == "heading" or "[cursor=pointer]" in line:
+            out.append(line.strip())
+    return "\n".join(out)
 
 
 def _short_url(url: str) -> str:
@@ -399,10 +502,20 @@ class PageView:
     #: After an action on the same page: only what changed (the model has the rest). None =
     #: send the whole page; "" = nothing visible changed.
     changes: str | None = None
+    #: What the action itself returned (a script's value, the steps of a batch).
+    output: str = ""
+    #: The tree is a part of the page (one element, or only the interactive elements).
+    partial: str = ""
 
     def render(self) -> str:
         head = [f"URL: {self.url}", f"Title: {self.title}"]
         head += [f"Note: {n}" for n in self.notes]
+        if self.output:
+            head += ["", self.output]
+        if self.partial:
+            body = self.tree or "(nothing matched)"
+            tail = ["", f"[cut at {len(self.tree)} chars — narrow it with ref=…, or browser_find]"] if self.truncated else []
+            return "\n".join([*head, "", f"{self.partial} (use [ref=…] values with the browser tools):", body, *tail])
         if self.changes is not None:
             if not self.changes:
                 return "\n".join([*head, "", f"{PAGE_CHANGES_MARK}: nothing visible changed."])
@@ -423,6 +536,29 @@ class PageView:
 
 
 Listener = Callable[[dict[str, Any]], Awaitable[None]]
+#: An interaction: gets the page and the element of the ref (None without one); may return text
+#: for the model (a script's value).
+Action = Callable[[Any, Any], Awaitable[Any]]
+
+
+@dataclass(slots=True)
+class Step:
+    """One action of a batch: what to do, on which element, and how the log names it."""
+
+    label: str
+    action: Action
+    ref: str | None = None
+    dialog: str = ""
+
+
+@dataclass(slots=True)
+class _Before:
+    """The browser just before an action, to tell what the action did."""
+
+    url: str
+    seen: tuple[str, str, str] | None
+    tabs: set[str]
+    downloads: set[str]
 
 
 class AgentBrowser:
@@ -455,6 +591,12 @@ class AgentBrowser:
         self.viewport = (1280, 860)
         self._cast: Any = None
         self._cast_cb: Any = None
+        #: Per page: what its console printed and which requests it made (newest last), and the
+        #: requests still loading (request -> when it started).
+        self._console: dict[Any, deque[dict[str, Any]]] = {}
+        self._requests: dict[Any, deque[dict[str, Any]]] = {}
+        self._inflight: dict[Any, dict[Any, float]] = {}
+        self._request_seq = 0
 
     # --- wiring ---------------------------------------------------------------
 
@@ -612,6 +754,65 @@ class AgentBrowser:
 
     def _wire_page(self, page: Any) -> None:
         page.on("dialog", lambda dialog: asyncio.ensure_future(self._on_dialog(dialog)))
+        console = self._console.setdefault(page, deque(maxlen=LOG_KEEP))
+        requests = self._requests.setdefault(page, deque(maxlen=LOG_KEEP))
+        inflight = self._inflight.setdefault(page, {})
+        by_request: dict[Any, dict[str, Any]] = {}
+
+        def on_console(msg: Any) -> None:
+            where = ""
+            try:
+                loc = msg.location or {}
+                if loc.get("url"):
+                    where = f"{loc['url']}:{loc.get('lineNumber', 0) + 1}"
+            except Exception:  # noqa: BLE001 - a message without a source is still a message
+                logger.debug("console message without a location", exc_info=True)
+            console.append({"type": msg.type, "text": msg.text, "where": where, "at": time.time()})
+
+        def on_error(error: Any) -> None:
+            console.append({"type": "error", "text": f"Uncaught {error}", "where": "", "at": time.time()})
+
+        def on_navigated(frame: Any) -> None:
+            # Marks which page load a message belongs to: the agent misread an error its own
+            # form submit caused as one from the page load.
+            if frame == page.main_frame:
+                console.append({"type": "page", "text": f"opened {frame.url}", "where": "", "at": time.time()})
+
+        def on_request(request: Any) -> None:
+            self._request_seq += 1
+            entry = {"id": f"r{self._request_seq}", "method": request.method, "url": request.url,
+                     "type": request.resource_type, "status": None, "ms": None, "failure": "",
+                     "started": time.monotonic(), "response": None, "request": request}
+            by_request[request] = entry
+            requests.append(entry)
+            if request.resource_type in _LOADING_TYPES:
+                inflight[request] = time.monotonic()
+
+        def on_response(response: Any) -> None:
+            entry = by_request.get(response.request)
+            if entry is not None:
+                entry["status"], entry["response"] = response.status, response
+
+        def on_done(request: Any, failed: bool) -> None:
+            inflight.pop(request, None)
+            entry = by_request.pop(request, None)
+            if entry is not None:
+                entry["ms"] = int((time.monotonic() - entry["started"]) * 1000)
+                if failed:
+                    entry["failure"] = str(request.failure or "failed")
+
+        def on_close(_page: Any) -> None:
+            for log in (self._console, self._requests, self._inflight):
+                log.pop(page, None)
+
+        page.on("console", on_console)
+        page.on("pageerror", on_error)
+        page.on("framenavigated", on_navigated)
+        page.on("request", on_request)
+        page.on("response", on_response)
+        page.on("requestfinished", lambda r: on_done(r, False))
+        page.on("requestfailed", lambda r: on_done(r, True))
+        page.on("close", on_close)
         if self._mode == "chrome":
             # Chrome mode: downloads come through Playwright, saved into quarantine.
             # (Embedded tabs report theirs through the shell instead — see above.)
@@ -670,6 +871,8 @@ class AgentBrowser:
         self._browser = self._ctx = None
         self._target_ids.clear()
         self._chrome_ids.clear()
+        for log in (self._console, self._requests, self._inflight):
+            log.clear()
         if self._mode == "chrome":
             self._tabs.clear()
             self._active = ""
@@ -890,14 +1093,31 @@ class AgentBrowser:
             if "Download is starting" in str(exc):
                 return  # the URL is a file: it goes to quarantine, reported via downloads
             raise ToolError(f"Could not open '{url}': {exc}") from exc
-        await self._settle(page)
+        await self._settle(page, SETTLE_LOAD_S)
 
-    async def _settle(self, page: Any, quiet_ms: int = 2500) -> None:
-        """Waits briefly for the page to calm down; endless polling pages are normal."""
-        try:
-            await page.wait_for_load_state("networkidle", timeout=quiet_ms)
-        except Exception:  # noqa: BLE001
-            logger.debug("page did not reach networkidle in %s ms", quiet_ms)
+    def _loading(self, page: Any) -> int:
+        """Requests of this page that are still loading its content (long polls not counted)."""
+        now = time.monotonic()
+        return sum(1 for started in self._inflight.get(page, {}).values() if now - started < STALE_REQUEST_S)
+
+    async def _settle(self, page: Any, cap_s: float = SETTLE_ACTION_S) -> bool:
+        """Waits until the page has calmed down: its content unchanged for QUIET_MS and nothing
+        it needs still loading — usually a few hundred milliseconds. Pages that never calm down
+        (live feeds, animations) are left after `cap_s`. True when it settled."""
+        end = time.monotonic() + cap_s
+        reset = True
+        while True:
+            try:
+                state, quiet = await page.evaluate(_QUIET_PROBE, reset)
+                reset = False
+                if state != "loading" and quiet >= QUIET_MS and not self._loading(page):
+                    return True
+            except Exception:  # noqa: BLE001 - a navigation replaced the document: probe the new one
+                logger.debug("settle probe failed (navigating?)", exc_info=True)
+            if time.monotonic() >= end:
+                logger.debug("page did not settle in %.1f s", cap_s)
+                return False
+            await asyncio.sleep(0.1)
 
     def agent_action(self) -> _AgentScope:
         """One agent action at a time (a model may fire several tools at once, and
@@ -905,17 +1125,27 @@ class AgentBrowser:
         meanwhile are answered for the agent, not shown to the user."""
         return _AgentScope(self)
 
-    async def navigate(self, url: str, sandbox: Settings | None = None) -> PageView:
-        await self._notify({"kind": "agent_active"})
+    def active_url(self) -> str:
+        for page, tab_id in self._chrome_ids.items():  # chrome mode: the page knows best
+            if tab_id == self._active and not page.is_closed():
+                return page.url
+        tab = self._tabs.get(self._active)
+        return tab.url if tab is not None else ""
+
+    async def open_in(self, page: Any, url: str, sandbox: Settings | None = None) -> None:
+        """Loads `url` (an address, a search or a workspace page) into `page`."""
         target = local_target(url, sandbox) or normalize_target(url)
         if not target.startswith(("http://", "https://", "about:blank", "file:")):
             raise ToolError("The browser opens web pages (http/https) and pages inside the workspace.")
+        tab = self._tabs.get(self._active)
+        if tab is not None and page.url in ("", "about:blank"):
+            tab.by_agent = True  # an empty tab the agent fills is its own, not the user's page
+        await self._goto(page, target)
+
+    async def navigate(self, url: str, sandbox: Settings | None = None) -> PageView:
+        await self._notify({"kind": "agent_active"})
         async with self.agent_action():
-            page = await self.page()
-            tab = self._tabs.get(self._active)
-            if tab is not None and page.url in ("", "about:blank"):
-                tab.by_agent = True  # an empty tab the agent fills is its own, not the user's page
-            await self._goto(page, target)
+            await self.open_in(await self.page(), url, sandbox)
             return await self.snapshot()
 
     async def _keep_in_sandbox(self, page: Any, sandbox: Settings | None) -> None:
@@ -941,7 +1171,7 @@ class AgentBrowser:
                     await page.reload(wait_until="domcontentloaded", timeout=30000)
             except Exception:  # noqa: BLE001 — no history entry is not an error for the model
                 logger.debug("history %s failed", op, exc_info=True)
-            await self._settle(page)
+            await self._settle(page, SETTLE_LOAD_S)
             await self._keep_in_sandbox(page, sandbox)
             return await self.snapshot()
 
@@ -958,46 +1188,105 @@ class AgentBrowser:
             raise ToolError(f"Unknown ref '{ref}'. Use a [ref=…] value from the latest page snapshot.") from exc
         return loc
 
-    async def act(self, action: Callable[[Any, Any], Awaitable[None]], ref: str | None = None,
-                  *, dialog: str = "", sandbox: Settings | None = None) -> PageView:
-        """Runs one interaction and returns the resulting page, with what changed."""
+    # An action: before it, run it, let the page settle, say what happened, look at the result.
+
+    def _before(self, page: Any) -> _Before:
+        return _Before(url=page.url, seen=self._seen, tabs=set(self._tabs),
+                       downloads={d["id"] for d in self.downloads.list()})
+
+    async def _perform(self, page: Any, action: Action, ref: str | None, dialog: str, label: str = "") -> str:
+        if label and page in self._console:
+            self._console[page].append({"type": "action", "text": label, "where": "", "at": time.time()})
+        self._pending_dialog_choice = dialog
+        target = await self.locate(ref) if ref else None
+        try:
+            output = await action(page, target)
+        except ToolError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ToolError(f"The action failed: {explain_failure(exc)}") from exc
+        finally:
+            self._pending_dialog_choice = ""
+        return str(output) if output is not None else ""
+
+    async def _after(self, page: Any, before: _Before, sandbox: Settings | None) -> tuple[Any, list[str], bool]:
+        """Settles the page an action left; returns the page to look at, what happened, and
+        whether a new tab opened."""
+        await asyncio.sleep(0.05)  # a click's navigation or new tab starts a moment later
+        new_tabs = [t for t in self._tabs if t not in before.tabs]
+        for tab_id in new_tabs:
+            self._tabs[tab_id].by_agent = True
+        if new_tabs and self._mode == "chrome":
+            page = await self.page()  # followed the link into the new tab
+        await self._settle(page, SETTLE_LOAD_S if new_tabs or page.url != before.url else SETTLE_ACTION_S)
+        await self._keep_in_sandbox(page, sandbox)
+        notes: list[str] = []
+        if page.url != before.url:
+            notes.append(f"navigated from {before.url}")
+        if new_tabs:
+            notes.append(f"a new tab opened: {', '.join(new_tabs)} (now active)")
+        for d in self.downloads.list():
+            if d["id"] not in before.downloads:
+                notes.append(f"download started: {d['name']} — see browser_downloads")
+        return page, notes, bool(new_tabs)
+
+    async def _look(self, page: Any, before: _Before, new_tab: bool, sandbox: Settings | None) -> PageView:
+        """The page after actions: what changed since the model's previous look, or the whole
+        page when it is another one."""
+        view = await self.snapshot()
+        diff_on = sandbox.browser_snapshot_diff if sandbox is not None else get_settings().browser_snapshot_diff
+        if (diff_on and before.seen is not None and not new_tab and self._seen is not None
+                and before.seen[:2] == self._seen[:2]):
+            # Same tab, same address: the model has the page from its previous look.
+            view.changes = page_changes(before.seen[2], self._seen[2])
+        return view
+
+    async def act(self, action: Action, ref: str | None = None, *, dialog: str = "",
+                  sandbox: Settings | None = None, look: bool = True, label: str = "") -> PageView:
+        """Runs one interaction and returns the resulting page, with what changed. look=False
+        skips reading the page (the caller only needs the action's own output)."""
         async with self.agent_action():
             page = await self.page()
-            before_url = page.url
-            before_seen = self._seen
-            before_tabs = set(self._tabs)
-            before_downloads = {d["id"] for d in self.downloads.list()}
-            self._pending_dialog_choice = dialog
-            target = await self.locate(ref) if ref else None
-            try:
-                await action(page, target)
-            except ToolError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                raise ToolError(f"The action failed: {str(exc).splitlines()[0][:300]}") from exc
-            finally:
-                self._pending_dialog_choice = ""
-            await asyncio.sleep(0.3)
-            new_tabs = [t for t in self._tabs if t not in before_tabs]
-            for tab_id in new_tabs:
-                self._tabs[tab_id].by_agent = True
-            if new_tabs and self._mode == "chrome":
-                page = await self.page()  # followed the link into the new tab
-            await self._settle(page)
-            await self._keep_in_sandbox(page, sandbox)
-            view = await self.snapshot()
-            diff_on = sandbox.browser_snapshot_diff if sandbox is not None else get_settings().browser_snapshot_diff
-            if (diff_on and before_seen is not None and not new_tabs and self._seen is not None
-                    and before_seen[:2] == self._seen[:2]):
-                # Same tab, same address: the model has the page from its previous look.
-                view.changes = page_changes(before_seen[2], self._seen[2])
-            if page.url != before_url:
-                view.notes.append(f"navigated from {before_url}")
-            if new_tabs:
-                view.notes.append(f"a new tab opened: {', '.join(new_tabs)} (now active)")
-            fresh = [d for d in self.downloads.list() if d["id"] not in before_downloads]
-            for d in fresh:
-                view.notes.append(f"download started: {d['name']} — see browser_downloads")
+            before = self._before(page)
+            output = await self._perform(page, action, ref, dialog, label)
+            page, notes, new_tab = await self._after(page, before, sandbox)
+            if not look:
+                notes += self._dialog_notes
+                self._dialog_notes.clear()
+                return PageView(url=page.url, title="", tree="", notes=notes, changes="", output=output)
+            view = await self._look(page, before, new_tab, sandbox)
+            view.notes = notes + view.notes
+            view.output = output
+            return view
+
+    async def run_steps(self, steps: list[Step], sandbox: Settings | None = None) -> PageView:
+        """Several actions in a row, the page read once at the end: one call instead of a model
+        round trip per click. Stops at the first step that fails; the page is returned either
+        way, so the model sees where it stands."""
+        async with self.agent_action():
+            page = await self.page()
+            first = self._before(page)
+            lines: list[str] = []
+            new_tab_seen = False
+            for number, step in enumerate(steps, 1):
+                before = self._before(page)
+                try:
+                    output = await self._perform(page, step.action, step.ref, step.dialog, step.label)
+                    page, notes, new_tab = await self._after(page, before, sandbox)
+                except ToolError as exc:
+                    lines.append(f"{number}. {step.label} — FAILED: {exc}")
+                    if number < len(steps):
+                        lines.append(f"(steps {number + 1}–{len(steps)} were not run)")
+                    break
+                new_tab_seen = new_tab_seen or new_tab
+                line = f"{number}. {step.label} — ok" + (f" ({'; '.join(notes)})" if notes else "")
+                if output:
+                    line += "\n   " + output.replace("\n", "\n   ")
+                lines.append(line)
+            view = await self._look(page, first, new_tab_seen, sandbox)
+            view.output = "Steps:\n" + "\n".join(lines)
+            if page.url != first.url:
+                view.notes.insert(0, f"navigated from {first.url}")
             return view
 
     async def snapshot(self, *, limit: int = SNAPSHOT_LIMIT) -> PageView:
@@ -1015,6 +1304,90 @@ class AgentBrowser:
         self._dialog_notes.clear()
         self._seen = (self._active, page.url, tree)
         return PageView(url=page.url, title=title or page.url, tree=tree[:limit], truncated=truncated, notes=notes)
+
+    async def read(self, *, ref: str = "", interactive: bool = False, depth: int | None = None,
+                   limit: int = SNAPSHOT_LIMIT) -> PageView:
+        """The page, or a part of it: one element's subtree (ref), only what can be acted on
+        (interactive), or the top `depth` levels. The whole page also becomes the base of the
+        next action's diff; a part does not."""
+        if not ref and not interactive and depth is None:
+            return await self.snapshot(limit=limit)
+        async with self.agent_action():
+            page = await self.page()
+            where = await self.locate(ref) if ref else page
+            try:
+                tree = compact_tree(await where.aria_snapshot(mode="ai", depth=depth, timeout=15000))
+            except Exception as exc:  # noqa: BLE001
+                raise ToolError(f"Could not read the page: {explain_failure(exc)}") from exc
+            title = await page.title()
+        parts = [f"element [ref={ref}]" if ref else "the page", f"{depth} levels deep" if depth else "",
+                 "only interactive elements and headings" if interactive else ""]
+        if interactive:
+            tree = interactive_only(tree)
+        return PageView(url=page.url, title=title or page.url, tree=tree[:limit], truncated=len(tree) > limit,
+                        partial="Part of the page: " + ", ".join(p for p in parts if p))
+
+    async def page_text(self, *, ref: str = "", start: int = 0, limit: int = 20_000) -> tuple[str, int]:
+        """The readable text of the page (its main content when the page marks one) or of one
+        element; returns a slice of it and the full length."""
+        async with self.agent_action():
+            page = await self.page()
+            try:
+                if ref:
+                    text = await (await self.locate(ref)).evaluate(_PAGE_TEXT)
+                else:
+                    text = await page.evaluate(_PAGE_TEXT, None)
+            except ToolError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise ToolError(f"Could not read the page text: {explain_failure(exc)}") from exc
+        lines = [ln.strip() for ln in str(text or "").splitlines()]
+        cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+        return cleaned[start:start + limit], len(cleaned)
+
+    async def run_js(self, page: Any, code: str) -> str:
+        """Runs `code` in the page the way the DevTools console does (top-level await; the
+        value of the last expression is the result) and returns that value as text."""
+        cdp = await page.context.new_cdp_session(page)
+        try:
+            reply = await cdp.send("Runtime.evaluate", {
+                "expression": code, "replMode": True, "awaitPromise": True, "userGesture": True,
+                "returnByValue": False, "allowUnsafeEvalBlockedByCSP": True})
+            failure = reply.get("exceptionDetails")
+            if failure:
+                described = (failure.get("exception") or {}).get("description") or failure.get("text") or "error"
+                raise ToolError(f"The script threw: {described[:1500]}")
+            result = reply.get("result") or {}
+            object_id = result.get("objectId")
+            if not object_id:
+                if "unserializableValue" in result:
+                    return str(result["unserializableValue"])
+                if result.get("type") == "undefined":
+                    return "undefined"
+                value = result.get("value")
+                return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            try:
+                shown = await cdp.send("Runtime.callFunctionOn", {
+                    "functionDeclaration": _SERIALIZE, "objectId": object_id, "returnByValue": True})
+                return str((shown.get("result") or {}).get("value", result.get("description", "")))
+            finally:
+                await cdp.send("Runtime.releaseObject", {"objectId": object_id})
+        finally:
+            try:
+                await cdp.detach()
+            except Exception:  # noqa: BLE001 - the page may have navigated away
+                logger.debug("cdp detach failed", exc_info=True)
+
+    def console_log(self, page: Any) -> list[dict[str, Any]]:
+        return list(self._console.get(page, ()))
+
+    def request_log(self, page: Any) -> list[dict[str, Any]]:
+        return list(self._requests.get(page, ()))
+
+    def clear_logs(self, page: Any) -> None:
+        for log in (self._console, self._requests):
+            if page in log:
+                log[page].clear()
 
     async def find(self, query: str, limit: int = 12) -> str:
         """Places in the full snapshot that match the query — for long pages.
@@ -1047,14 +1420,22 @@ class AgentBrowser:
         more = f"\n…and {len(picked) - limit} more places" if len(picked) > limit else ""
         return note + "\n---\n".join(blocks) + more
 
-    async def screenshot_png(self, *, full_page: bool = False) -> bytes:
+    async def screenshot_png(self, *, full_page: bool = False, ref: str = "",
+                             region: tuple[float, float, float, float] | None = None) -> bytes:
+        """The visible part of the tab (or the whole page, one element, or a zoomed region) in
+        CSS pixels — the coordinates browser_click x/y take."""
         page = await self.page()
         try:
-            png = await page.screenshot(full_page=full_page, timeout=15000)
-            if min(png_size(png)) < MIN_SHOT_SIDE:
-                # A tab without a real size (opened while the panel was closed, by an older
-                # shell): render it at a desktop size just for this shot.
-                png = await self._shot_at_size(page, full_page)
+            if ref:
+                png = await (await self.locate(ref)).screenshot(scale="css", timeout=15000)
+            elif region is not None:
+                png = await self._zoom(page, region)
+            else:
+                png = await page.screenshot(full_page=full_page, scale="css", timeout=15000)
+                if min(png_size(png)) < MIN_SHOT_SIDE:
+                    # A tab without a real size (opened while the panel was closed, by an older
+                    # shell): render it at a desktop size just for this shot.
+                    png = await self._shot_at_size(page, full_page)
         except ToolError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -1065,6 +1446,22 @@ class AgentBrowser:
         if min(png_size(png)) < MIN_SHOT_SIDE:
             raise ToolError("The screenshot came out empty (the tab has no size). Open the browser panel and retry.")
         return png
+
+    async def _zoom(self, page: Any, region: tuple[float, float, float, float]) -> bytes:
+        """A region of the visible page, magnified so small text and icons can be read."""
+        x0, y0, x1, y1 = region
+        width, height = x1 - x0, y1 - y0
+        if width < 4 or height < 4:
+            raise ToolError("The region is too small: give x0, y0, x1, y1 with x1 > x0 and y1 > y0.")
+        scale = max(1.0, min(4.0, 1280 / width, 1280 / height))
+        sx, sy = await page.evaluate("[visualViewport.pageLeft, visualViewport.pageTop]")
+        cdp = await page.context.new_cdp_session(page)
+        try:
+            shot = await cdp.send("Page.captureScreenshot", {"format": "png", "clip": {
+                "x": x0 + sx, "y": y0 + sy, "width": width, "height": height, "scale": scale}})
+        finally:
+            await cdp.detach()
+        return base64.b64decode(shot["data"])
 
     async def _shot_at_size(self, page: Any, full_page: bool) -> bytes:
         cdp = await page.context.new_cdp_session(page)

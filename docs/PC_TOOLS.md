@@ -4,7 +4,7 @@ Catalog of every built-in tool the PC agent exposes to the model. Generated from
 the code (`core/tools/builtin/*`), not from memory. Keep it in sync — see the
 update rule at the bottom.
 
-- **Total: 121 tools** · last updated: 2026-10-07
+- **Total: 127 tools** · last updated: 2026-10-09
 - **Category** — how approval is gated: `read` (auto), `edit` / `execute` /
   `network` (may ask in manual mode). `⚠` marks a tool flagged `dangerous`
   (state-changing, asks by default).
@@ -114,17 +114,23 @@ workspace (for testing the sites/apps the agent builds); links out of it are ref
 | Tool | Cat | Description | Source |
 |------|-----|-------------|--------|
 | `browser_navigate` | network | Open a URL (or search the words), or a local page inside the workspace (`dist/index.html`, file://), in the active tab; returns the page snapshot with refs. | browser_tools |
-| `browser_read` | read | Re-read the active tab: fresh snapshot with `[ref=…]` handles. | browser_tools |
+| `browser_read` | read | Re-read the active tab: fresh snapshot with `[ref=…]` handles; `ref=` reads one part, `interactive=true` only controls and headings, `depth`, `max_chars`. | browser_tools |
+| `browser_text` | read | The readable text of the tab (main content when marked) or of one element; long text in parts (`start=`). | browser_tools |
 | `browser_find` | read | Find snapshot lines (with refs) containing all the words — cheaper than re-reading a long page. | browser_tools |
-| `browser_click` | network ⚠ | Click by ref (double / right button; `dialog=accept` for confirm pages). Reports navigation, new tabs, downloads. | browser_tools |
-| `browser_type` | network ⚠ | Type into a field by ref; `replace`, `submit=true` presses Enter. | browser_tools |
+| `browser_click` | network ⚠ | Click by ref or at x/y of a screenshot (double / right button / modifiers; `dialog=accept` for confirm pages). Reports navigation, new tabs, downloads; a failed click says what covers or disables the element. | browser_tools |
+| `browser_type` | network ⚠ | Type into a field by ref; `replace`, `slowly` (key by key), `submit=true` presses Enter. | browser_tools |
+| `browser_fill` | network ⚠ | Fill a whole form in one call: text fields, checkboxes/radios/switches, drop-downs, each by ref. | browser_tools |
 | `browser_press` | network | Press a key or combination, optionally on an element. | browser_tools |
 | `browser_select` | network | Choose option(s) in a drop-down by ref. | browser_tools |
-| `browser_hover` | read | Hover an element (menus, tooltips). | browser_tools |
+| `browser_hover` | read | Hover an element or a point (menus, tooltips). | browser_tools |
 | `browser_upload` | network | Attach workspace files to a file-upload field or upload button, without the OS file dialog (fills the hidden or on-click input directly). | browser_tools |
-| `browser_scroll` | read | Scroll the page or bring an element into view. | browser_tools |
-| `browser_wait` | read | Wait for text to appear/disappear or a fixed time. | browser_tools |
-| `browser_screenshot` | read | Screenshot the active tab and attach it to the conversation for the model to see. | browser_tools |
+| `browser_scroll` | read | Scroll the page, the panel under x/y, or bring an element into view. | browser_tools |
+| `browser_wait` | read | Wait for text to appear/disappear, the address to change, or a fixed time (`timeout`). | browser_tools |
+| `browser_js` | network ⚠ | Run JavaScript in the tab like the DevTools console (top-level await, last expression returned as JSON; elements as HTML). | browser_tools |
+| `browser_batch` | network ⚠ | Several steps (navigate, click, type, press, select, fill, hover, scroll, wait, js, upload) in one call with one approval; the page is read once at the end; stops at the first failure. | browser_tools |
+| `browser_console` | read | The tab's console: logs, warnings, errors, uncaught exceptions; filter, errors only, clear. | browser_tools |
+| `browser_requests` | read | The tab's network requests (method, status, type, time); failed / API only; `id=` shows request and response bodies. | browser_tools |
+| `browser_screenshot` | read | Screenshot the active tab (CSS pixels = click coordinates), one element, or a zoomed region, and attach it to the conversation for the model to see. | browser_tools |
 | `browser_tabs` | network | Tabs and history: list (marks the agent's vs the user's tabs) / new / select / close (own tabs freely, the user's ask) / back / forward / reload. | browser_tools |
 | `browser_handoff` | read | Hand control to the user (captcha, 2FA, sign-in); waits for "Done". | browser_tools |
 | `browser_downloads` | read | Downloads land in quarantine and are checked (Defender, disguised executables, risky types); list / move to Downloads or the workspace (approval; risky files always ask) / delete. | browser_tools |
