@@ -69,6 +69,13 @@ _CLICKABLE_ROLES = frozenset({"link", "button", "tab", "menuitem", "menuitemchec
 _UNNAMED_WRAPPER = re.compile(r"\s*- generic \[ref=[^\]]+\]:")
 _ROLE = re.compile(r"\s*- (\w+)")
 _URL_LINE = re.compile(r"^(\s*- /url: )(\S+)(.*)$")
+#: Characters of the Unicode private-use area (icon fonts), with the spaces between them.
+_ICON_GLYPHS = re.compile(r"[ \t]*[-](?:[ \t]*[-])*")
+#: The hidden copy of a rich-text editor: a nameless text box whose value is HTML markup. The
+#: editor itself is in the tree under the copy's label (_MARK_EDITORS).
+_EDITOR_COPY = re.compile(r'\s*- textbox \[ref=[^\]]+\]: "?<(?:div|p|br|span)\b')
+#: A line left with nothing to say once the icons are gone ("- text:", "- generic: ").
+_EMPTY_LEAF = re.compile(r"\s*- (?:text|generic|img)(?: \[[^\]]*\])*:?\s*(?:\"\s*\")?")
 
 #: A page is settled when its content has not changed this long and no request is pending.
 #: (Waiting for "network idle" instead cost 2.5 s after every action on any page that polls.)
@@ -96,6 +103,36 @@ _QUIET_PROBE = """(reset) => {
   }
   if (reset) w.__altairQuiet.at = performance.now();
   return [document.readyState, performance.now() - w.__altairQuiet.at];
+}"""
+
+# Editing hosts without a role become text boxes (the outermost editable element only). An
+# editor whose labelled field is a hidden copy (an invisible <textarea> holding its HTML) takes
+# that field's label, and the copy leaves the tree: one "Order title" box, the real one.
+_MARK_EDITORS = """() => {
+  const visible = (n) => {
+    const r = n.getBoundingClientRect(), s = getComputedStyle(n);
+    return r.width > 4 && r.height > 4 && s.visibility !== "hidden" && s.display !== "none" && +s.opacity > 0.05;
+  };
+  const hosts = document.querySelectorAll('[contenteditable=""], [contenteditable=true], [contenteditable=plaintext-only]');
+  for (const el of hosts) {
+    if (el.parentElement && el.parentElement.isContentEditable) continue;
+    if (!el.hasAttribute("role")) {
+      el.setAttribute("role", "textbox");
+      el.setAttribute("aria-multiline", "true");
+    }
+    for (let n = el.parentElement, depth = 0; n && depth < 4; n = n.parentElement, depth++) {
+      const copies = [...n.querySelectorAll("textarea, input:not([type=hidden])")].filter(
+        (f) => !visible(f) || /^\\s*<(div|p|br|span)\\b/i.test(f.value || ""));
+      if (!copies.length) continue;
+      if (copies.length === 1 && visible(el)) {
+        const copy = copies[0];
+        const label = copy.getAttribute("aria-label") || (copy.labels && copy.labels[0] && copy.labels[0].innerText.trim());
+        if (label && !el.hasAttribute("aria-label") && !el.hasAttribute("aria-labelledby")) el.setAttribute("aria-label", label);
+        copy.setAttribute("aria-hidden", "true");
+      }
+      break;
+    }
+  }
 }"""
 
 # The readable text of the page (or of one element): the main content when the page marks it.
@@ -189,7 +226,17 @@ def compact_tree(tree: str) -> str:
     """
     out: list[str] = []
     for line in tree.splitlines():
-        if _UNNAMED_WRAPPER.fullmatch(line):
+        if _ICON_GLYPHS.search(line):
+            # Icon fonts draw with private-use characters: meaningless to the model, and a
+            # toolbar of them took whole lines on Telegram and Kwork.
+            stripped = _ICON_GLYPHS.sub("", line).rstrip()
+            if _EMPTY_LEAF.fullmatch(stripped):
+                if "[ref=" not in stripped:
+                    continue
+                # An icon-only control (a toolbar button) stays: it can be clicked.
+                stripped = stripped.rstrip(':" ') + ": (icon)"
+            line = stripped
+        if _UNNAMED_WRAPPER.fullmatch(line) or _EDITOR_COPY.match(line):
             continue
         if " [cursor=pointer]" in line:
             role = _ROLE.match(line)
@@ -1295,6 +1342,7 @@ class AgentBrowser:
             title = await page.title()
         except Exception:  # noqa: BLE001
             title = ""
+        await self._mark_editors(page)
         try:
             tree = compact_tree(await page.aria_snapshot(mode="ai", timeout=15000))
         except Exception as exc:  # noqa: BLE001
@@ -1304,6 +1352,15 @@ class AgentBrowser:
         self._dialog_notes.clear()
         self._seen = (self._active, page.url, tree)
         return PageView(url=page.url, title=title or page.url, tree=tree[:limit], truncated=truncated, notes=notes)
+
+    async def _mark_editors(self, page: Any) -> None:
+        """Gives a text box role to editable areas that lack one: without it a rich-text editor
+        is a plain "generic" in the tree, often named by its placeholder, and the model types into
+        the labelled hidden copy next to it instead (live, on a Kwork form)."""
+        try:
+            await page.evaluate(_MARK_EDITORS)
+        except Exception:  # noqa: BLE001 - a page that is navigating: the tree is read as it is
+            logger.debug("could not mark the editors", exc_info=True)
 
     async def read(self, *, ref: str = "", interactive: bool = False, depth: int | None = None,
                    limit: int = SNAPSHOT_LIMIT) -> PageView:
@@ -1315,6 +1372,7 @@ class AgentBrowser:
         async with self.agent_action():
             page = await self.page()
             where = await self.locate(ref) if ref else page
+            await self._mark_editors(page)
             try:
                 tree = compact_tree(await where.aria_snapshot(mode="ai", depth=depth, timeout=15000))
             except Exception as exc:  # noqa: BLE001
@@ -1397,6 +1455,7 @@ class AgentBrowser:
         most query words; each hit is shown with that context and its refs.
         """
         page = await self.page()
+        await self._mark_editors(page)
         tree = await page.aria_snapshot(mode="ai", timeout=15000)
         lines = tree.splitlines()
         words = [w for w in query.lower().split() if w]

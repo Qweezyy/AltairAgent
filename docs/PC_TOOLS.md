@@ -118,8 +118,8 @@ workspace (for testing the sites/apps the agent builds); links out of it are ref
 | `browser_text` | read | The readable text of the tab (main content when marked) or of one element; long text in parts (`start=`). | browser_tools |
 | `browser_find` | read | Find snapshot lines (with refs) containing all the words — cheaper than re-reading a long page. | browser_tools |
 | `browser_click` | network ⚠ | Click by ref or at x/y of a screenshot (double / right button / modifiers; `dialog=accept` for confirm pages). Reports navigation, new tabs, downloads; a failed click says what covers or disables the element. | browser_tools |
-| `browser_type` | network ⚠ | Type into a field by ref; `replace`, `slowly` (key by key), `submit=true` presses Enter. | browser_tools |
-| `browser_fill` | network ⚠ | Fill a whole form in one call: text fields, checkboxes/radios/switches, drop-downs, each by ref. | browser_tools |
+| `browser_type` | network ⚠ | Type into a field or a rich-text editor by ref (a labelled hidden copy leads to the visible editor; a paste, then key-by-key typing if the editor ignores typed input; a warning when the field does not show the text); `replace`, `slowly`, `submit=true` presses Enter; new lines are Shift+Enter in editors. | browser_tools |
+| `browser_fill` | network ⚠ | Fill a whole form in one call: text fields and editors (as `browser_type`), checkboxes/radios/switches, `<select>` and drop-downs built from divs, each by ref. | browser_tools |
 | `browser_press` | network | Press a key or combination, optionally on an element. | browser_tools |
 | `browser_select` | network | Choose option(s) in a drop-down by ref. | browser_tools |
 | `browser_hover` | read | Hover an element or a point (menus, tooltips). | browser_tools |

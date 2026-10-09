@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from abc import abstractmethod
@@ -322,7 +323,10 @@ class TypeArgs(BaseModel):
 
 class BrowserTypeTool(_StepTool):
     name = "browser_type"
-    description = "Types into a text field by ref; submit=true presses Enter after it."
+    description = (
+        "Types into a text field or a rich-text editor by ref and checks the field shows the text "
+        "(a warning says when it does not); submit=true presses Enter after it."
+    )
     Args = TypeArgs
 
     def approval_reason(self, args) -> str:  # type: ignore[override]
@@ -330,26 +334,125 @@ class BrowserTypeTool(_StepTool):
         return tr("appr.br_type_submit" if args.submit else "appr.br_type", text=text, ref=args.ref)
 
     def step(self, args: TypeArgs, ctx: ToolContext) -> Step:
-        async def action(page, target) -> None:
-            await _enter_text(page, target, args.text, replace=args.replace, slowly=args.slowly)
+        async def action(page, target) -> str:
+            note = await _enter_text(page, target, args.text, replace=args.replace, slowly=args.slowly)
             if args.submit:
-                await target.press("Enter")
+                await page.keyboard.press("Enter")
+            return note
 
         return Step(_label(self.name, args), action, args.ref)
 
 
-async def _enter_text(page: Any, target: Any, text: str, *, replace: bool = True, slowly: bool = False) -> None:
-    if replace and not slowly:
+# The element that really takes the text for `el`. Rich-text editors (Trumbowyg, Summernote, …)
+# keep the labelled <textarea> as a hidden copy (1x1 px or invisible, its value is the editor's
+# HTML) next to the visible contenteditable box the site reads: text set on the copy shows up in
+# the page tree yet the editor and its form never see it. Live: the agent spent ~100 steps on a
+# Kwork form this way.
+_EDITABLE_FOR = """(el) => {
+  const visible = (n) => {
+    const r = n.getBoundingClientRect(), s = getComputedStyle(n);
+    return r.width > 4 && r.height > 4 && s.visibility !== "hidden" && s.display !== "none" && +s.opacity > 0.05;
+  };
+  if (el.isContentEditable) {
+    let host = el;  // the editing host, not a paragraph inside it
+    while (host.parentElement && host.parentElement.isContentEditable) host = host.parentElement;
+    return host;
+  }
+  if (!["TEXTAREA", "INPUT"].includes(el.tagName)) {
+    const inner = el.querySelector('textarea, input:not([type=hidden]), [contenteditable=""], [contenteditable=true]');
+    return inner || el;
+  }
+  const copy = !visible(el) || /^\\s*<(div|p|br|span)\\b/i.test(el.value || "");
+  if (!copy) return el;
+  for (let n = el.parentElement, depth = 0; n && depth < 4; n = n.parentElement, depth++) {
+    const boxes = [...n.querySelectorAll('[contenteditable=""], [contenteditable=true]')].filter(visible);
+    if (boxes.length === 1) return boxes[0];
+    if (boxes.length > 1) break;
+  }
+  return el;
+}"""
+
+# What the field shows now: the value of an input, the text of an editor.
+_SHOWN_TEXT = """(el) => el.isContentEditable ? el.innerText : (el.value ?? el.textContent ?? "")"""
+
+# A paste the way a browser delivers one: editors that rebuild their content on paste take it.
+_PASTE = """(el, text) => {
+  const data = new DataTransfer();
+  data.setData("text/plain", text);
+  el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+}"""
+
+
+def _same_text(shown: str, wanted: str) -> bool:
+    """The field holds the text: whitespace aside, and formatting aside for masked fields
+    ("9 000" for 9000, "+7 (999) 123-45-67" for a phone)."""
+    if "".join(shown.split()) == "".join(wanted.split()):
+        return True
+    letters = lambda s: re.sub(r"\W", "", s)  # noqa: E731
+    return bool(letters(wanted)) and letters(shown) == letters(wanted)
+
+
+async def _enter_text(page: Any, target: Any, text: str, *, replace: bool = True, slowly: bool = False) -> str:
+    """Puts `text` into a field the way a person would, and checks the field took it.
+
+    Plain inputs get fill() (fast; it fires the input events frameworks listen to). Editors get
+    real keyboard input: focus, select all, insert the text as typed input, and a final key so
+    sites that count or validate on key up see it. If the field then shows something else, a
+    paste and then key-by-key typing are tried. Returns a note for the model ("" when it went
+    as planned)."""
+    handle = await target.element_handle(timeout=8000)
+    field = (await handle.evaluate_handle(_EDITABLE_FOR)).as_element() or handle
+    redirected = not await field.evaluate("(a, b) => a === b", handle)
+    editor = await field.evaluate("(el) => el.isContentEditable")
+    before = await field.evaluate(_SHOWN_TEXT) if not replace else ""
+    wanted = text if replace else before + text
+    notes = ["typed into the visible editor (the labelled field is its hidden copy)"] if redirected else []
+
+    if not editor and replace and not slowly:
         try:
-            await target.fill(text, timeout=8000)
-            return
-        except Exception:  # noqa: BLE001 — rich editors refuse fill(): type like a person
+            await field.fill(text, timeout=8000)
+            if _same_text(await field.evaluate(_SHOWN_TEXT), wanted):
+                return "; ".join(notes)
+        except Exception:  # noqa: BLE001 - masked or custom inputs refuse fill(): type like a person
             logger.debug("fill refused; typing instead", exc_info=True)
-    await target.click(timeout=8000)
-    await page.keyboard.press("Control+A" if replace else "End")
-    if replace:
-        await page.keyboard.press("Delete")
-    await page.keyboard.type(text, delay=20 if slowly else 5)
+
+    async def focus(select_all: bool) -> None:
+        await field.click(timeout=8000)
+        if select_all:
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Delete")
+        else:
+            await page.keyboard.press("Control+End")
+
+    await focus(replace)
+    if slowly:
+        await page.keyboard.type(text, delay=20)
+    else:
+        for number, line in enumerate(text.split("\n")):
+            if number:
+                # A new line, not "send": Enter submits chat boxes, Shift+Enter breaks the line.
+                await page.keyboard.press("Shift+Enter" if editor else "Enter")
+            if line:
+                await page.keyboard.insert_text(line)
+    await page.keyboard.press("End")  # a real key up for sites that count/validate on it
+    shown = await field.evaluate(_SHOWN_TEXT)
+    if _same_text(shown, wanted):
+        return "; ".join(notes)
+
+    for how in ("paste", "keys"):
+        await focus(True)
+        if how == "paste":
+            await field.evaluate(_PASTE, wanted)
+        else:
+            await page.keyboard.type(wanted, delay=10)
+        await page.keyboard.press("End")
+        shown = await field.evaluate(_SHOWN_TEXT)
+        if _same_text(shown, wanted):
+            notes.append("the editor only took the text " + ("as a paste" if how == "paste" else "typed key by key"))
+            return "; ".join(notes)
+    preview = shown if len(shown) <= 200 else shown[:197] + "…"
+    notes.append(f"WARNING: the field shows «{preview}», not the text you gave — check it before sending")
+    return "; ".join(notes)
 
 
 class PressArgs(BaseModel):
@@ -420,8 +523,27 @@ _FIELD_KIND = """(el) => {
   if (el.tagName === "SELECT") return "select";
   if (["checkbox", "radio"].includes(type) || ["checkbox", "radio", "switch", "menuitemcheckbox"].includes(role))
     return "check";
+  // A drop-down built from divs (vue-select, react-select…): opened by a click, picked from a list.
+  if (["combobox", "listbox"].includes(role) && !["INPUT", "TEXTAREA"].includes(el.tagName)) return "combo";
   return "text";
 }"""
+
+
+async def _pick(page: Any, box: Any, value: str) -> None:
+    """Chooses `value` in a drop-down made of divs: open it, click the option (typing to filter
+    the list when the option is not shown)."""
+    await box.click(timeout=8000)
+    for attempt in range(2):
+        options = page.get_by_role("option", name=value)
+        try:
+            await options.first.wait_for(state="visible", timeout=2500)
+        except Exception:  # noqa: BLE001 - not listed yet: filter the list by typing
+            if attempt == 0:
+                await page.keyboard.insert_text(value)
+                continue
+            raise ToolError(f"No option «{value}» appeared in the list; read the list and pick by ref.") from None
+        await options.first.click(timeout=8000)
+        return
 
 
 class BrowserFillTool(_StepTool):
@@ -441,6 +563,7 @@ class BrowserFillTool(_StepTool):
         b = get_agent_browser()
 
         async def action(page, target) -> str:
+            notes = []
             for item in args.fields:
                 field = await b.locate(item.ref)
                 kind = await field.evaluate(_FIELD_KIND)
@@ -451,16 +574,20 @@ class BrowserFillTool(_StepTool):
                         await field.set_checked(on, timeout=8000)
                     elif kind == "select":
                         await _choose(field, [str(item.value)])
+                    elif kind == "combo":
+                        await _pick(page, field, str(item.value))
                     else:
                         value = item.value
                         if isinstance(value, float) and value.is_integer():
                             value = int(value)
-                        await _enter_text(page, field, str(value).lower() if isinstance(value, bool) else str(value))
-                except ToolError:
-                    raise
+                        note = await _enter_text(page, field, str(value).lower() if isinstance(value, bool) else str(value))
+                        if note:
+                            notes.append(f"[ref={item.ref}]: {note}")
+                except ToolError as exc:
+                    raise ToolError(f"Field [ref={item.ref}]: {exc}") from exc
                 except Exception as exc:  # noqa: BLE001
                     raise ToolError(f"Field [ref={item.ref}]: {explain_failure(exc)}") from exc
-            return f"filled {len(args.fields)} field(s)"
+            return "\n".join([f"filled {len(args.fields)} field(s)", *notes])
 
         return Step(_label(self.name, args), action)
 
