@@ -1829,8 +1829,14 @@ private fun ThinkingIndicator(status: String) {
         AltiMascot(size = (width * 0.11f).coerceIn(40f, 60f).dp, satellites = true, mood = AltiMood.Think)
         if (status.isNotBlank()) {
             Spacer(Modifier.width(8.dp))
+            // A long wait shows its seconds: a big prompt (video, long history) is read silently for a
+            // minute or more, and a ticking counter tells that apart from a hang.
+            var elapsed by remember(status) { androidx.compose.runtime.mutableIntStateOf(0) }
+            LaunchedEffect(status) {
+                while (true) { kotlinx.coroutines.delay(1_000); elapsed++ }
+            }
             Text(
-                status,
+                if (elapsed >= 10) status + " · " + stringResource(R.string.elapsed_seconds, elapsed) else status,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

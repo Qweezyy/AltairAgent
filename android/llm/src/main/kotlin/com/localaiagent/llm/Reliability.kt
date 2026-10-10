@@ -47,7 +47,11 @@ internal data class EffortField(val name: String, val value: JsonElement)
 internal fun effortField(baseUrl: String, model: String, effort: String?): EffortField? {
     if (effort == null) return null
     val url = baseUrl.lowercase()
+    val m = model.lowercase()
     return when {
+        // Gemini (anywhere but OpenRouter) obeys reasoning_effort and ignores the Z.ai "thinking" field,
+        // even behind GateYourWay: measured 2026-10-10, "thinking: disabled" changed nothing.
+        "gemini" in m && "openrouter.ai" !in url -> EffortField("reasoning_effort", JsonPrimitive(effort))
         "openrouter.ai" in url -> EffortField(
             "reasoning", buildJsonObject { put("effort", if (effort == "minimal") Effort.LOW else effort) },
         )
@@ -107,6 +111,36 @@ internal class FakeAnswerException(val reason: String) : RuntimeException(
 /** The first byte of the answer did not come in time. */
 internal class FirstByteTimeoutException(seconds: Long) :
     java.io.IOException("No answer from the model for $seconds s")
+
+/** The answer stopped flowing: no data for too long after it had started. */
+internal class StreamSilenceException(seconds: Long) :
+    java.io.IOException("The answer stopped coming for $seconds s")
+
+/**
+ * The model declined (a safety or content filter) and sent nothing. Asking again bills the whole prompt
+ * again and gets the same refusal, so this is an honest error, not a retry.
+ */
+internal class ModelRefusedException(reason: String) :
+    RuntimeException("The model declined to answer ($reason). Rephrase the request or remove the attachment it objects to.")
+
+/** finish_reason values of a refusal (OpenAI-style and Gemini's own, lower-cased). */
+internal val REFUSAL_REASONS = setOf(
+    "content_filter", "safety", "prohibited_content", "blocklist", "spii", "recitation", "image_safety",
+)
+
+/**
+ * How long to wait for the first byte of an answer: the base wait, plus time for the model to read and
+ * think over a big prompt, plus time to upload the request from a slow phone network. A small chat
+ * gets about the base; a 230K-token prompt with a video several minutes.
+ */
+internal fun firstByteBudgetMs(
+    baseMs: Long, per100kTokensMs: Long, uploadBytesPerSec: Long,
+    estimatedTokens: Long, bodyBytes: Long,
+): Long {
+    val reading = estimatedTokens * per100kTokensMs / 100_000
+    val upload = if (uploadBytesPerSec > 0) bodyBytes * 1000 / uploadBytesPerSec else 0
+    return (baseMs + reading + upload).coerceAtMost(15 * 60_000L)
+}
 
 /**
  * Per-provider health shared by all chats. A provider is sick for [SICK_FOR_MS] after it failed all

@@ -128,6 +128,76 @@ class ReliabilityTest {
         assertEquals(1, main.requests.size)
     }
 
+    /** A config where 25K prompt tokens (100K characters) add 1 s to the first-byte wait. */
+    private fun scaled(firstByteMs: Long, silenceMs: Long = 60_000) = LlmConfig(
+        baseUrl = main.baseUrl, model = "m", apiKey = "k", maxRetries = 3, retryDelayScale = 0.01,
+        firstByteTimeoutMs = firstByteMs, silenceTimeoutMs = silenceMs,
+        firstBytePer100kTokensMs = 4_000, uploadBytesPerSec = 0,
+    )
+
+    @Test
+    fun aBigPromptIsGivenTimeToBeRead() = runBlocking {
+        // 100K characters ≈ 25K tokens → 0.5 s + 1 s allowed; the model answers after 1.2 s.
+        main.serve(answer("read it all").copy(firstByteDelayMs = 1200))
+        val big = listOf(Message(Role.USER, "x".repeat(100_000)))
+        val c = OpenAiCompatClient(scaled(firstByteMs = 500))
+        assertEquals("read it all", c.complete(big).content)
+        c.close()
+        assertEquals("one request, nothing billed twice", 1, main.requests.size)
+    }
+
+    @Test
+    fun aSmallPromptStillHasTheShortWait() = runBlocking {
+        main.serve(answer("too late").copy(firstByteDelayMs = 1200), answer("in time"))
+        val c = OpenAiCompatClient(scaled(firstByteMs = 500))
+        assertEquals("in time", c.complete(ask).content)
+        c.close()
+        assertEquals(2, main.requests.size)
+    }
+
+    @Test
+    fun silentThinkingAfterTheHeadersIsNotCut() = runBlocking {
+        // Headers at once, then 1 s of silence (the model thinks), then the answer: silence before the
+        // first data counts against the first-byte budget, not the 0.3 s silence limit.
+        main.serve(answer("thought it over").copy(dataDelayMs = 1000))
+        val c = OpenAiCompatClient(scaled(firstByteMs = 3000, silenceMs = 300))
+        assertEquals("thought it over", c.complete(ask).content)
+        c.close()
+        assertEquals(1, main.requests.size)
+    }
+
+    @Test
+    fun aStreamThatStopsMidwayIsCutBySilence() = runBlocking {
+        main.serve(
+            Reply(listOf(text("Hel"), text("lo")), complete = true, chunkDelayMs = 900),
+            answer("Hello again"),
+        )
+        val c = OpenAiCompatClient(scaled(firstByteMs = 3000, silenceMs = 300))
+        assertEquals("Hello again", c.complete(ask).content)
+        c.close()
+        assertEquals(2, main.requests.size)
+    }
+
+    @Test
+    fun aRefusalIsAnHonestErrorNotFiveBilledRetries() = runBlocking {
+        main.serve(Reply(listOf("""{"choices":[{"delta":{},"finish_reason":"content_filter"}]}""")), answer("never asked"))
+        try { call(cfg(retries = 5)); fail("a refusal must surface") } catch (e: RuntimeException) {
+            assertTrue(e.message, e.message!!.contains("declined"))
+        }
+        assertEquals(1, main.requests.size)
+        assertFalse(ProviderHealth.isSick(ProviderHealth.key(main.baseUrl, "m")))
+    }
+
+    @Test
+    fun firstByteBudgetGrowsWithThePrompt() {
+        // A small chat: about the base wait.
+        assertEquals(90_000L + 24_000 + 1_000, firstByteBudgetMs(90_000, 120_000, 100_000, 20_000, 100_000))
+        // 228K tokens with a 16 MB body (a video): over 8 minutes, under the 15-minute cap.
+        val big = firstByteBudgetMs(90_000, 120_000, 100_000, 228_000, 16_000_000)
+        assertTrue("$big", big in 480_000L..900_000L)
+        assertEquals(15 * 60_000L, firstByteBudgetMs(90_000, 120_000, 100_000, 5_000_000, 100_000_000))
+    }
+
     // ---------------------------------------------------------------- reasoning effort
 
     @Test
@@ -145,6 +215,11 @@ class ReliabilityTest {
         assertEquals("reasoning_effort", oai.name)
         assertEquals(JsonPrimitive("medium"), oai.value)
         assertNull(effortField("https://api.openai.com/v1", "gpt-5", null))
+        // Gemini ignores the Z.ai field even behind GateYourWay (measured): it gets reasoning_effort.
+        val gem = effortField("https://api.gateyourway.com/v1", "gemini-3.8-flash", "low")!!
+        assertEquals("reasoning_effort", gem.name)
+        assertEquals(JsonPrimitive("low"), gem.value)
+        assertEquals("reasoning", effortField("https://openrouter.ai/api/v1", "google/gemini-3.8-flash", "low")!!.name)
     }
 
     @Test

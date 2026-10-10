@@ -387,4 +387,5 @@
     <string name="md_alert_important">Important</string>
     <string name="md_alert_warning">Warning</string>
     <string name="md_alert_caution">Caution</string>
+    <string name="elapsed_seconds">%1$d s</string>
 </resources>

@@ -37,6 +37,14 @@ data class LlmConfig(
     val connectTimeoutMs: Long = 15_000,
     val silenceTimeoutMs: Long = 60_000,
     val firstByteTimeoutMs: Long = 90_000,
+    /**
+     * Extra wait for the first byte per 100K prompt tokens: a model reads and silently thinks over a big
+     * prompt (video, long history) for a minute or more before it sends anything. Measured on
+     * GateYourWay + gemini-3.8-flash: ~40 s of silence at 210K tokens.
+     */
+    val firstBytePer100kTokensMs: Long = 120_000,
+    /** Upload speed assumed for the request body (a phone on a weak network): its time is waited out too. */
+    val uploadBytesPerSec: Long = 100_000,
     /** A first byte slower than this, twice in a row, makes the provider "sick" for a while. */
     val slowFirstByteMs: Long = 40_000,
     /** Models (each with its own provider and key) that take the steps while this one is sick. */

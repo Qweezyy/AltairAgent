@@ -12,6 +12,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.HttpTimeoutConfig
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.headers
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
@@ -95,6 +96,9 @@ class OpenAiCompatClient(
                 throw e
             } catch (e: ModelLoopException) {
                 throw e
+            } catch (e: ModelRefusedException) {
+                // Another provider of the same model would refuse too; the provider is not sick.
+                throw e
             } catch (e: Throwable) {
                 lastError = e
                 tried += attempts
@@ -147,6 +151,7 @@ class OpenAiCompatClient(
                     return if (prefix.isEmpty()) turn else turn.copy(content = prefix + turn.content)
                 } catch (t: Throwable) {
                     if (t is CancellationException) throw t
+                    if (t is ModelRefusedException) throw t
                     if (t is EffortRejectedException) {
                         // Sent once, refused: never again for this provider, and the attempt is free.
                         ProviderHealth.rejectEffortField(cfg.baseUrl)
@@ -223,18 +228,39 @@ class OpenAiCompatClient(
             }
         }
 
+        val bodyText = json.encodeToString(JsonObject.serializer(), body)
+        // The wait for the first byte grows with the prompt: reading it, thinking it over and uploading it
+        // from a phone take minutes for a big one, and cutting it off then bills the prompt for nothing.
+        val budgetMs = firstByteBudgetMs(
+            cfg.firstByteTimeoutMs, cfg.firstBytePer100kTokensMs, cfg.uploadBytesPerSec,
+            estimatedTokens(messages), bodyText.length.toLong(),
+        )
         limiter.acquire()
         var released = false
         suspend fun release() { if (!released) { released = true; limiter.release() } }
         try {
             val started = System.currentTimeMillis()
+            // Set on every line; after the first one, silence longer than the silence timeout ends it.
+            var lastLineAt = 0L
             coroutineScope {
                 // The first byte has its own deadline; once data flows, only silence ends the stream.
                 val watchdog = launch {
-                    delay(cfg.firstByteTimeoutMs)
-                    throw FirstByteTimeoutException(cfg.firstByteTimeoutMs / 1000)
+                    delay(budgetMs)
+                    throw FirstByteTimeoutException(budgetMs / 1000)
+                }
+                val silence = launch {
+                    while (true) {
+                        delay(minOf(1_000L, cfg.silenceTimeoutMs))
+                        val last = lastLineAt
+                        if (last > 0 && System.currentTimeMillis() - last > cfg.silenceTimeoutMs) {
+                            throw StreamSilenceException(cfg.silenceTimeoutMs / 1000)
+                        }
+                    }
                 }
                 http(cfg).preparePost(url) {
+                    // The socket may stay silent as long as the first byte may take; later silence is
+                    // watched above.
+                    timeout { socketTimeoutMillis = maxOf(budgetMs, cfg.silenceTimeoutMs) }
                     contentType(ContentType.Application.Json)
                     headers {
                         append(HttpHeaders.Authorization, "Bearer ${cfg.apiKey}")
@@ -243,10 +269,11 @@ class OpenAiCompatClient(
                             append("X-Title", "Local AI Agent")
                         }
                     }
-                    setBody(json.encodeToString(JsonObject.serializer(), body))
+                    setBody(bodyText)
                 }.execute { response ->
                     if (!response.status.isSuccess()) {
                         watchdog.cancel()
+                        silence.cancel()
                         val text = response.bodyAsText().take(400)
                         val code = response.status.value
                         if (code == 400 && field != null && text.contains(field.name)) throw EffortRejectedException()
@@ -258,10 +285,13 @@ class OpenAiCompatClient(
                     var first = true
                     while (true) {
                         val line = channel.readUTF8Line() ?: break
+                        lastLineAt = System.currentTimeMillis()
                         if (first) {
                             first = false
                             watchdog.cancel()
-                            ProviderHealth.noteFirstByte(healthKey, System.currentTimeMillis() - started, cfg.slowFirstByteMs)
+                            // Slow means slower than this prompt's own allowance, not than a small chat's.
+                            val waited = lastLineAt - started - (budgetMs - cfg.firstByteTimeoutMs)
+                            ProviderHealth.noteFirstByte(healthKey, waited, cfg.slowFirstByteMs)
                         }
                         if (!line.startsWith("data:")) continue
                         val data = line.removePrefix("data:").trim()
@@ -309,6 +339,7 @@ class OpenAiCompatClient(
                         }
                     }
                     watchdog.cancel()
+                    silence.cancel()
                     if (!completed) throw java.io.IOException("The answer stream ended before the model finished")
                 }
             }
@@ -326,12 +357,30 @@ class OpenAiCompatClient(
             usage = usage,
             finishReason = finishReason,
         )
+        if (turn.content.isBlank() && turn.toolCalls.isEmpty() && finishReason.lowercase() in REFUSAL_REASONS) {
+            throw ModelRefusedException(finishReason)
+        }
         FakeAnswer.classify(turn.content, turn.toolCalls.isNotEmpty(), usage.promptTokens, requestChars(messages))
             ?.let { throw FakeAnswerException(it) }
         // A real answer: what was held back goes out now.
         emit(held.toString())
         limiter.onSuccess()
         return turn
+    }
+
+    /**
+     * The prompt's size in tokens, roughly: text at ~4 characters a token, a picture ~1000 tokens, video
+     * and audio ~1 token per 50 bytes (a 4 MB low-res clip of 12 min measured at 70K tokens on Gemini).
+     */
+    private fun estimatedTokens(messages: List<Message>): Long = messages.sumOf { m ->
+        val text = (m.content.length + m.toolCalls.sumOf { it.arguments.length }) / 4L
+        text + m.parts.sumOf { p ->
+            when (p) {
+                is Part.Image -> 1_000L
+                is Part.File -> p.dataUri.length * 3L / 4 / 50
+                else -> 0L
+            }
+        }
     }
 
     /** The text size of a request, images left out. */

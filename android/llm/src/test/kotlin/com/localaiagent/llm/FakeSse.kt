@@ -21,6 +21,8 @@ class FakeSse : Closeable {
         val errorBody: String = "",
         val firstByteDelayMs: Long = 0,
         val chunkDelayMs: Long = 0,
+        /** A pause after the headers, before any data (a model thinking silently). */
+        val dataDelayMs: Long = 0,
     )
 
     private val server = ServerSocket(0)
@@ -61,6 +63,8 @@ class FakeSse : Closeable {
             out.write(b); out.flush(); return
         }
         out.write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n".toByteArray())
+        out.flush()
+        if (reply.dataDelayMs > 0) Thread.sleep(reply.dataDelayMs)
         for (chunk in reply.chunks) {
             out.write("data: $chunk\n\n".toByteArray()); out.flush()
             if (reply.chunkDelayMs > 0) Thread.sleep(reply.chunkDelayMs)

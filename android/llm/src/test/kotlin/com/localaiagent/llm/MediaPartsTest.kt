@@ -54,6 +54,35 @@ class MediaPartsTest {
     }
 
     /**
+     * A ~210K-token prompt (three copies of a 12-minute clip) with the app's own settings, run only with
+     * GYW_KEY and GYW_BIG_VIDEO=<path to an mp4> set (it costs ~$0.03). Gemini reads it silently for ~40 s.
+     */
+    @Test
+    fun liveBigVideoPromptIsAnsweredNotCut() = runBlocking {
+        val key = System.getenv("GYW_KEY").orEmpty()
+        val path = System.getenv("GYW_BIG_VIDEO").orEmpty()
+        assumeTrue("set GYW_KEY and GYW_BIG_VIDEO to run", key.isNotBlank() && path.isNotBlank())
+        val data = "data:video/mp4;base64," + Base64.getEncoder().encodeToString(java.io.File(path).readBytes())
+        val c = OpenAiCompatClient(
+            LlmConfig(baseUrl = "https://api.gateyourway.com/v1", model = "gemini-3.8-flash", apiKey = key),
+        )
+        var retries = 0
+        val turn = c.complete(
+            listOf(
+                Message(
+                    Role.USER, "Watch the attached videos. In one sentence: what changes on screen over time?",
+                    parts = (1..3).map { Part.File(data, "clip$it.mp4") },
+                ),
+            ),
+            onRetry = { _, _, _, _ -> retries++ },
+        )
+        c.close()
+        assertTrue(turn.content, turn.content.isNotBlank())
+        assertTrue("prompt ${turn.usage.promptTokens}", turn.usage.promptTokens > 150_000)
+        assertEquals("answered on the first attempt", 0, retries)
+    }
+
+    /**
      * The real thing, run only with a key: GYW_KEY=… (GateYourWay) and optionally GYW_MODEL. Our client
      * sends a 5 s clip with on-screen text and a spoken word; the model must report both.
      */
@@ -77,6 +106,9 @@ class MediaPartsTest {
         )
         c.close()
         val text = turn.content.lowercase()
+        // Gemini's own filter now and then blocks a harmless clip by mistake (seen 2026-10-10): that is
+        // Google's verdict, not a transport failure, so the test does not count it.
+        assumeTrue("Gemini's filter blocked the clip this time", "blocked by gemini" !in text)
         assertTrue(turn.content, "elephant" in text && "58" in text)
         assertTrue(turn.content, "pineapple" in text)
     }

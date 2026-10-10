@@ -117,6 +117,15 @@ _Changes landing on `main` but not yet part of a tagged release go here._
   the messages stay in the chat, the model sees the summary.
 
 ### Fixed
+- Android: big prompts (a video or a long chat, ~200K+ tokens) no longer end in an empty answer that
+  still bills the prompt. The client waited 90 s for the first byte (upload included) and 60 s of silence,
+  while Gemini reads such a prompt silently for 40 s and more, longer over a phone network; it cut the
+  request, the provider charged the input, and the retry did the same. The wait now grows with the prompt
+  and its upload, silence counts only once the answer flows, and the waiting status shows the seconds.
+- Android: Gemini models get the reasoning level as reasoning_effort (the Z.ai "thinking" field sent to
+  GateYourWay was ignored by Gemini, so "adaptive/low" did not save anything there).
+- Android: a refusal by the model's content filter ends with a clear message instead of five billed
+  retries of the same prompt.
 - **The health gate no longer believes a lying exit code.** A test command that exits with 0 while
   its output says something failed (`pytest || true`, a wrapper script) is now red: the summary of
   pytest, unittest, jest/vitest, mocha, cargo or go wins over the exit code.

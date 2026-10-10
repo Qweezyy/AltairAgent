@@ -386,4 +386,5 @@
     <string name="md_alert_important">Важно</string>
     <string name="md_alert_warning">Внимание</string>
     <string name="md_alert_caution">Осторожно</string>
+    <string name="elapsed_seconds">%1$d с</string>
 </resources>
