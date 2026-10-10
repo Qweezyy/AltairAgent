@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "altair-dev",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["pc/main.py", "--server", "--port", "8791"],
+      "port": 8791
+    }
+  ]
+}

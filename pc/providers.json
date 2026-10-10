@@ -1,0 +1,20 @@
+[
+  {
+    "id": "default",
+    "name": "api.gateyourway.com",
+    "base_url": "https://api.gateyourway.com/v1",
+    "api_key": "",
+    "models": [
+      {
+        "id": "glm-5.3-flash",
+        "name": "",
+        "context": 1000000,
+        "api_key": "",
+        "photo": true,
+        "video": false,
+        "audio": false,
+        "files": true
+      }
+    ]
+  }
+]
