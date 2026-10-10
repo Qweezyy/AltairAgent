@@ -101,6 +101,8 @@ internal class PcBridgeClient(private val config: PcBridgeConfig) {
                     "show_image" -> obj.str("url")?.let {
                         trySend(BridgeEvent.Image(it, obj.str("caption").orEmpty()))
                     }
+                    // News of the PC's servers this phone is a body of (deduped with their own).
+                    "notice" -> com.localaiagent.app.servers.ServerHub.onPcNotice(obj)
                     "run.finished" -> {
                         trySend(BridgeEvent.Finished(obj.str("text").orEmpty()))
                         webSocket.close(1000, null)

@@ -59,6 +59,9 @@ val LocalAnswerSpacing = androidx.compose.runtime.compositionLocalOf<Pair<Float,
 
 val LocalUiScale = androidx.compose.runtime.compositionLocalOf<Pair<Float, (Float) -> Unit>> { 1f to {} }
 
+/** Opens Servers with a scanned `altair://body` link (asks before pairing). */
+val LocalOpenServerLink = staticCompositionLocalOf<(String) -> Unit> { {} }
+
 /** Re-checks the PC bridge right away (tapping the presence chip). */
 val LocalRefreshPresence = staticCompositionLocalOf<() -> Unit> { {} }
 

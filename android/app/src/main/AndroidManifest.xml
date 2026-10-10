@@ -43,6 +43,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="altair" android:host="pair" />
             </intent-filter>
+            <!-- A server's pairing link (PHONE_SERVER_SPEC): altair://body?n=..&s=..&b=..&c=.. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="altair" android:host="body" />
+            </intent-filter>
         </activity>
 
         <!-- Выбор иконки в настройках: активна ровно ОДНА точка входа-алиас (по умолчанию IconDeep).

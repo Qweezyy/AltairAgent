@@ -20,6 +20,9 @@ class App : Application(), ImageLoaderFactory {
         super.onCreate()
         createChannels()
         registerActivityLifecycleCallbacks(ForegroundTracker)
+        com.localaiagent.app.servers.ServerHub.init(this)
+        // Reading the list decrypts it through the Keystore: not on the startup path.
+        Thread { com.localaiagent.app.servers.ServerHub.schedule() }.start()
         // Встроенный Python (Chaquopy) — стартуем один раз при запуске приложения.
         if (!com.chaquo.python.Python.isStarted()) {
             com.chaquo.python.Python.start(com.chaquo.python.android.AndroidPlatform(this))
@@ -40,6 +43,10 @@ class App : Application(), ImageLoaderFactory {
         mgr.createNotificationChannel(
             NotificationChannel(CHANNEL_REMIND, ctx.getString(R.string.channel_remind_name), NotificationManager.IMPORTANCE_HIGH)
                 .apply { description = ctx.getString(R.string.channel_remind_desc) },
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(CHANNEL_SERVERS, ctx.getString(R.string.channel_servers_name), NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = ctx.getString(R.string.channel_servers_desc) },
         )
     }
 
@@ -67,6 +74,7 @@ class App : Application(), ImageLoaderFactory {
         const val CHANNEL_RUN = "agent_run"
         const val CHANNEL_DONE = "agent_done"
         const val CHANNEL_REMIND = "agent_remind"
+        const val CHANNEL_SERVERS = "servers"
 
         /** True while at least one activity is visible (the app is in the foreground). */
         val isForeground: Boolean get() = ForegroundTracker.started > 0

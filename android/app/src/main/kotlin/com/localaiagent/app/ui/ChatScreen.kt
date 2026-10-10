@@ -275,6 +275,7 @@ fun ChatScreen(
     // Plugins (MCP) and skills
     pluginActions: PluginActions = PluginActions(),
     onKeyPromptShown: () -> Unit = {},
+    onOpenServers: () -> Unit = {},
     bridgeSyncSupported: Boolean = false,
 ) {
     var showSettings by remember { mutableStateOf(false) }
@@ -372,6 +373,7 @@ fun ChatScreen(
                 onOpenSearch = { scope.launch { drawerState.close() }; showChatSearch = true },
                 onOpenSecrets = { scope.launch { drawerState.close() }; showSecrets = true },
                 onOpenPlugins = { scope.launch { drawerState.close() }; showPlugins = true },
+                onOpenServers = { scope.launch { drawerState.close() }; onOpenServers() },
                 onOpenBoard = { scope.launch { drawerState.close() }; showBoard = true },
                 onOpenSettings = { scope.launch { drawerState.close() }; showSettings = true },
             )
@@ -934,6 +936,7 @@ private fun DrawerContent(
     onOpenSearch: () -> Unit,
     onOpenSecrets: () -> Unit,
     onOpenPlugins: () -> Unit,
+    onOpenServers: () -> Unit,
     onOpenBoard: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -981,6 +984,7 @@ private fun DrawerContent(
             RailRow(Icons.Outlined.Dashboard, stringResource(R.string.nav_board), badge = state.board.size, onClick = onOpenBoard)
             RailRow(Icons.Outlined.Key, stringResource(R.string.nav_secrets), badge = state.secrets.size, onClick = onOpenSecrets)
             RailRow(Icons.Outlined.Extension, stringResource(R.string.nav_plugins), badge = state.mcpServers.size + state.skills.size, onClick = onOpenPlugins)
+            RailRow(Icons.Outlined.Dns, stringResource(R.string.nav_servers), onClick = onOpenServers)
 
             RailLabel(stringResource(R.string.nav_section_chats))
             LazyColumn(Modifier.weight(1f)) {
@@ -2538,10 +2542,16 @@ private fun BridgeScreen(
             val clipboard = LocalClipboardManager.current
             var link by remember { mutableStateOf("") }
             val scanCtx = androidx.compose.ui.platform.LocalContext.current
+            val openServerLink = LocalOpenServerLink.current
             // Camera apps and Google Lens rarely open custom altair:// links, so the phone scans the
             // PC's QR code itself.
             val scanQr = rememberLauncherForActivityResult(com.journeyapps.barcodescanner.ScanContract()) { res ->
                 val text = res.contents ?: return@rememberLauncherForActivityResult
+                // A server's QR scanned here by mistake: it belongs to Servers, not to the PC bridge.
+                if (com.localaiagent.app.servers.parseServerLink(text) != null) {
+                    openServerLink(text)
+                    return@rememberLauncherForActivityResult
+                }
                 val p = parsePairLink(text)
                 if (p == null) {
                     android.widget.Toast.makeText(scanCtx, scanCtx.getString(R.string.pair_fail), android.widget.Toast.LENGTH_LONG).show()
