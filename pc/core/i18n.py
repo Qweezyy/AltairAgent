@@ -31,6 +31,8 @@ CATALOG: dict[str, dict[str, str]] = {
     "appr.open_url": {"en": "Open the web page {url}", "ru": "Открыть веб-страницу {url}"},
     "appr.research": {"en": "Research on the web: {question}", "ru": "Исследование в интернете: {question}"},
     "appr.images": {"en": "Search the web for images: {query}", "ru": "Поиск картинок в интернете: {query}"},
+    "srv.remove_failed": {"en": "The agent was not removed (step: {step}): {why}. The server stays in the list; nothing here was forgotten.", "ru": "Агент не удалён (шаг: {step}): {why}. Сервер остаётся в списке, здесь ничего не забыто."},
+    "srv.need_sudo": {"en": "On {name} sudo asks for the password: enter it for this action (it is used once and not saved).", "ru": "На {name} sudo спрашивает пароль: введите его для этого действия (он нужен один раз и не сохраняется)."},
     "appr.br_open": {"en": "Open {url} in the built-in browser", "ru": "Открыть {url} во встроенном браузере"},
     "appr.br_click": {"en": "Click an element on the page ({ref})", "ru": "Нажать на элемент страницы ({ref})"},
     "appr.br_type": {"en": "Type into a field on the page ({ref}): «{text}»", "ru": "Ввести в поле на странице ({ref}): «{text}»"},

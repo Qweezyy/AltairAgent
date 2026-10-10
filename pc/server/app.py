@@ -574,19 +574,55 @@ def create_app() -> FastAPI:
             body = await asyncio.to_thread(_gate().trust.add, payload)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
-        await _journal_app("body.trusted", body=body.id, name=body.name, kind=body.kind)
+        await _journal_app("body.trusted", body=body.id, name=body.name, body_kind=body.kind)
         return {"ok": True, "id": body.id}
 
     @app.post("/api/bodies/{bid}/revoke")
     async def bodies_revoke(request: Request, bid: str) -> dict:
-        """Keeps a body out from now on and ends its open sessions."""
-        _local_only(request)
+        """Keeps a body out from now on and ends its open sessions. From this machine, or from the
+        owner's phone (a phone body signed in): a lost or taken-over PC is shut out from the phone.
+        A PC reaches a server through SSH, not with its body key, so revoking a PC also takes its
+        authorized_keys line away and ends its SSH sessions, the tunnel included."""
         gate = _gate()
+        by = _revoker(request, gate)
+        if bid == gate.identity.id:
+            raise HTTPException(status_code=400, detail="a body cannot revoke itself")
         revoked = await asyncio.to_thread(gate.trust.revoke, bid)
         ended = gate.end_sessions(bid)
-        if revoked:
-            await _journal_app("body.revoked", body=bid, sessions_ended=ended)
-        return {"ok": revoked, "sessions_ended": ended}
+        ssh: dict[str, Any] = {}
+        from core.ssh_access import SshAccess, cut
+
+        access = SshAccess(app.state.settings.data_dir / "identity")
+        info = await asyncio.to_thread(access.get, bid)
+        if info is not None:
+            ssh = await asyncio.to_thread(cut, info)
+            await asyncio.to_thread(access.forget, bid)
+        if revoked or ssh:
+            await _journal_app("body.revoked", body=bid, by=by, sessions_ended=ended, **ssh)
+        return {"ok": revoked, "sessions_ended": ended, **ssh}
+
+    @app.get("/api/bodies/trusted")
+    async def bodies_trusted(request: Request) -> dict:
+        """The bodies this one trusts (for the phone's list of who may reach this server, with a
+        revoke button); `you` is the caller."""
+        gate = _gate()
+        by = _revoker(request, gate)
+        bodies = await asyncio.to_thread(gate.trust.all)
+        return {"self": {"id": gate.identity.id, "name": gate.identity.name, "kind": gate.identity.kind},
+                "you": by.removeprefix("phone:") if by != "local" else "",
+                "trusted": [{"id": b.id, "name": b.name, "kind": b.kind, "added_at": b.added_at,
+                             "revoked": b.revoked} for b in bodies]}
+
+    def _revoker(request: Request, gate: Any) -> str:
+        """Who may revoke a body: this machine, or a phone signed in with its key."""
+        auth = request.scope.get("altair_auth")
+        if auth == "loopback":
+            return "local"
+        caller = request.scope.get("altair_body") if auth == "body" else None
+        body = gate.trust.get(caller) if caller else None
+        if body is None or body.revoked or body.kind != "phone":
+            raise HTTPException(status_code=403, detail=tr("api.local_only"))
+        return f"phone:{body.id}"
 
     # ---------------------------------------------------------------- servers (core/servers)
 
@@ -653,7 +689,7 @@ def create_app() -> FastAPI:
         return {"ok": True, "report": report.to_dict()}
 
     def _start_server_job(req, kind: str) -> dict:
-        from core.servers.install import InstallError, Installer
+        from core.servers.install import Installer, InstallError
 
         busy = [j for j in app.state.server_jobs.values()
                 if j.get("host") == req.host and j["state"] == "running"]
@@ -715,10 +751,33 @@ def create_app() -> FastAPI:
         record = await asyncio.to_thread(ServerStore(app.state.settings.data_dir).get, sid)
         if record is None:
             raise HTTPException(status_code=404, detail="no such server")
+        sudo_password = str((payload or {}).get("sudo_password") or "")
+        if not record.user_service and not sudo_password and await _sudo_kind(record) == "password":
+            # Asked now, not halfway through a background job: the window asks and sends it again.
+            return _need_sudo(record)
         req = InstallRequest(host=record.host, user=record.user, port=record.port, name=record.name,
                              mode=record.mode, source=str((payload or {}).get("source") or "github"),
-                             bring_memory=False, update=True)
+                             bring_memory=False, update=True, sudo_password=sudo_password)
         return _start_server_job(req, "update")
+
+    async def _sudo_kind(record: Any) -> str:
+        """How this PC's login on the server gets root ("root", "nopass", "password", "none");
+        "" when the server cannot be reached (the action then reports that itself)."""
+        from core.servers import remote as remote_module
+        from core.servers.preflight import run_preflight
+        from core.servers.registry import ServerStore
+
+        login = remote_module.Login(host=record.host, port=record.port, user=record.user,
+                                    key_path=str(ServerStore(app.state.settings.data_dir).key_path(record.id)),
+                                    host_key=record.host_key)
+        try:
+            async with remote_module.SSHRemote(login) as remote:
+                return (await run_preflight(remote)).sudo
+        except remote_module.RemoteError:
+            return ""
+
+    def _need_sudo(record: Any) -> dict:
+        return {"ok": False, "need": "sudo_password", "error": tr("srv.need_sudo", name=record.name or record.host)}
 
     @app.post("/api/servers/{sid}/mode")
     async def servers_mode(request: Request, sid: str, payload: dict) -> dict:
@@ -772,7 +831,7 @@ def create_app() -> FastAPI:
     async def servers_uninstall(request: Request, sid: str, payload: dict | None = None) -> dict:
         """Removes the agent from the server, this PC's key from it and the server from here."""
         _local_only(request)
-        from core.servers.install import uninstall
+        from core.servers.install import NEED_SUDO, InstallError, uninstall
         from core.servers.registry import ServerStore
         from core.servers.remote import RemoteError
 
@@ -781,7 +840,14 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="no such server")
         keep = bool((payload or {}).get("keep_data"))
         try:
-            await uninstall(app.state.settings, record, keep_data=keep)
+            await uninstall(app.state.settings, record, keep_data=keep,
+                            sudo_password=str((payload or {}).get("sudo_password") or ""))
+        except InstallError as exc:
+            if str(exc) == NEED_SUDO:
+                return _need_sudo(record)
+            # Nothing is forgotten: the server stays in the list, reachable, to try again.
+            await _journal_app("server.remove_failed", server=sid, host=record.host, step=exc.step, error=str(exc))
+            return {"ok": False, "error": tr("srv.remove_failed", step=exc.step, why=str(exc))}
         except RemoteError as exc:
             return {"ok": False, "error": str(exc)}
         await _journal_app("server.removed", server=sid, host=record.host, kept_data=keep)

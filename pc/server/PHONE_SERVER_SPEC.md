@@ -150,6 +150,8 @@ online/connecting/offline, `agent` ok/down, `status.load`), handy for a "bodies"
 | Journal | `GET <base>/api/journal?limit=100&before=<seq>&since=<seq>&kind=<k1,k2>` (newest first) |
 | Stop everything | `POST <base>/api/runs/stop` → `{"ok": true, "stopped": [chat ids]}` — one button, confirm first |
 | News (poll) | `GET <base>/api/notices` (first time: no `since`) → `{"notices": [], "next": N}`; then `GET <base>/api/notices?since=N` → `{"notices": [...], "next": N2}`; keep `N` per server |
+| Who may reach it | `GET <base>/api/bodies/trusted` → `{"self": {id, name, kind}, "you": <phone id>, "trusted": [{id, name, kind: "pc"\|"phone"\|"server", added_at, revoked}]}` |
+| Shut a body out | `POST <base>/api/bodies/{id}/revoke` → `{"ok": true, "sessions_ended": n}`; for a PC also `"key_removed": bool, "sessions_cut": n` — its SSH key leaves the server's `authorized_keys` and its open tunnel is ended, so a lost or taken-over PC cannot reach the server any more. Confirm first; `403` for anything but a phone, `400` for the server itself |
 
 On connect send `{"type": "ui_lang", "lang": "ru"|"en"}` as with the PC: the server's texts
 (notice titles too) follow it.
@@ -197,7 +199,9 @@ Probe with `GET /api/health` (open on both routes) with a short timeout; re-prob
 - The certificate pin is the server's identity on the direct route — never fall back to "trust all".
 - The pairing code is single use; never store it after pairing.
 - Removing the server in the phone: forget its entry; the owner revokes the phone on the server
-  (`POST /api/bodies/{id}/revoke`, from the PC side).
+  (`POST /api/bodies/{id}/revoke`, from the PC or another phone).
+- Revoking a PC from the phone (§5) is the owner's emergency brake: show the PC's name, ask to
+  confirm, and say that the PC has to be added to the server again to get back in.
 
 ## 9. Done means (for the Android chat)
 
@@ -210,7 +214,9 @@ Probe with `GET /api/health` (open on both routes) with a short timeout; re-prob
 5. Background: lock the phone, run a task on the server from the PC → a notification arrives
    (within the WorkManager period) and opens the chat.
 6. Same notice through PC and server → one notification.
-7. Tests in `:core`/`:app` for: link parsing, card/id computation (match Python's for a fixed key —
+7. The server's screen lists who may reach it (`/api/bodies/trusted`); revoking the PC there
+   ends its tunnel (`sessions_cut` ≥ 1 while the PC is on) and the PC shows the server offline.
+8. Tests in `:core`/`:app` for: link parsing, card/id computation (match Python's for a fixed key —
    vector below), message to sign, pin check, notice dedupe.
 
 **Test vectors** (pinned in `tests/test_phone_server.py`; the Kotlin tests must give the same):

@@ -37,6 +37,32 @@ def _gpus() -> list[str]:
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
+#: How long the Docker answer is kept: Docker Desktop comes and goes, the daemon too.
+DOCKER_TTL_S = 60.0
+_docker: tuple[float, bool] = (0.0, False)
+
+
+def docker_ready() -> bool:
+    """Docker that can run containers now: its daemon answers. The `docker` program alone said
+    yes on WSL with Docker Desktop stopped (the WSL integration leaves the client there), and the
+    planner would have sent container work to a machine that cannot run it."""
+    global _docker
+    checked, ready = _docker
+    if time.monotonic() - checked < DOCKER_TTL_S:
+        return ready
+    exe = shutil.which("docker")
+    ready = False
+    if exe:
+        try:
+            done = subprocess.run([exe, "version", "--format", "{{.Server.Version}}"], capture_output=True,
+                                  text=True, timeout=8, check=False)
+            ready = done.returncode == 0 and bool(done.stdout.strip())
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.debug("docker: %s", exc)
+    _docker = (time.monotonic(), ready)
+    return ready
+
+
 def _system() -> str:
     if platform.system() == "Linux":
         try:
@@ -61,7 +87,6 @@ def facts() -> dict[str, Any]:
             "cpus": os.cpu_count() or 0,
             "mem_mb": psutil.virtual_memory().total // (1024 * 1024),
             "gpus": _gpus(),
-            "docker": bool(shutil.which("docker")),
             "version": __version__,
         }
     return _facts
@@ -93,4 +118,4 @@ def status(identity_card: dict[str, Any], data_dir: Path, running_tasks: int = 0
            workspace: str = "") -> dict[str, Any]:
     card = {k: v for k, v in identity_card.items() if k != "public_key"}
     # The default folder there: where another body's call lands when it names no folder.
-    return {**card, **facts(), "workspace": workspace, "load": load(data_dir, running_tasks)}
+    return {**card, **facts(), "docker": docker_ready(), "workspace": workspace, "load": load(data_dir, running_tasks)}

@@ -93,6 +93,20 @@ class Servers:
     async def all(self) -> list[dict]:
         return (await self._get("/api/servers")).get("servers", [])
 
+    async def _post_sudo(self, path: str, payload: dict, timeout: float = 120) -> Any:
+        """POSTs a server action; when that server's sudo needs the password, asks for it (no
+        echo, not stored) and sends it once with the action."""
+        r = await self._post(path, payload, timeout)
+        if r.get("need") != "sudo_password":
+            return r
+        if not sys.stdin.isatty():
+            return r
+        self.console.print(Text(r.get("error") or "", style="yellow"))
+        sudo = await asyncio.to_thread(getpass.getpass, self.t("srv.sudo_password_once"))
+        if not sudo:
+            return r
+        return await self._post(path, {**payload, "sudo_password": sudo}, timeout)
+
     async def show_list(self) -> int:
         servers = await self.all()
         if not servers:
@@ -229,7 +243,7 @@ class Servers:
         s = self._one(await self.all(), args.server.strip())
         if s is None:
             return 1
-        started = await self._post(f"/api/servers/{s['id']}/update", {"source": args.source})
+        started = await self._post_sudo(f"/api/servers/{s['id']}/update", {"source": args.source})
         if not started.get("ok"):
             self.console.print(Text(started.get("error") or "?", style="red"))
             return 1
@@ -261,8 +275,9 @@ class Servers:
             answer = await asyncio.to_thread(input, self.t("srv.confirm_remove", name=s.get("name") or s["host"]))
             if answer.strip().lower() not in ("y", "yes", "д", "да"):
                 return 1
-        with self.console.status(self.t("srv.removing")):
-            r = await self._post(f"/api/servers/{s['id']}/uninstall", {"keep_data": args.keep_data})
+        # No spinner: a sudo password may be asked for on the way.
+        self.console.print(Text(self.t("srv.removing"), style="dim"))
+        r = await self._post_sudo(f"/api/servers/{s['id']}/uninstall", {"keep_data": args.keep_data}, timeout=900)
         if not r.get("ok"):
             self.console.print(Text(r.get("error") or "?", style="red"))
             return 1

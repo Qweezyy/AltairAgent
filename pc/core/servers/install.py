@@ -438,7 +438,7 @@ class Installer:
                 if not pre.can_install:
                     raise InstallError("preflight", "; ".join(pre.problems))
                 if pre.sudo == "password" and not req.sudo_password:
-                    raise InstallError("preflight", "this login needs the sudo password")
+                    raise InstallError("preflight", NEED_SUDO)
                 if mode == "sandbox":
                     self._sandbox_preflight(pre)
                 home = (await remote.run("printf %s \"$HOME\"")).out.strip() or "/root"
@@ -465,6 +465,7 @@ class Installer:
                 else:
                     await self._configure(remote, layout)
                     await self._identity(remote, layout)
+                await self._pc_ssh(remote, layout, home, key_path)
                 await self._service(remote, layout, home)
                 await self._guardian(remote, layout)
                 await self._health(remote, layout)
@@ -640,6 +641,24 @@ ln -sfn {release} {layout.install_dir}/current
                          root=True)
         self.state.body_id = str(card["id"])
 
+    async def _pc_ssh(self, remote: SSHRemote, layout: Layout, home: str, key_path: Path) -> None:
+        """Tells the server which authorized_keys line and key are this PC's (core/ssh_access.py):
+        revoking this PC there — from the owner's phone, say — then takes its SSH access away too,
+        not only its body key. Done at every update as well, for servers installed before."""
+        import asyncssh
+
+        from core.bodies import Identity
+
+        public = (await asyncio.to_thread(key_path.with_suffix(".pub").read_text, encoding="ascii")).strip()
+        fingerprint = asyncssh.import_public_key(public).get_fingerprint("sha256")
+        pc_id = await asyncio.to_thread(lambda: Identity(self.settings.data_dir / "identity",
+                                                         self.settings.body_kind).id)
+        info = {"body": pc_id, "authorized_keys": f"{home}/.ssh/authorized_keys",
+                "marker": f"altair-pc-{self.state.server_id}", "fingerprint": fingerprint}
+        binary = f"{layout.install_dir}/current/LocalAIAgent"
+        await self._must(remote, f"APP_PATH={layout.data_dir} {binary} --pc-ssh {shlex.quote(json.dumps(info))}",
+                         "identity", root=True)
+
     def _sandbox_preflight(self, pre: Preflight) -> None:
         """The sandbox needs Docker: there, or installable (apt and root rights); and setfacl, to
         give the agent's user the granted folders without changing their owner."""
@@ -768,10 +787,35 @@ def _last_json(text: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------- removing it again
 
 
-async def uninstall(settings: Settings, record: ServerRecord, *, keep_data: bool = False,
+#: The error of an action on a server whose sudo asks for the password when none was given: the
+#: window and the CLI ask for it and try again (it is not stored, like at the install).
+NEED_SUDO = "this server needs the sudo password for this"
+#: The longest one removal command may take (a stuck one used to hang for the 15-minute default).
+UNINSTALL_STEP_TIMEOUT = 120.0
+
+
+async def use_root(remote: SSHRemote, pre: Preflight, sudo_password: str) -> None:
+    """Gives `remote` the root rights of this login, for actions after the install: with the sudo
+    password when sudo asks for one. Refuses before anything changes when it cannot."""
+    if pre.sudo == "none":
+        raise InstallError("preflight", "this login has no root rights (no sudo)")
+    if pre.sudo == "password" and not sudo_password:
+        raise InstallError("preflight", NEED_SUDO)
+    remote.sudo = {"root": "", "nopass": "sudo -n", "password": "sudo -S -p ''"}[pre.sudo]
+    remote.sudo_password = sudo_password if pre.sudo == "password" else ""
+    if pre.sudo == "password" and not (await remote.run("true", root=True, timeout=30)).ok:
+        raise InstallError("preflight", "the sudo password was not accepted")
+
+
+async def uninstall(settings: Settings, record: ServerRecord, *, keep_data: bool = False, sudo_password: str = "",
                     progress: Progress | None = None) -> None:
     """Stops and removes the agent from the server, takes this PC's key out of authorized_keys,
-    forgets the server here and stops trusting its body."""
+    forgets the server here and stops trusting its body.
+
+    Every step is checked, and what is left is looked for at the end: only a server with nothing
+    left on it loses this PC's key and is forgotten here. Before, on a server whose sudo asks for
+    the password every command ran without rights — the service stop hung, the files stayed —
+    and the server was forgotten anyway, the agent still running there and no key to reach it."""
     report = progress or (lambda step, detail, pct: None)
     store = ServerStore(settings.data_dir)
     login = Login(host=record.host, port=record.port, user=record.user, key_path=str(store.key_path(record.id)),
@@ -779,28 +823,45 @@ async def uninstall(settings: Settings, record: ServerRecord, *, keep_data: bool
     ctl = "systemctl --user" if record.user_service else "systemctl"
     unit = ("~/.config/systemd/user/altair.service" if record.user_service
             else "/etc/systemd/system/altair.service")
+    guardian_unit = unit.replace("altair.service", "altair-guardian.service")
     data = "" if keep_data else record.data_dir
     home = record.install_dir.rsplit("/.local/share/altair", 1)[0]
     command = Layout.for_login(not record.user_service, home).command
+    system = not record.user_service
+
     async with SSHRemote(login) as remote:
         pre = await run_preflight(remote)
-        remote.sudo = {"root": "", "nopass": "sudo -n"}.get(pre.sudo, remote.sudo)
+        if system:
+            await use_root(remote, pre, sudo_password)
+
+        async def must(step: str, cmd: str, root: bool) -> None:
+            result = await remote.run(cmd, root=root, timeout=UNINSTALL_STEP_TIMEOUT)
+            if not result.ok:
+                raise InstallError(step, (result.err or result.out).strip()[:300] or f"exit code {result.code}")
+
         report("service", "stop", 0.2)
-        guardian_unit = unit.replace("altair.service", "altair-guardian.service")
         if record.mode == "sandbox":
-            await remote.run("docker rm -f altair >/dev/null 2>&1; docker images -q altair | xargs -r docker rmi -f "
-                             ">/dev/null 2>&1; docker network rm altair-net >/dev/null 2>&1; true", root=True)
-        await remote.run(f"{ctl} disable --now altair-guardian 2>/dev/null; rm -f {guardian_unit}; "
-                         f"{ctl} disable --now altair 2>/dev/null; rm -f {unit}; {ctl} daemon-reload",
-                         root=not record.user_service)
+            await must("service", "docker rm -f altair >/dev/null 2>&1; docker images -q altair | xargs -r docker rmi -f "
+                                  ">/dev/null 2>&1; docker network rm altair-net >/dev/null 2>&1; true", True)
+        # A unit that is already gone is fine; the closing daemon-reload fails without the rights.
+        await must("service", f"{ctl} disable --now altair-guardian >/dev/null 2>&1 || true; rm -f {guardian_unit}; "
+                              f"{ctl} disable --now altair >/dev/null 2>&1 || true; rm -f {unit}; {ctl} daemon-reload",
+                   system)
         report("files", "remove", 0.5)
-        await remote.run(f"rm -rf {shlex.quote(record.install_dir)} {shlex.quote(data) if data else ''}; "
-                         f"rm -f {shlex.quote(command)}",
-                         root=True)
+        await must("files", f"rm -rf {shlex.quote(record.install_dir)} {shlex.quote(data) if data else ''}; "
+                            f"rm -f {shlex.quote(command)}", True)
+        left = await remote.run(f"for p in {shlex.quote(record.install_dir)} {shlex.quote(data) if data else ''} "
+                                f"{shlex.quote(command)} {unit} {guardian_unit}; do [ -e \"$p\" ] && echo \"$p\"; done; "
+                                f"{ctl} is-active altair altair-guardian 2>/dev/null | grep -x active; true",
+                                root=system, timeout=UNINSTALL_STEP_TIMEOUT)
+        if left.out.strip():
+            raise InstallError("files", "still on the server: " + ", ".join(left.out.split()))
         report("key", "remove", 0.8)
         marker = f"altair-pc-{record.id}"
-        await remote.run(f"test -f ~/.ssh/authorized_keys && grep -v {shlex.quote(marker)} ~/.ssh/authorized_keys "
-                         "> ~/.ssh/.ak.tmp; mv ~/.ssh/.ak.tmp ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys")
+        # The key goes last: after it this PC cannot log in there to finish anything.
+        await must("key", f"test -f ~/.ssh/authorized_keys || exit 0; grep -v {shlex.quote(marker)} ~/.ssh/authorized_keys "
+                          "> ~/.ssh/.ak.tmp; mv ~/.ssh/.ak.tmp ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",
+                   False)
     from core.bodies import TrustStore
 
     if record.body_id:

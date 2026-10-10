@@ -538,3 +538,121 @@ async def test_a_sandbox_folder_must_be_a_real_absolute_one(settings, tmp_path, 
     with pytest.raises(InstallError) as err:
         await _installer(settings, server, InstallRequest(host="h", password="p", mode="sandbox", folders=[bad])).run()
     assert "absolute path" in str(err.value)
+
+
+# ------------------------------------------------------------------ a server whose sudo asks for the password
+
+SUDO_PROBE = GOOD_PROBE.replace("uid=0", "uid=1000").replace("sudo_nopass=yes", "sudo_nopass=no")
+
+
+class SudoServer(FakeServer):
+    """Like the WSL test machine: the login is not root and its sudo asks for the password.
+    What is installed stays until a command with real root rights removes it."""
+
+    def __init__(self, tmp: Path, password: str = "s3cret") -> None:
+        super().__init__(tmp)
+        self.probe = SUDO_PROBE
+        self.password = password
+        self.installed = {"/opt/altair", "/var/lib/altair", "/usr/local/bin/altair",
+                          "/etc/systemd/system/altair.service", "/etc/systemd/system/altair-guardian.service"}
+        self.services = {"altair", "altair-guardian"}
+
+
+class SudoRemote(FakeRemote):
+    async def run(self, command: str, *, root: bool = False, timeout: float = 0, stdin: str | None = None) -> RunResult:
+        s = self.server
+        if root:
+            if not self.sudo:
+                s.commands.append(command)
+                return RunResult(1, "", "Permission denied")   # what the old uninstall ran into
+            if self.sudo.startswith("sudo -S") and self.sudo_password != s.password:
+                s.commands.append(command)
+                return RunResult(1, "", "sudo: 1 incorrect password attempt")
+        if "do [ -e" in command:                                 # the check for what is left
+            s.commands.append(command)
+            left = sorted(s.installed) + sorted(f"active:{x}" for x in s.services)
+            return RunResult(0, "\n".join(left), "")
+        if root and "disable --now altair" in command:
+            s.services.clear()
+            for unit in [p for p in s.installed if p.endswith(".service")]:
+                s.installed.discard(unit)
+        if root and command.startswith("rm -rf"):
+            s.installed -= {p for p in s.installed if p in command}
+        return await super().run(command, root=root, timeout=timeout, stdin=stdin)
+
+
+async def _installed_on(settings, tmp_path, server) -> object:
+    record = await _installer(settings, FakeServer(tmp_path), InstallRequest(host="h", password="p")).run()
+    record.body_id = server.identity.id
+    return record
+
+
+@pytest.mark.parametrize("given, why", [("", install_module.NEED_SUDO), ("wrong", "the sudo password was not accepted")])
+async def test_without_the_sudo_password_nothing_is_touched(settings, tmp_path, release, monkeypatch, given, why):
+    """Live (WSL, sudo with a password): the old uninstall ran every command without rights,
+    hung on the service stop, left the agent running — and forgot the server and its key."""
+    server = SudoServer(tmp_path)
+    record = await _installed_on(settings, tmp_path, server)
+    monkeypatch.setattr("core.servers.install.SSHRemote", lambda login: SudoRemote(server, login))
+    with pytest.raises(InstallError, match=why):
+        await uninstall(settings, record, sudo_password=given)
+    assert not any("disable --now" in c or "rm -rf" in c or "grep -v altair-pc" in c for c in server.commands)
+    assert server.services == {"altair", "altair-guardian"}
+    assert ServerStore(settings.data_dir).get(record.id) is not None      # still in the list, still reachable
+
+
+async def test_with_the_sudo_password_everything_goes(settings, tmp_path, release, monkeypatch):
+    server = SudoServer(tmp_path)
+    record = await _installed_on(settings, tmp_path, server)
+    monkeypatch.setattr("core.servers.install.SSHRemote", lambda login: SudoRemote(server, login))
+    await uninstall(settings, record, sudo_password="s3cret")
+    assert not server.installed and not server.services
+    assert server.commands[-1].startswith("test -f ~/.ssh/authorized_keys") and f"altair-pc-{record.id}" in server.commands[-1]
+    assert ServerStore(settings.data_dir).get(record.id) is None
+
+
+async def test_a_server_with_something_left_is_not_forgotten(settings, tmp_path, release, monkeypatch):
+    server = SudoServer(tmp_path)
+    record = await _installed_on(settings, tmp_path, server)
+
+    class Stubborn(SudoRemote):          # the files cannot be removed (an immutable or busy folder)
+        async def run(self, command, **kw):
+            if command.startswith("rm -rf"):
+                self.server.commands.append(command)
+                return RunResult(0, "", "")
+            return await super().run(command, **kw)
+
+    monkeypatch.setattr("core.servers.install.SSHRemote", lambda login: Stubborn(server, login))
+    with pytest.raises(InstallError, match="still on the server: /opt/altair") as caught:
+        await uninstall(settings, record, sudo_password="s3cret")
+    assert caught.value.step == "files"
+    assert not any("grep -v altair-pc" in c for c in server.commands)   # the PC can still log in to retry
+    assert ServerStore(settings.data_dir).get(record.id) is not None
+
+
+def test_the_api_asks_for_the_sudo_password_and_takes_it_once(monkeypatch, settings, tmp_path, release):
+    server = SudoServer(tmp_path)
+    with _api(monkeypatch, settings, FakeServer(tmp_path)) as client:
+        job = _wait_job(client, client.post("/api/servers/install", json={"host": "h", "password": "p"}).json()["job"])
+        sid = job["server"]["id"]
+        fake = lambda login: SudoRemote(server, login)  # noqa: E731
+        import core.servers.remote as remote_module
+
+        monkeypatch.setattr(install_module, "SSHRemote", fake)
+        monkeypatch.setattr(remote_module, "SSHRemote", fake)
+
+        asked = client.post(f"/api/servers/{sid}/uninstall", json={}).json()
+        assert asked["ok"] is False and asked["need"] == "sudo_password" and "sudo" in asked["error"]
+        update = client.post(f"/api/servers/{sid}/update", json={}).json()
+        assert update["need"] == "sudo_password" and "job" not in update      # asked before any job starts
+
+        wrong = client.post(f"/api/servers/{sid}/uninstall", json={"sudo_password": "nope"}).json()
+        assert wrong["ok"] is False and "need" not in wrong and "not accepted" in wrong["error"]
+        assert [s["id"] for s in client.get("/api/servers").json()["servers"]] == [sid]
+
+        done = client.post(f"/api/servers/{sid}/uninstall", json={"sudo_password": "s3cret"}).json()
+        assert done == {"ok": True}
+        assert client.get("/api/servers").json() == {"servers": []}
+        kinds = [r["kind"] for r in client.get("/api/journal?kind=server.").json()["records"]]
+        assert kinds[:2] == ["server.removed", "server.remove_failed"]
+        assert "s3cret" not in json.dumps(client.get("/api/journal").json())

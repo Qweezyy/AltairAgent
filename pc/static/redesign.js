@@ -2101,6 +2101,45 @@ function confirmDialog({ title, message, confirmText, cancelText, danger } = {})
   });
 }
 
+// A password asked for one action (a server's sudo password): never stored; null when cancelled.
+function passwordDialog({ title, message, confirmText } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey); resolve(val); };
+    const overlay = el(`<div class="overlay confirm-overlay">
+      <div class="confirm-box" role="dialog" aria-modal="true">
+        <div class="confirm-title">${esc(title || T("cf.title"))}</div>
+        ${message ? `<div class="confirm-msg">${esc(message)}</div>` : ""}
+        <input class="field" data-pw type="password" autocomplete="new-password" />
+        <div class="confirm-actions">
+          <button class="btn btn-outline" data-cancel>${esc(T("cf.cancel"))}</button>
+          <button class="btn btn-primary" data-ok>${esc(confirmText || T("cf.ok"))}</button>
+        </div>
+      </div></div>`);
+    const value = () => $("[data-pw]", overlay).value;
+    const onKey = (e) => { if (e.key === "Escape") finish(null); else if (e.key === "Enter" && value()) finish(value()); };
+    overlay.addEventListener("click", (e) => { if (e.target === overlay || e.target.closest("[data-cancel]")) finish(null); else if (e.target.closest("[data-ok]") && value()) finish(value()); });
+    document.addEventListener("keydown", onKey);
+    els.overlayRoot.appendChild(overlay);
+    setTimeout(() => $("[data-pw]", overlay)?.focus(), 30);
+  });
+}
+
+// POSTs a server action; when the server says its sudo needs the password, asks for it and tries
+// again with it (once per attempt; nothing is kept).
+async function serverAction(url, body, name) {
+  let payload = { ...body };
+  for (;;) {
+    let r;
+    try { r = await (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })).json(); }
+    catch { return { ok: false }; }
+    if (r.ok || r.need !== "sudo_password") return r;
+    const pw = await passwordDialog({ title: T("srv.sudoTitle", { name }), message: r.error || T("srv.sudoHelp"), confirmText: T("cf.ok") });
+    if (pw === null) return { ok: false, cancelled: true };
+    payload = { ...body, sudo_password: pw };
+  }
+}
+
 // ------------------------------------------------------------------ командная палитра (Ctrl/Cmd-K)
 async function openPalette() {
   if ($(".palette-overlay")) { closePalette(); return; }
@@ -2861,11 +2900,9 @@ async function renderServersSection(main) {
         },
       })), false));
       $("[data-update]", card)?.addEventListener("click", async (e) => {
-        e.currentTarget.disabled = true;
-        let r;
-        try { r = await (await fetch(`/api/servers/${encodeURIComponent(s.id)}/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); }
-        catch { r = { ok: false }; }
-        if (!r.ok) { toast(r.error || T("t.error"), "error"); e.currentTarget.disabled = false; return; }
+        const btn = e.currentTarget; btn.disabled = true;
+        const r = await serverAction(`/api/servers/${encodeURIComponent(s.id)}/update`, {}, s.name || s.host);
+        if (!r.ok) { if (!r.cancelled) toast(r.error || T("t.error"), "error"); btn.disabled = false; return; }
         const box = $("#srv-form", main); box.hidden = false;
         followInstall(box, r.job, drawList, () => { box.innerHTML = ""; box.hidden = true; }, "srv.updating");
       });
@@ -2879,10 +2916,8 @@ async function renderServersSection(main) {
         const ok = await confirmDialog({ title: T("srv.removeTitle", { name: s.name || s.host }), message: T(keep ? "srv.removeMsgKeep" : "srv.removeMsg"), confirmText: T("srv.remove"), danger: true });
         if (!ok) return;
         const btn = e.currentTarget; btn.disabled = true;
-        try {
-          const r = await (await fetch(`/api/servers/${encodeURIComponent(s.id)}/uninstall`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_data: keep }) })).json();
-          if (r.ok) { toast(T("srv.removed")); drawList(); } else { toast(r.error || T("t.error"), "error"); btn.disabled = false; }
-        } catch { toast(T("t.error"), "error"); btn.disabled = false; }
+        const r = await serverAction(`/api/servers/${encodeURIComponent(s.id)}/uninstall`, { keep_data: keep }, s.name || s.host);
+        if (r.ok) { toast(T("srv.removed")); drawList(); } else { if (!r.cancelled) toast(r.error || T("t.error"), "error"); btn.disabled = false; }
       });
       list.appendChild(card);
     });

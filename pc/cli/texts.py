@@ -117,6 +117,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "srv.recommend": {"en": "Recommended mode: {mode}. {why}", "ru": "Рекомендую режим «{mode}». {why}"},
     "srv.need_yes": {"en": "Not a terminal: nobody to confirm. Add -y.", "ru": "Не терминал: некому подтвердить. Добавьте -y."},
     "srv.confirm": {"en": "Install Altair on {host} in the “{mode}” mode? [Y/n] ", "ru": "Ставлю Altair на {host} в режиме «{mode}»? [Y/n] "},
+    "srv.sudo_password_once": {"en": "sudo password (only for this action): ", "ru": "Пароль sudo (только для этого действия): "},
     "srv.sudo_password": {"en": "sudo password (only for this install): ", "ru": "Пароль sudo (только на время установки): "},
     "srv.step.connect": {"en": "Connecting", "ru": "Подключение"},
     "srv.step.preflight": {"en": "Looking at the server", "ru": "Осмотр сервера"},

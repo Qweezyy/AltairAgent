@@ -74,10 +74,13 @@ And two modes per task: **"Autopilot"** (leave it alone — gates and rollback) 
   `solve_math`; dev server; code map / LSP; an eval harness; desktop shell (Tauri).
 - **Android app (Kotlin/Compose):** chat, models, skills, MCP plugins, memory, bridge to the PC;
   full/lite builds; a space-themed rebrand (theme/icons).
+- **Your servers (0.3.0):** the agent installs itself on a Linux server, works there with the PC off,
+  picks the body for each task, moves chats, looks after itself (guardian, rollbacks, safe system
+  changes) and is reachable from the phone — see "Your servers" below.
 
-**In progress / planned:** a server tier and a pool of servers with automatic task placement; a single
-account and chat sync (keypair + QR pairing); deploy and self-heal "to production"; Autopilot/Co-pilot
-modes; generative media (via your keys); frictionless onboarding of all bodies in a couple of steps.
+**In progress / planned:** a single account and full chat sync between all bodies; deploy and
+self-heal "to production"; generative media (via your keys); frictionless onboarding of all bodies
+in a couple of steps.
 
 **Known limitations:**
 - **Phone ↔ PC works only on the same local network** (e.g. one Wi-Fi) for now. The bridge and
@@ -143,6 +146,58 @@ Download the `.apk` from the [latest release](https://github.com/Qweezyy/AltairA
 on your phone and open it (Android asks once to allow installs from your browser or file manager).
 Android 8.0+ is required. To connect it to the PC, see "Known limitations" above — for now both
 devices need to be on the same network.
+
+## Your servers (0.3.0)
+
+A Linux server can become another body of the same agent: it keeps working when your PC is off,
+and the agent decides itself where each piece of work runs.
+
+**Adding one.** Settings → Servers → Add server (or `altair server add HOST`): the address, the
+user and the password once. Altair checks the server first (system, memory, disk, root rights,
+what is missing) and shows it before changing anything. Then it installs itself:
+
+- the password is used only to put **this PC's own SSH key** on the server; it is not saved
+  anywhere — on the PC or on the server — and every later connection uses the key and the host
+  key pinned on the first one;
+- when sudo asks for a password, it is asked for during the install, an update and the removal,
+  and not kept;
+- needs: Linux x64 or arm64 with systemd and SSH, root or sudo rights. Tested on Ubuntu 22.04 and 26.04.
+
+**Modes** (per server, changeable later): **Owner** — the agent does what it needs there;
+**Autopilot** — everything except reconfiguring the machine itself asks you first; **Careful** —
+it asks before every change; **Sandbox** — the agent lives in a Docker container and sees only the
+folders you give it (with CPU and memory limits).
+
+**How it is reached.** The agent on the server listens only on `127.0.0.1`; the PC talks to it
+through an SSH tunnel. No port is opened. For the phone there is an optional direct door (TLS on
+port 8443, off by default) whose certificate the phone pins when it pairs.
+
+**One agent, several machines.** In a normal chat the agent sees your bodies (this PC and the
+servers), picks one for a task — where the repository is, where there is a GPU or Docker, a server
+for long work — and runs its file and command tools there (`body="name:/folder"`). A chat can move
+to a server and continue there; memory and skills are kept in sync between the bodies.
+
+**It looks after itself.** A small guardian service next to the agent restarts it when it hangs,
+rolls a new version back if it does not come up healthy, and cleans the disk. Changes that could
+cut you off (sshd, firewall, network) go through `safe_system_change`: the undo is armed first, and
+the change stays only if a fresh SSH login from your PC still works afterwards — otherwise it is
+undone by itself (after 2 minutes by default). `self_check` shows its state; every server action lands in the
+Journal.
+
+**From the phone.** The server's card in Settings → Servers has a "Phone" button with a QR code.
+The phone then sees the server's status, chats and Journal, gets its notifications, has a stop
+button, and — if the PC is lost or taken over — can shut that PC out of the server (its SSH key and
+open tunnel go with it).
+
+**Removing it.** One button (or `altair server remove`): the services, the files, the `altair`
+command and this PC's key in `authorized_keys` are removed, then checked. If anything is left, the
+server stays in the list and nothing is forgotten, so you can try again.
+
+**Security, in short — what to look at:** the Journal (an append-only, hash-chained record of what
+happened on each body); Settings → Servers for who is connected; keep the direct door off unless
+the phone needs it; use the Sandbox mode for a server that also runs other important things.
+
+Terminal: `altair server list | check | add | remove | update | mode`.
 
 ## Quick start from source (Windows)
 

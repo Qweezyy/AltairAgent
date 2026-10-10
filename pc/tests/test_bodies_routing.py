@@ -265,3 +265,30 @@ def test_the_prompt_knows_the_bodies_only_when_there_are_some(no_servers):
 ])
 def test_a_body_and_its_folder_are_told_apart(value, expected):
     assert routing.split_body(value) == expected
+
+
+def test_docker_counts_only_when_its_daemon_answers(monkeypatch):
+    """Live: WSL with Docker Desktop stopped has the `docker` client (the WSL integration) and no
+    daemon; it was reported "with Docker" and could get container work."""
+    import subprocess
+
+    import core.body_status as bs
+
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, answer[0], stdout=answer[1], stderr="")
+
+    monkeypatch.setattr(bs.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None)
+    monkeypatch.setattr(bs.subprocess, "run", fake_run)
+    answer = (1, "")                                     # "Cannot connect to the Docker daemon"
+    monkeypatch.setattr(bs, "_docker", (0.0, False))
+    assert bs.docker_ready() is False
+    answer = (0, "27.3.1\n")
+    assert bs.docker_ready() is False and len(calls) == 1          # kept for a minute
+    monkeypatch.setattr(bs, "_docker", (0.0, False))
+    assert bs.docker_ready() is True and calls[-1][1:3] == ["version", "--format"]
+    monkeypatch.setattr(bs.shutil, "which", lambda name: None)
+    monkeypatch.setattr(bs, "_docker", (0.0, True))
+    assert bs.docker_ready() is False                              # no client at all

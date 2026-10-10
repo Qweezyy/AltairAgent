@@ -612,6 +612,7 @@ def main() -> int:
     # The server installer exchanges keys over SSH with these (core/servers/install.py).
     parser.add_argument("--body-card", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--trust-body", type=str, default=None, metavar="CARD_JSON", help=argparse.SUPPRESS)
+    parser.add_argument("--pc-ssh", type=str, default=None, metavar="JSON", help=argparse.SUPPRESS)
     parser.add_argument("--browser-cdp-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--browser-net-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--browser-dir", type=str, default=None, help=argparse.SUPPRESS)
@@ -638,6 +639,8 @@ def main() -> int:
     settings = get_settings()
     if args.body_card or args.trust_body:
         return _body_command(settings, args.body_card, args.trust_body)
+    if args.pc_ssh:
+        return _pc_ssh_command(settings, args.pc_ssh)
     host = args.host or settings.host
     port = args.port or settings.port
 
@@ -688,6 +691,19 @@ def _body_command(settings, card: bool, trust: str | None) -> int:
         print(_json.dumps({"trusted": body.id}))
         return 0
     print(_json.dumps(Identity(folder, settings.body_kind).card()))
+    return 0
+
+
+def _pc_ssh_command(settings, raw: str) -> int:
+    """`--pc-ssh` records how a PC body reaches this server over SSH (core/ssh_access.py), so
+    revoking it takes that access away too. Used by the server installer over SSH."""
+    import json as _json
+
+    from core.ssh_access import SshAccess
+
+    info = _json.loads(raw)
+    entry = SshAccess(settings.data_dir / "identity").record(str(info["body"]), info)
+    print(_json.dumps({"recorded": info["body"], "marker": entry["marker"]}))
     return 0
 
 
