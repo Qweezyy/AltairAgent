@@ -127,6 +127,11 @@ dependencies {
     implementation(libs.okhttp)
     // In-app QR scanner for PC pairing (ZXing, Apache-2.0, no Google Play Services).
     implementation(libs.zxing.embedded)
+    // The phone's own Ed25519 identity for servers (0.3.0 stage 6): Android < 13 has no Ed25519 in
+    // the platform JCA. BouncyCastle (MIT), lightweight API only.
+    implementation(libs.bouncycastle.prov)
+    // Background polling of the servers' news.
+    implementation(libs.androidx.work)
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
